@@ -1,0 +1,32 @@
+{
+  "summary": "Verified data sync from reference site (prazo-payment-sys.emergent.host). All 5 backend assertions match source exactly (cash drawer Runner+GYM, prazo debts Runner+GYM, expenses total). Frontend Prazo tab loads in Gestor dashboard, KPI 'Total a receber' shows R$ 10.615,60 (consolidated = 8727.9 + 1887.7), customer list renders, and filter switching (Todas/Runner/GYM Londres/Todas) produces NO React removeChild / NotFoundError / commitDeletionEffectsOnFiber errors.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_data_sync_verification_jan2026.py",
+    "/app/test_reports/pytest/data_sync_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "There are two duplicate /api/cash/{store}/drawer endpoints (routers/cash.py:142 and server.py:1879). Both now include the synthetic filter, but having two route definitions for the same URL is risky; the order of router registration determines which one wins. Recommend consolidating into a single endpoint to avoid drift in future fixes.",
+    "Server-side aggregation could be added so /api/prazo/debts returns the precomputed total instead of letting the frontend recompute (currently both reference site and this app are consistent, but a server-side total avoids client float drift)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_data_sync_verification_jan2026.py (new)",
+    "/app/test_reports/iteration_1.json (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "gestor / ganoh2024 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None - used existing synced data",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend endpoints verified against reference site values: /api/cash/runner/drawer (current_balance=197.75), /api/cash/gym-londres/drawer (current_balance=117.4), /api/prazo/debts?store=runner (53 customers, R$8727.90), /api/prazo/debts?store=gym-londres (11 customers, R$1887.70), /api/expenses with basic-auth (122 items, R$23125.79). Frontend Prazo tab consolidated KPI shows R$10.615,60. No removeChild error observed during repeated filter switching. Reusable test file: /app/backend/tests/test_data_sync_verification_jan2026.py",
+  "rca of the issue": "Original removeChild error (per problem statement) was hypothesized to be caused by partial_paid field migration leaving stale order references in the PrazoTab render tree. After the data fix migrating prazo_partial_paid -> partial_paid on 517 orders, plus the cash_drawer synthetic-flag filter and explicit balance field write, the Prazo tab now mounts/unmounts/refilters cleanly with zero DOM exceptions. No further fix required."
+}

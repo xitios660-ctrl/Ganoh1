@@ -153,7 +153,8 @@ async def get_cash_drawer(store: str):
     cash_query = {
         "store": store,
         "status": {"$in": ["ready", "delivered"]},
-        "payment_method": "cash"
+        "payment_method": "cash",
+        "synthetic": {"$ne": True},
     }
     if last_reset_at:
         cash_query["created_at"] = {"$gte": last_reset_at}
@@ -219,7 +220,8 @@ async def get_cash_drawer_debug(store: str):
     cash_query = {
         "store": store,
         "status": {"$in": ["ready", "delivered"]},
-        "payment_method": "cash"
+        "payment_method": "cash",
+        "synthetic": {"$ne": True},
     }
     if last_reset_at:
         cash_query["created_at"] = {"$gte": last_reset_at}

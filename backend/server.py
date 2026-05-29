@@ -1893,7 +1893,8 @@ async def get_cash_drawer(store: StoreLocation):
     cash_query = {
         "store": store.value,
         "status": {"$in": ["ready", "delivered"]},
-        "payment_method": "cash"
+        "payment_method": "cash",
+        "synthetic": {"$ne": True},
     }
     if last_reset_at:
         cash_query["created_at"] = {"$gte": last_reset_at}

@@ -101,7 +101,7 @@ async def sync_prazo(client):
                         "status": "prazo_pending",
                         "created_at": order.get("date") or datetime.now(timezone.utc).isoformat(),
                         "prazo_paid": False,
-                        "prazo_partial_paid": float(order.get("partial_paid", 0)) or 0,
+                        "partial_paid": float(order.get("partial_paid", 0)) or 0,
                     }
                     await db.orders.update_one(
                         {"id": oid},
