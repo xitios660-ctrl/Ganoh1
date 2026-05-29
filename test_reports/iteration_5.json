@@ -1,0 +1,48 @@
+{
+  "summary": "Full e2e validation of the new Manual Sales feature (POST/GET/DELETE /api/gestor/manual-sale + UI dialog in Gastor 'Gastos' tab). 18/18 backend tests pass and the UI happy-path/edge cases pass.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_manual_sales_jan2026.py",
+    "/app/test_reports/pytest/manual_sales_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "GestorPage.js is 3093 lines — exceeds the 700-line guideline. Recommend splitting (tabs into sub-components, manual-sale dialog into its own component).",
+    "Manual sale list endpoint /api/gestor/manual-sales has no pagination beyond a single 'limit' query param — fine for now but will need cursor/skip if a gestor logs many sales per day.",
+    "Validation messages are duplicated as raw strings inside create_manual_sale (store/payment_method/period). Consider Enum/Literal types on the Pydantic model so FastAPI returns 422 with consistent shapes; current 400 + free-text detail works but couples FE to PT-BR strings.",
+    "Frontend amount field accepts '0' (non-empty) which enables the submit button; backend correctly rejects with 400, but FE could pre-validate to avoid the round-trip and show inline error before submit."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_manual_sales_jan2026.py (new)"
+  ],
+  "success_rate": {"backend": "100% (18/18)", "frontend": "100% (all critical UI checks passed)"},
+  "test_credentials": "gestor / ganoh2024 (read from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Tests create and clean up their own TEST_-prefixed manual sales. Final check via API confirmed 0 manual sales remain. The startup-task one-time inserts use 'manual_morning_sale' flag (not 'manual_sale'), so they're correctly isolated from the new feature's list/delete endpoints.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Manual Sales feature is fully working. Pytest file at /app/backend/tests/test_manual_sales_jan2026.py covers auth, validation, create/list/delete, sort order, explicit-date shift-hour, dashboard total integration, and protection against deleting non-manual orders. Frontend dialog tested via Playwright: button '+ Venda Manual' opens dialog in Gastos tab; comma->dot normalization works on amount; empty/0 are properly rejected; success toast appears and dialog closes; reopening shows 'Últimas vendas manuais' list with the entry formatted 'Runner · R$ 600.55 (credit · manha)'; trash icon deletes with confirmation. Two-flag design (manual_sale vs manual_morning_sale) keeps the startup one-time inserts safely isolated from the user-managed list/delete UI.",
+  "verified_flows": [
+    "POST /api/gestor/manual-sale happy path (returns success + order_id + amount + store; persists order with manual_sale=true)",
+    "Dashboard month totals increase by the inserted amount and decrease after delete",
+    "All 4 validation rules return 400 with PT-BR messages (Loja inválida / Forma de pagamento inválida / Turno inválido / O valor deve ser maior que zero)",
+    "Missing auth returns 401; wrong auth returns 401",
+    "GET /api/gestor/manual-sales returns sorted-desc list with all required fields and no Mongo _id leakage",
+    "DELETE /api/gestor/manual-sale/{id} removes only manual_sale=true docs (404 for unknown / non-manual ids)",
+    "Explicit date='2026-05-15' with period='tarde' creates an order with timestamp on May 15 at the expected shift hour (14h Brazil / 17h UTC)",
+    "Frontend: '+ Venda Manual' button visible in Gastos tab header next to Exportar IR / Foto+IA / Manual",
+    "Frontend: dialog has Loja, Turno, Forma de Pagamento, Valor, Data, Descrição fields (all data-testid'd)",
+    "Frontend: amount accepts both '600,55' and '600.55' and normalizes to '600.55'",
+    "Frontend: submit disabled when amount is empty",
+    "Frontend: success toast 'Venda manual lançada: R$ 600.55' appears and dialog auto-closes",
+    "Frontend: reopening shows new entry in 'Últimas vendas manuais' as 'Runner · R$ 600.55 (credit · manha)'",
+    "Frontend: trash icon deletes the entry with toast 'Venda manual removida' and KPIs update"
+  ]
+}

@@ -106,6 +106,11 @@ export const GestorPage = () => {
   const [expenses, setExpenses] = useState([]);
   const [expensesChartData, setExpensesChartData] = useState(null);
   const [showExpenseDialog, setShowExpenseDialog] = useState(false);
+  // Manual sale state (Lançamento Manual de Vendas)
+  const [showManualSaleDialog, setShowManualSaleDialog] = useState(false);
+  const [newManualSale, setNewManualSale] = useState({ store: 'runner', payment_method: 'credit', amount: '', period: 'manha', description: '', date: '' });
+  const [manualSales, setManualSales] = useState([]);
+  const [savingManualSale, setSavingManualSale] = useState(false);
   const [newExpense, setNewExpense] = useState({ description: '', amount: '', category: 'outros', store: 'all', notes: '' });
   const [expenseImage, setExpenseImage] = useState(null);
   const [expenseImagePreview, setExpenseImagePreview] = useState(null);
@@ -197,6 +202,7 @@ export const GestorPage = () => {
           fetchMenuItems();
           fetchPrazoData();
           fetchExpenses();
+          fetchManualSales();
         }, 50);
       } catch (_e) {
         // Stale credentials — clear and let the manual login form show.
@@ -229,6 +235,7 @@ export const GestorPage = () => {
         fetchMenuItems();
         fetchPrazoData();
         fetchExpenses();
+        fetchManualSales();
       }, 500);
     } catch (error) {
       toast.error('Credenciais inválidas');
@@ -1040,6 +1047,68 @@ export const GestorPage = () => {
     }
   };
 
+  // ============== MANUAL SALES (lançamento manual de vendas) ==============
+  const fetchManualSales = async () => {
+    const auth = localStorage.getItem('gestor_auth');
+    if (!auth) return;
+    const [user, pass] = atob(auth).split(':');
+    try {
+      const res = await axios.get(`${API}/gestor/manual-sales`, { auth: { username: user, password: pass }, params: { limit: 50 } });
+      setManualSales(res.data.sales || []);
+    } catch (e) { /* silent */ }
+  };
+
+  const handleSaveManualSale = async () => {
+    const auth = localStorage.getItem('gestor_auth');
+    if (!auth) return;
+    const [user, pass] = atob(auth).split(':');
+    const amountStr = String(newManualSale.amount).replace(',', '.').trim();
+    const amountNum = parseFloat(amountStr);
+    if (!amountNum || amountNum <= 0) {
+      toast.error('Informe um valor maior que zero');
+      return;
+    }
+    setSavingManualSale(true);
+    try {
+      const body = {
+        store: newManualSale.store,
+        payment_method: newManualSale.payment_method,
+        amount: amountNum,
+        period: newManualSale.period,
+        description: newManualSale.description || '',
+      };
+      if (newManualSale.date) body.date = newManualSale.date;
+      await axios.post(`${API}/gestor/manual-sale`, body, { auth: { username: user, password: pass } });
+      toast.success(`Venda manual lançada: R$ ${amountNum.toFixed(2)}`);
+      setShowManualSaleDialog(false);
+      setNewManualSale({ store: 'runner', payment_method: 'credit', amount: '', period: 'manha', description: '', date: '' });
+      fetchManualSales();
+      fetchExpenses();
+      fetchChartData();
+    } catch (error) {
+      const msg = error?.response?.data?.detail || 'Erro ao lançar venda manual';
+      toast.error(typeof msg === 'string' ? msg : 'Erro ao lançar venda manual');
+    } finally {
+      setSavingManualSale(false);
+    }
+  };
+
+  const handleDeleteManualSale = async (orderId) => {
+    if (!window.confirm('Excluir esta venda manual? Os KPIs voltarão a não contabilizar este valor.')) return;
+    const auth = localStorage.getItem('gestor_auth');
+    if (!auth) return;
+    const [user, pass] = atob(auth).split(':');
+    try {
+      await axios.delete(`${API}/gestor/manual-sale/${orderId}`, { auth: { username: user, password: pass } });
+      toast.success('Venda manual removida');
+      fetchManualSales();
+      fetchExpenses();
+      fetchChartData();
+    } catch (error) {
+      toast.error('Erro ao remover venda manual');
+    }
+  };
+
   const handleDeleteExpense = async (expenseId) => {
     const auth = localStorage.getItem('gestor_auth');
     if (!auth) return;
@@ -1721,13 +1790,25 @@ export const GestorPage = () => {
                   <Receipt className="h-5 w-5 text-red-600" />
                   Gestão de Gastos
                 </h2>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <Button 
                     variant="outline"
                     onClick={handleExportContador}
                     title="Exportar para Contador"
                   >
                     <DollarSign className="h-4 w-4 mr-1" /> Exportar IR
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="border-emerald-400/40 text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20"
+                    onClick={() => {
+                      setNewManualSale({ store: 'runner', payment_method: 'credit', amount: '', period: 'manha', description: '', date: '' });
+                      setShowManualSaleDialog(true);
+                    }}
+                    data-testid="open-manual-sale-dialog"
+                    title="Lançar venda manual (turno/total não digitado pedido a pedido)"
+                  >
+                    <DollarSign className="h-4 w-4 mr-1" /> + Venda Manual
                   </Button>
                   <Button 
                     className="bg-brand-600 hover:bg-brand-700"
@@ -2580,6 +2661,151 @@ export const GestorPage = () => {
                 Cancelar
               </Button>
             </DialogFooter>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manual Sale Dialog (Lançamento Manual de Vendas) */}
+      <Dialog open={showManualSaleDialog} onOpenChange={setShowManualSaleDialog}>
+        <DialogContent className="max-w-md" data-testid="manual-sale-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <DollarSign className="h-5 w-5 text-emerald-600" />
+              Lançar Venda Manual
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 mt-2">
+            <p className="text-xs text-muted-foreground">
+              Use para registrar totais de turno (ex.: vendas da manhã não digitadas pedido a pedido).
+              Conta no caixa, KPIs e gráficos como uma venda normal.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Loja *</Label>
+                <select
+                  className="w-full border rounded-md px-2 py-2 text-sm bg-background"
+                  value={newManualSale.store}
+                  onChange={(e) => setNewManualSale({ ...newManualSale, store: e.target.value })}
+                  data-testid="manual-sale-store"
+                >
+                  <option value="runner">Runner</option>
+                  <option value="gym-londres">GYM Londres</option>
+                </select>
+              </div>
+              <div>
+                <Label>Turno *</Label>
+                <select
+                  className="w-full border rounded-md px-2 py-2 text-sm bg-background"
+                  value={newManualSale.period}
+                  onChange={(e) => setNewManualSale({ ...newManualSale, period: e.target.value })}
+                  data-testid="manual-sale-period"
+                >
+                  <option value="manha">Manhã</option>
+                  <option value="tarde">Tarde</option>
+                  <option value="noite">Noite</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Forma de Pagamento *</Label>
+                <select
+                  className="w-full border rounded-md px-2 py-2 text-sm bg-background"
+                  value={newManualSale.payment_method}
+                  onChange={(e) => setNewManualSale({ ...newManualSale, payment_method: e.target.value })}
+                  data-testid="manual-sale-payment"
+                >
+                  <option value="cash">Dinheiro</option>
+                  <option value="pix">PIX</option>
+                  <option value="credit">Crédito</option>
+                  <option value="debit">Débito</option>
+                  <option value="voucher">Voucher</option>
+                </select>
+              </div>
+              <div>
+                <Label>Valor (R$) *</Label>
+                <Input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="600,55"
+                  value={newManualSale.amount}
+                  onChange={(e) => {
+                    let v = e.target.value.replace(/[^\d.,]/g, '').replace(',', '.');
+                    const parts = v.split('.');
+                    if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('');
+                    setNewManualSale({ ...newManualSale, amount: v });
+                  }}
+                  data-testid="manual-sale-amount"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label>Data (opcional — padrão hoje)</Label>
+              <Input
+                type="date"
+                value={newManualSale.date}
+                onChange={(e) => setNewManualSale({ ...newManualSale, date: e.target.value })}
+                data-testid="manual-sale-date"
+              />
+            </div>
+
+            <div>
+              <Label>Descrição (opcional)</Label>
+              <Input
+                type="text"
+                placeholder="Ex.: Vendas balcão manhã"
+                value={newManualSale.description}
+                onChange={(e) => setNewManualSale({ ...newManualSale, description: e.target.value })}
+                data-testid="manual-sale-description"
+              />
+            </div>
+
+            <Button
+              className="w-full bg-emerald-600 hover:bg-emerald-700"
+              disabled={!newManualSale.amount || savingManualSale}
+              onClick={handleSaveManualSale}
+              data-testid="manual-sale-submit"
+            >
+              {savingManualSale ? 'Lançando…' : 'Lançar Venda'}
+            </Button>
+
+            {manualSales.length > 0 && (
+              <div className="pt-2 border-t mt-2">
+                <p className="text-xs font-medium text-muted-foreground mb-2">
+                  Últimas vendas manuais ({manualSales.length})
+                </p>
+                <div className="max-h-40 overflow-y-auto space-y-1" data-testid="manual-sales-list">
+                  {manualSales.slice(0, 10).map((s) => (
+                    <div key={s.id} className="flex items-center justify-between text-xs bg-muted/40 rounded px-2 py-1.5">
+                      <div className="flex-1 min-w-0">
+                        <p className="truncate font-medium">
+                          {s.store === 'runner' ? 'Runner' : 'GYM'} · R$ {Number(s.total).toFixed(2)}
+                          <span className="text-muted-foreground ml-1">
+                            ({s.payment_method} · {s.pickup_time})
+                          </span>
+                        </p>
+                        <p className="text-[10px] text-muted-foreground truncate">
+                          {new Date(s.created_at).toLocaleString('pt-BR')} — {s.customer_name}
+                        </p>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-red-500 hover:bg-red-50"
+                        onClick={() => handleDeleteManualSale(s.id)}
+                        data-testid={`manual-sale-delete-${s.id}`}
+                        title="Excluir esta venda manual"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </DialogContent>
       </Dialog>

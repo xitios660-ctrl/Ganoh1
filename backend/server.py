@@ -2892,6 +2892,93 @@ async def get_weekly_chart_data(date: str = None, store: str = None, username: s
         },
     }
 
+# ==================== MANUAL SALES ENDPOINTS ====================
+class ManualSalePayload(BaseModel):
+    store: str
+    payment_method: str
+    amount: float
+    period: str = "manha"
+    description: str = ""
+    date: Optional[str] = None  # YYYY-MM-DD
+
+@api_router.post("/gestor/manual-sale")
+async def create_manual_sale(payload: ManualSalePayload, username: str = Depends(verify_gestor)):
+    """Register a manual sale (shift/morning totals not entered as individual orders).
+    Stored as a regular order with status=delivered + flag manual_sale=True so the gestor
+    can later list/delete it. Counts in dashboard KPIs and cash drawer like any real order.
+    """
+    if payload.store not in ("runner", "gym-londres"):
+        raise HTTPException(400, "Loja inválida")
+    if payload.payment_method not in ("cash", "pix", "credit", "debit", "voucher"):
+        raise HTTPException(400, "Forma de pagamento inválida")
+    if payload.amount is None or payload.amount <= 0:
+        raise HTTPException(400, "O valor deve ser maior que zero")
+    if payload.period not in ("manha", "tarde", "noite"):
+        raise HTTPException(400, "Turno inválido")
+
+    period_hours = {"manha": 9, "tarde": 14, "noite": 20}
+    hour = period_hours[payload.period]
+
+    brazil_tz = pytz.timezone("America/Sao_Paulo")
+    if payload.date:
+        try:
+            base = datetime.strptime(payload.date, "%Y-%m-%d")
+            base = brazil_tz.localize(base.replace(hour=hour))
+        except Exception:
+            raise HTTPException(400, "Data inválida — use AAAA-MM-DD")
+    else:
+        base = datetime.now(brazil_tz).replace(hour=hour, minute=0, second=0, microsecond=0)
+    created_utc = base.astimezone(timezone.utc)
+
+    payment_labels = {"cash": "Dinheiro", "pix": "PIX", "credit": "Crédito", "debit": "Débito", "voucher": "Voucher"}
+    period_labels = {"manha": "Manhã", "tarde": "Tarde", "noite": "Noite"}
+    label = f"Venda manual ({period_labels[payload.period]} – {payment_labels[payload.payment_method]})"
+
+    order = {
+        "id": str(uuid.uuid4()),
+        "store": payload.store,
+        "customer_name": payload.description.strip() or label,
+        "items": [{
+            "menu_item_id": "manual-sale",
+            "name": label,
+            "category": "Outros",
+            "price": float(payload.amount),
+            "quantity": 1,
+        }],
+        "total": float(payload.amount),
+        "original_total": float(payload.amount),
+        "payment_method": payload.payment_method,
+        "pickup_time": payload.period,
+        "status": "delivered",
+        "created_at": created_utc.isoformat(),
+        "delivered_at": created_utc.isoformat(),
+        "manual_sale": True,
+        "created_by_gestor": username,
+    }
+    await db.orders.insert_one(order)
+    return {"success": True, "order_id": order["id"], "amount": order["total"], "store": order["store"]}
+
+
+@api_router.get("/gestor/manual-sales")
+async def list_manual_sales(limit: int = 100, username: str = Depends(verify_gestor)):
+    """List manual sales registered via /gestor/manual-sale (most recent first)."""
+    sales = await db.orders.find(
+        {"manual_sale": True},
+        {"_id": 0, "id": 1, "store": 1, "customer_name": 1, "total": 1,
+         "payment_method": 1, "pickup_time": 1, "created_at": 1}
+    ).sort("created_at", -1).limit(limit).to_list(limit)
+    return {"sales": sales}
+
+
+@api_router.delete("/gestor/manual-sale/{order_id}")
+async def delete_manual_sale(order_id: str, username: str = Depends(verify_gestor)):
+    """Delete a manual sale by id (only if flagged manual_sale=True — protects real orders)."""
+    r = await db.orders.delete_one({"id": order_id, "manual_sale": True})
+    if r.deleted_count == 0:
+        raise HTTPException(404, "Venda manual não encontrada")
+    return {"success": True}
+
+
 # ==================== SALES BY CATEGORY ====================
 
 @api_router.get("/gestor/sales-by-category")
