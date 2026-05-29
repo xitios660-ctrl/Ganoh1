@@ -1,0 +1,15 @@
+{
+  "short_name": "GANOH",
+  "name": "GANOH Café Bistrô",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    }
+  ],
+  "start_url": ".",
+  "display": "standalone",
+  "theme_color": "#6B8E4E",
+  "background_color": "#F5F7F2"
+}

@@ -1,0 +1,1037 @@
+/* ====================================================================
+   KITCHEN CINEMATIC THEME
+   Premium dark glass UI worth $10K for GANOH Café Bistrô Kitchen.
+   Applied via .kitchen-cinematic wrapper to override the light theme
+   without touching the existing 2700+ line JSX.
+   ==================================================================== */
+
+.kitchen-cinematic {
+  --kc-bg: #050805;
+  --kc-bg-elevated: rgba(18, 26, 18, 0.55);
+  --kc-bg-glass: rgba(15, 22, 16, 0.55);
+  --kc-bg-glass-strong: rgba(20, 28, 20, 0.78);
+  --kc-border: rgba(168, 217, 107, 0.18);
+  --kc-border-hot: rgba(168, 217, 107, 0.45);
+  --kc-text: #e9f0e1;
+  --kc-text-muted: rgba(233, 240, 225, 0.55);
+  --kc-text-dim: rgba(233, 240, 225, 0.4);
+  --kc-accent: #a8d96b;
+  --kc-accent-deep: #7CB342;
+  --kc-accent-warm: #e9c46a;
+  --kc-amber: #f5b65b;
+  --kc-blue: #6cb2ff;
+  --kc-red: #ff6b7a;
+  --kc-purple: #b794f4;
+  --kc-pink: #ff8cb3;
+
+  background: transparent !important;
+  color: var(--kc-text);
+  position: relative;
+  min-height: 100vh;
+  font-family: "Manrope", sans-serif;
+}
+
+/* ==================== TYPOGRAPHY ==================== */
+.kitchen-cinematic h1,
+.kitchen-cinematic h2,
+.kitchen-cinematic h3,
+.kitchen-cinematic .font-heading {
+  font-family: "Bodoni Moda", "Playfair Display", serif;
+  letter-spacing: -0.015em;
+}
+
+/* ==================== HEADER ==================== */
+.kitchen-cinematic > header {
+  background: linear-gradient(180deg, rgba(8, 14, 10, 0.92) 0%, rgba(10, 18, 12, 0.78) 100%) !important;
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border-bottom: 1px solid var(--kc-border) !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4), 0 1px 0 rgba(168, 217, 107, 0.08) inset;
+  color: var(--kc-text);
+  padding: 14px 18px !important;
+}
+
+.kitchen-cinematic > header > div:first-child > div:first-child span {
+  font-family: "Bodoni Moda", "Playfair Display", serif;
+  font-weight: 600;
+  font-size: 1.15rem !important;
+  letter-spacing: 0.04em;
+  background: linear-gradient(135deg, #d4f0a4 0%, #a8d96b 50%, #7CB342 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 24px rgba(168, 217, 107, 0.3);
+}
+
+/* Header buttons */
+.kitchen-cinematic > header button {
+  border-color: var(--kc-border) !important;
+  background: var(--kc-bg-glass) !important;
+  color: var(--kc-text) !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.kitchen-cinematic > header button:hover {
+  background: rgba(168, 217, 107, 0.12) !important;
+  border-color: var(--kc-border-hot) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 0 20px rgba(168, 217, 107, 0.25);
+}
+
+.kitchen-cinematic > header button.bg-brand-600,
+.kitchen-cinematic > header button[class*="bg-brand"] {
+  background: linear-gradient(135deg, #8cc341 0%, #6ca22e 100%) !important;
+  border-color: #a8d96b !important;
+  color: #0a1410 !important;
+  box-shadow: 0 0 18px rgba(168, 217, 107, 0.4), 0 1px 0 rgba(255, 255, 255, 0.2) inset;
+}
+
+/* ==================== QUICK STATS CHIPS ==================== */
+.kitchen-cinematic > header > div:last-child {
+  margin-top: 12px !important;
+}
+
+.kitchen-cinematic > header > div:last-child > div {
+  border-radius: 12px !important;
+  padding: 8px 6px !important;
+  backdrop-filter: blur(12px);
+  border: 1px solid var(--kc-border);
+  background: var(--kc-bg-glass) !important;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.kitchen-cinematic > header > div:last-child > div::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, var(--accent-color, transparent) 0%, transparent 60%);
+  opacity: 0.2;
+  pointer-events: none;
+}
+
+.kitchen-cinematic > header > div:last-child > div:nth-child(1) { --accent-color: rgba(108, 178, 255, 0.4); }
+.kitchen-cinematic > header > div:last-child > div:nth-child(2) { --accent-color: rgba(150, 150, 150, 0.4); }
+.kitchen-cinematic > header > div:last-child > div:nth-child(3) { --accent-color: rgba(245, 182, 91, 0.4); }
+.kitchen-cinematic > header > div:last-child > div:nth-child(4) { --accent-color: rgba(168, 217, 107, 0.4); }
+
+.kitchen-cinematic > header > div:last-child > div:hover {
+  transform: translateY(-2px) scale(1.03);
+  border-color: var(--kc-border-hot);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), 0 0 24px rgba(168, 217, 107, 0.2);
+}
+
+.kitchen-cinematic > header > div:last-child > div span:first-child {
+  font-family: "Bodoni Moda", serif;
+  font-size: 1.4rem !important;
+  font-weight: 700;
+}
+
+.kitchen-cinematic > header > div:last-child > div span:last-child {
+  color: var(--kc-text-muted) !important;
+  font-size: 0.65rem !important;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+/* ==================== TABS ==================== */
+.kitchen-cinematic [role="tablist"] {
+  background: var(--kc-bg-glass-strong) !important;
+  backdrop-filter: blur(16px);
+  border: 1px solid var(--kc-border) !important;
+  padding: 4px !important;
+  border-radius: 14px !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3), 0 1px 0 rgba(168, 217, 107, 0.08) inset;
+  height: auto !important;
+}
+
+.kitchen-cinematic [role="tab"] {
+  color: var(--kc-text-muted) !important;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  border-radius: 10px !important;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  background: transparent !important;
+}
+
+.kitchen-cinematic [role="tab"]:hover {
+  color: var(--kc-text) !important;
+  background: rgba(168, 217, 107, 0.06) !important;
+}
+
+.kitchen-cinematic [role="tab"][data-state="active"] {
+  background: linear-gradient(135deg, rgba(168, 217, 107, 0.18) 0%, rgba(124, 179, 66, 0.12) 100%) !important;
+  color: #d4f0a4 !important;
+  box-shadow: 0 0 16px rgba(168, 217, 107, 0.25), 0 1px 0 rgba(168, 217, 107, 0.25) inset !important;
+  border: 1px solid rgba(168, 217, 107, 0.3);
+}
+
+/* ==================== CARDS (bg-white -> glass) ==================== */
+.kitchen-cinematic .bg-white {
+  background: linear-gradient(180deg, rgba(22, 32, 24, 0.88) 0%, rgba(14, 22, 16, 0.92) 100%) !important;
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  border: 1px solid var(--kc-border) !important;
+  color: var(--kc-text) !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55), 0 1px 0 rgba(168, 217, 107, 0.1) inset;
+  position: relative;
+  overflow: hidden;
+  transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.kitchen-cinematic .bg-white:hover {
+  border-color: var(--kc-border-hot) !important;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6), 0 0 32px rgba(168, 217, 107, 0.22), 0 1px 0 rgba(168, 217, 107, 0.15) inset;
+  transform: translateY(-3px);
+}
+
+/* Bg-gray-100 (page bg) -> transparent so 3D shows through */
+.kitchen-cinematic.min-h-screen.bg-gray-100,
+.kitchen-cinematic .bg-gray-100 {
+  background: transparent !important;
+}
+
+/* ==================== ORDER CARD STATUS BAR (bgLight + borderColor) ==================== */
+.kitchen-cinematic .bg-gray-50 {
+  background: linear-gradient(135deg, rgba(120, 120, 130, 0.18), rgba(80, 80, 90, 0.08)) !important;
+  border-color: rgba(180, 180, 190, 0.25) !important;
+  color: var(--kc-text) !important;
+}
+
+.kitchen-cinematic .bg-amber-50,
+.kitchen-cinematic .bg-amber-100 {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.18), rgba(245, 158, 11, 0.06)) !important;
+  color: #ffd580 !important;
+  border-color: rgba(245, 158, 11, 0.3) !important;
+}
+
+.kitchen-cinematic .bg-brand-50 {
+  background: linear-gradient(135deg, rgba(168, 217, 107, 0.18), rgba(124, 179, 66, 0.05)) !important;
+  color: #d4f0a4 !important;
+  border-color: rgba(168, 217, 107, 0.3) !important;
+}
+
+.kitchen-cinematic .bg-brand-100 {
+  background: linear-gradient(135deg, rgba(168, 217, 107, 0.22), rgba(124, 179, 66, 0.08)) !important;
+  color: #d4f0a4 !important;
+}
+
+.kitchen-cinematic .bg-blue-50,
+.kitchen-cinematic .bg-blue-100 {
+  background: linear-gradient(135deg, rgba(108, 178, 255, 0.18), rgba(108, 178, 255, 0.05)) !important;
+  color: #b3d4ff !important;
+  border-color: rgba(108, 178, 255, 0.3) !important;
+}
+
+.kitchen-cinematic .bg-green-50 {
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.18), rgba(74, 222, 128, 0.05)) !important;
+  color: #b3ffc8 !important;
+}
+
+.kitchen-cinematic .bg-green-100 {
+  background: linear-gradient(135deg, rgba(74, 222, 128, 0.22), rgba(74, 222, 128, 0.08)) !important;
+  color: #b3ffc8 !important;
+}
+
+.kitchen-cinematic .bg-purple-50,
+.kitchen-cinematic .bg-purple-100 {
+  background: linear-gradient(135deg, rgba(183, 148, 244, 0.18), rgba(183, 148, 244, 0.05)) !important;
+  color: #d6c4f9 !important;
+}
+
+.kitchen-cinematic .bg-red-50 {
+  background: linear-gradient(135deg, rgba(255, 107, 122, 0.18), rgba(255, 107, 122, 0.05)) !important;
+  color: #ffb3bd !important;
+}
+
+.kitchen-cinematic .bg-pink-50 {
+  background: linear-gradient(135deg, rgba(255, 140, 179, 0.18), rgba(255, 140, 179, 0.05)) !important;
+  color: #ffc4d9 !important;
+}
+
+.kitchen-cinematic .bg-secondary\/50,
+.kitchen-cinematic .bg-secondary {
+  background: rgba(168, 217, 107, 0.08) !important;
+}
+
+/* ==================== BORDER COLORS ==================== */
+.kitchen-cinematic .border-l-blue-500 { border-left-color: #6cb2ff !important; box-shadow: -4px 0 16px rgba(108, 178, 255, 0.3); }
+.kitchen-cinematic .border-l-gray-500 { border-left-color: #94a3b8 !important; box-shadow: -4px 0 16px rgba(148, 163, 184, 0.2); }
+.kitchen-cinematic .border-l-amber-500 { border-left-color: #f5b65b !important; box-shadow: -4px 0 16px rgba(245, 182, 91, 0.3); }
+.kitchen-cinematic .border-l-brand-500 { border-left-color: #a8d96b !important; box-shadow: -4px 0 16px rgba(168, 217, 107, 0.35); }
+.kitchen-cinematic .border-l-4 { border-left-width: 4px !important; }
+
+.kitchen-cinematic .border,
+.kitchen-cinematic .border-border {
+  border-color: var(--kc-border) !important;
+}
+
+.kitchen-cinematic .border-red-200 { border-color: rgba(255, 107, 122, 0.4) !important; }
+.kitchen-cinematic .border-amber-200 { border-color: rgba(245, 182, 91, 0.4) !important; }
+.kitchen-cinematic .border-blue-200 { border-color: rgba(108, 178, 255, 0.4) !important; }
+.kitchen-cinematic .border-green-200 { border-color: rgba(74, 222, 128, 0.4) !important; }
+
+/* ==================== TEXT COLORS ==================== */
+.kitchen-cinematic .text-muted-foreground { color: var(--kc-text-muted) !important; }
+.kitchen-cinematic .text-gray-600 { color: var(--kc-text-muted) !important; }
+.kitchen-cinematic .text-gray-700 { color: #c0c8b8 !important; }
+
+.kitchen-cinematic .text-blue-600 { color: #6cb2ff !important; text-shadow: 0 0 12px rgba(108, 178, 255, 0.4); }
+.kitchen-cinematic .text-blue-700 { color: #8cc4ff !important; text-shadow: 0 0 12px rgba(108, 178, 255, 0.4); }
+.kitchen-cinematic .text-amber-600 { color: #f5b65b !important; text-shadow: 0 0 12px rgba(245, 182, 91, 0.4); }
+.kitchen-cinematic .text-amber-700 { color: #f5c878 !important; text-shadow: 0 0 12px rgba(245, 182, 91, 0.4); }
+.kitchen-cinematic .text-brand-600 { color: #a8d96b !important; text-shadow: 0 0 14px rgba(168, 217, 107, 0.45); }
+.kitchen-cinematic .text-brand-700 { color: #c0e489 !important; text-shadow: 0 0 14px rgba(168, 217, 107, 0.5); }
+.kitchen-cinematic .text-green-600 { color: #7ddf9f !important; text-shadow: 0 0 14px rgba(125, 223, 159, 0.4); }
+.kitchen-cinematic .text-green-700 { color: #94e6b0 !important; }
+.kitchen-cinematic .text-purple-600 { color: #b794f4 !important; }
+.kitchen-cinematic .text-purple-700 { color: #c8a8f7 !important; }
+.kitchen-cinematic .text-pink-600 { color: #ff8cb3 !important; }
+.kitchen-cinematic .text-red-500,
+.kitchen-cinematic .text-red-600 { color: #ff8a96 !important; text-shadow: 0 0 12px rgba(255, 138, 150, 0.4); }
+.kitchen-cinematic .text-destructive { color: #ff8a96 !important; }
+
+/* ==================== BUTTONS ==================== */
+.kitchen-cinematic button {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  position: relative;
+  overflow: hidden;
+}
+
+.kitchen-cinematic button:not([disabled]):active {
+  transform: scale(0.97);
+}
+
+/* Outline buttons */
+.kitchen-cinematic button[class*="variant-outline"],
+.kitchen-cinematic .border-input {
+  background: var(--kc-bg-glass) !important;
+  border-color: var(--kc-border) !important;
+  color: var(--kc-text) !important;
+  backdrop-filter: blur(8px);
+}
+
+.kitchen-cinematic button[class*="variant-outline"]:hover,
+.kitchen-cinematic .border-input:hover {
+  background: rgba(168, 217, 107, 0.12) !important;
+  border-color: var(--kc-border-hot) !important;
+  color: #d4f0a4 !important;
+  box-shadow: 0 0 18px rgba(168, 217, 107, 0.2);
+}
+
+/* Brand buttons */
+.kitchen-cinematic .bg-brand-600,
+.kitchen-cinematic button.bg-brand-600 {
+  background: linear-gradient(135deg, #8cc341 0%, #6ca22e 100%) !important;
+  color: #0a1410 !important;
+  border: 0;
+  box-shadow: 0 4px 16px rgba(168, 217, 107, 0.35), 0 1px 0 rgba(255, 255, 255, 0.2) inset;
+}
+
+.kitchen-cinematic .hover\:bg-brand-700:hover,
+.kitchen-cinematic button.bg-brand-600:hover {
+  background: linear-gradient(135deg, #a8d96b 0%, #7CB342 100%) !important;
+  box-shadow: 0 6px 24px rgba(168, 217, 107, 0.55), 0 1px 0 rgba(255, 255, 255, 0.25) inset;
+  transform: translateY(-1px);
+}
+
+/* Amber buttons */
+.kitchen-cinematic .bg-amber-500,
+.kitchen-cinematic button.bg-amber-500 {
+  background: linear-gradient(135deg, #f5b65b 0%, #d4942b 100%) !important;
+  color: #2a1a05 !important;
+  box-shadow: 0 4px 16px rgba(245, 182, 91, 0.4), 0 1px 0 rgba(255, 255, 255, 0.2) inset;
+}
+
+.kitchen-cinematic .hover\:bg-amber-600:hover,
+.kitchen-cinematic button.bg-amber-500:hover {
+  background: linear-gradient(135deg, #ffd07a 0%, #f5b65b 100%) !important;
+  box-shadow: 0 6px 24px rgba(245, 182, 91, 0.55), 0 1px 0 rgba(255, 255, 255, 0.25) inset;
+  transform: translateY(-1px);
+}
+
+.kitchen-cinematic .bg-amber-600 {
+  background: linear-gradient(135deg, #d4942b 0%, #b87a1c 100%) !important;
+  color: #fff !important;
+}
+
+/* Green buttons */
+.kitchen-cinematic .bg-green-600,
+.kitchen-cinematic button.bg-green-600 {
+  background: linear-gradient(135deg, #5fc285 0%, #3f9c64 100%) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 16px rgba(74, 222, 128, 0.35), 0 1px 0 rgba(255, 255, 255, 0.2) inset;
+}
+
+.kitchen-cinematic .hover\:bg-green-700:hover,
+.kitchen-cinematic button.bg-green-600:hover {
+  background: linear-gradient(135deg, #7ddf9f 0%, #5fc285 100%) !important;
+  box-shadow: 0 6px 24px rgba(74, 222, 128, 0.55);
+  transform: translateY(-1px);
+}
+
+/* Blue buttons */
+.kitchen-cinematic .bg-blue-600,
+.kitchen-cinematic button.bg-blue-600 {
+  background: linear-gradient(135deg, #6cb2ff 0%, #3a8aef 100%) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 16px rgba(108, 178, 255, 0.4);
+}
+
+.kitchen-cinematic .hover\:bg-blue-700:hover,
+.kitchen-cinematic button.bg-blue-600:hover {
+  background: linear-gradient(135deg, #8cc4ff 0%, #6cb2ff 100%) !important;
+  box-shadow: 0 6px 24px rgba(108, 178, 255, 0.55);
+  transform: translateY(-1px);
+}
+
+/* ==================== INPUTS ==================== */
+.kitchen-cinematic input,
+.kitchen-cinematic textarea,
+.kitchen-cinematic select {
+  background: rgba(8, 14, 10, 0.55) !important;
+  border: 1px solid var(--kc-border) !important;
+  color: var(--kc-text) !important;
+  transition: all 0.2s ease;
+}
+
+.kitchen-cinematic input::placeholder,
+.kitchen-cinematic textarea::placeholder {
+  color: var(--kc-text-dim) !important;
+}
+
+.kitchen-cinematic input:focus,
+.kitchen-cinematic textarea:focus,
+.kitchen-cinematic select:focus {
+  border-color: var(--kc-border-hot) !important;
+  box-shadow: 0 0 0 3px rgba(168, 217, 107, 0.15), 0 0 18px rgba(168, 217, 107, 0.2) !important;
+  outline: none;
+}
+
+.kitchen-cinematic label {
+  color: var(--kc-text) !important;
+  font-weight: 500;
+}
+
+/* ==================== DIALOGS ==================== */
+.kitchen-cinematic [role="dialog"],
+[role="dialog"][data-radix-dialog-content] {
+  background: linear-gradient(180deg, rgba(20, 28, 22, 0.95) 0%, rgba(12, 18, 14, 0.95) 100%) !important;
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+  border: 1px solid rgba(168, 217, 107, 0.25) !important;
+  color: var(--kc-text) !important;
+  box-shadow: 0 25px 80px rgba(0, 0, 0, 0.7), 0 0 40px rgba(168, 217, 107, 0.15), 0 1px 0 rgba(168, 217, 107, 0.15) inset !important;
+}
+
+[role="dialog"][data-radix-dialog-content] h2,
+[role="dialog"][data-radix-dialog-content] [data-radix-dialog-title] {
+  font-family: "Bodoni Moda", serif;
+  color: #d4f0a4;
+  letter-spacing: 0.02em;
+}
+
+[role="dialog"][data-radix-dialog-content] input,
+[role="dialog"][data-radix-dialog-content] textarea,
+[role="dialog"][data-radix-dialog-content] select {
+  background: rgba(8, 14, 10, 0.6) !important;
+  border: 1px solid rgba(168, 217, 107, 0.25) !important;
+  color: var(--kc-text) !important;
+}
+
+[role="dialog"][data-radix-dialog-content] label {
+  color: var(--kc-text) !important;
+}
+
+[role="dialog"][data-radix-dialog-content] .bg-secondary\/50 {
+  background: rgba(168, 217, 107, 0.08) !important;
+}
+
+/* ==================== BADGES ==================== */
+.kitchen-cinematic [class*="bg-amber"],
+.kitchen-cinematic [class*="bg-brand"],
+.kitchen-cinematic [class*="bg-blue"],
+.kitchen-cinematic [class*="bg-green"],
+.kitchen-cinematic [class*="bg-red"],
+.kitchen-cinematic [class*="bg-purple"],
+.kitchen-cinematic [class*="bg-pink"] {
+  font-weight: 600;
+}
+
+/* Big colored summary cards (Total do Dia, Caixa, PIX Adjustments) */
+.kitchen-cinematic .bg-brand-600.text-white {
+  background: linear-gradient(135deg, rgba(168, 217, 107, 0.95) 0%, rgba(108, 162, 46, 0.95) 100%) !important;
+  color: #0a1410 !important;
+  border: 1px solid rgba(168, 217, 107, 0.5);
+  box-shadow: 0 12px 40px rgba(168, 217, 107, 0.35), 0 1px 0 rgba(255, 255, 255, 0.3) inset;
+  position: relative;
+  overflow: hidden;
+}
+
+.kitchen-cinematic .bg-brand-600.text-white::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -20%;
+  width: 280px;
+  height: 280px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.25), transparent 70%);
+  pointer-events: none;
+}
+
+.kitchen-cinematic .bg-green-600.text-white {
+  background: linear-gradient(135deg, #4fa874 0%, #2d7a4f 100%) !important;
+  border: 1px solid rgba(74, 222, 128, 0.4);
+  box-shadow: 0 12px 40px rgba(74, 222, 128, 0.25), 0 1px 0 rgba(255, 255, 255, 0.2) inset;
+}
+
+.kitchen-cinematic .bg-blue-600.text-white {
+  background: linear-gradient(135deg, #4a8edd 0%, #2a5fa8 100%) !important;
+  border: 1px solid rgba(108, 178, 255, 0.4);
+  box-shadow: 0 12px 40px rgba(108, 178, 255, 0.25), 0 1px 0 rgba(255, 255, 255, 0.2) inset;
+}
+
+.kitchen-cinematic .bg-amber-600.text-white {
+  background: linear-gradient(135deg, #d4942b 0%, #a47020 100%) !important;
+  color: #fff !important;
+  border: 1px solid rgba(245, 182, 91, 0.4);
+  box-shadow: 0 12px 40px rgba(245, 182, 91, 0.25), 0 1px 0 rgba(255, 255, 255, 0.2) inset;
+}
+
+/* Inner panels inside colored cards (bg-white/10, bg-white/20) - retain white tint */
+.kitchen-cinematic .bg-white\/10,
+.kitchen-cinematic .bg-white\/20 {
+  background: rgba(255, 255, 255, 0.15) !important;
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+/* ==================== SCROLLBARS ==================== */
+.kitchen-cinematic ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.kitchen-cinematic ::-webkit-scrollbar-track {
+  background: rgba(8, 14, 10, 0.3);
+}
+
+.kitchen-cinematic ::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, rgba(168, 217, 107, 0.4), rgba(124, 179, 66, 0.4));
+  border-radius: 999px;
+}
+
+.kitchen-cinematic ::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, rgba(168, 217, 107, 0.7), rgba(124, 179, 66, 0.7));
+}
+
+/* ==================== STATUS PULSE ANIMATION ==================== */
+@keyframes kc-status-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(168, 217, 107, 0.4); }
+  50% { box-shadow: 0 0 0 12px rgba(168, 217, 107, 0); }
+}
+
+.kitchen-cinematic .border-l-amber-500 {
+  animation: kc-status-pulse-amber 2.5s ease-in-out infinite;
+}
+
+@keyframes kc-status-pulse-amber {
+  0%, 100% { box-shadow: -4px 0 16px rgba(245, 182, 91, 0.3), 0 0 0 0 rgba(245, 182, 91, 0.3); }
+  50% { box-shadow: -4px 0 22px rgba(245, 182, 91, 0.5), 0 0 0 6px rgba(245, 182, 91, 0); }
+}
+
+.kitchen-cinematic .border-l-blue-500 {
+  animation: kc-status-pulse-blue 2.5s ease-in-out infinite;
+}
+
+@keyframes kc-status-pulse-blue {
+  0%, 100% { box-shadow: -4px 0 16px rgba(108, 178, 255, 0.3), 0 0 0 0 rgba(108, 178, 255, 0.3); }
+  50% { box-shadow: -4px 0 22px rgba(108, 178, 255, 0.5), 0 0 0 6px rgba(108, 178, 255, 0); }
+}
+
+/* ==================== ORDER CARD ENTRANCE ==================== */
+.kitchen-cinematic [data-testid="kitchen-page"] .grid > .bg-white {
+  animation: kc-order-enter 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes kc-order-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(24px) scale(0.95);
+    filter: blur(6px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
+/* ==================== SECTION HEADERS ==================== */
+.kitchen-cinematic main .flex.items-center.gap-1.mb-2 {
+  font-family: "Bodoni Moda", serif;
+  font-size: 1.05rem !important;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 16px !important;
+  position: relative;
+  padding-bottom: 8px;
+}
+
+.kitchen-cinematic main .flex.items-center.gap-1.mb-2::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 40px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--kc-accent), transparent);
+}
+
+/* ==================== EMPTY STATE ==================== */
+.kitchen-cinematic .text-center.py-8 {
+  padding: 64px 24px !important;
+  color: var(--kc-text-muted) !important;
+}
+
+.kitchen-cinematic .text-center.py-8 svg {
+  color: var(--kc-accent) !important;
+  opacity: 0.5 !important;
+  filter: drop-shadow(0 0 24px rgba(168, 217, 107, 0.4));
+  width: 56px !important;
+  height: 56px !important;
+}
+
+.kitchen-cinematic .text-center.py-8 p {
+  font-family: "Bodoni Moda", serif;
+  font-style: italic;
+  font-size: 1.05rem !important;
+  letter-spacing: 0.04em;
+  margin-top: 16px !important;
+}
+
+/* ==================== MAIN CONTENT PADDING ==================== */
+.kitchen-cinematic main {
+  padding: 20px 24px 80px !important;
+  max-width: 1600px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 1;
+}
+
+/* ==================== STICKY HEADER OFFSET ==================== */
+.kitchen-cinematic > header {
+  border-radius: 0 0 24px 24px;
+}
+
+/* ==================== ITEM ROWS / LIST ITEMS ==================== */
+.kitchen-cinematic .flex.items-center.justify-between.p-2.rounded-lg.border {
+  background: rgba(8, 14, 10, 0.4) !important;
+  border-color: var(--kc-border) !important;
+  transition: all 0.3s ease;
+}
+
+.kitchen-cinematic .flex.items-center.justify-between.p-2.rounded-lg.border:hover {
+  background: rgba(168, 217, 107, 0.08) !important;
+  border-color: var(--kc-border-hot) !important;
+}
+
+/* Stock item editable button */
+.kitchen-cinematic button[title="Clique para editar"] {
+  color: var(--kc-text) !important;
+}
+
+.kitchen-cinematic button[title="Clique para editar"]:hover {
+  background: rgba(168, 217, 107, 0.12) !important;
+}
+
+/* ==================== TOASTER ==================== */
+[data-sonner-toaster] [data-sonner-toast] {
+  background: rgba(20, 28, 22, 0.95) !important;
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(168, 217, 107, 0.3) !important;
+  color: var(--kc-text, #e9f0e1) !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5), 0 0 20px rgba(168, 217, 107, 0.2) !important;
+}
+
+/* ==================== SUBTLE ENTRANCE FOR WHOLE PAGE ==================== */
+@keyframes kc-page-fade {
+  0% { opacity: 0; transform: translateY(8px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.kitchen-cinematic main {
+  animation: kc-page-fade 0.7s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
+}
+
+/* ==================== HERO BAND - VENDAS / DASHBOARD TITLES ==================== */
+.kitchen-cinematic .bg-brand-600 .text-2xl,
+.kitchen-cinematic .bg-green-600 .text-2xl,
+.kitchen-cinematic .bg-blue-600 .text-2xl,
+.kitchen-cinematic .bg-amber-600 .text-2xl {
+  font-family: "Bodoni Moda", serif;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-size: 2.2rem !important;
+}
+
+/* ==================== BREATHING GLOW BEHIND ORDERS ==================== */
+.kitchen-cinematic .grid.grid-cols-1.sm\:grid-cols-2 {
+  position: relative;
+}
+
+/* ==================== TAB CONTENT EASE ==================== */
+.kitchen-cinematic [role="tabpanel"] {
+  animation: kc-tab-in 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes kc-tab-in {
+  0% { opacity: 0; transform: translateY(10px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Force hide tablist horizontal overflow scrollbar */
+.kitchen-cinematic [role="tablist"]::-webkit-scrollbar { display: none; }
+
+/* ====================================================================
+   PREMIUM STAT HERO CARDS — Total do Dia / Caixa / Ajustes PIX
+   Designed for high readability with tabular-nums, JetBrains Mono.
+   ==================================================================== */
+
+.kitchen-cinematic .kc-stat-hero {
+  position: relative;
+  overflow: hidden;
+  border-radius: 18px;
+  padding: 22px 24px;
+  color: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 24px 60px -20px rgba(0, 0, 0, 0.6),
+    0 2px 0 rgba(255, 255, 255, 0.08) inset,
+    0 -1px 0 rgba(0, 0, 0, 0.35) inset;
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+}
+
+.kitchen-cinematic .kc-stat-hero + .kc-stat-hero {
+  margin-top: 14px;
+}
+
+.kitchen-cinematic .kc-stat-hero__decor {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 90% -20%, rgba(255, 255, 255, 0.22), transparent 50%),
+    radial-gradient(circle at 10% 110%, rgba(0, 0, 0, 0.25), transparent 55%);
+}
+
+/* Variant: brand (Total do Dia) */
+.kitchen-cinematic .kc-stat-hero--brand {
+  background:
+    linear-gradient(135deg, #6ea636 0%, #4e7d22 60%, #355615 100%);
+}
+
+/* Variant: cash (Caixa) */
+.kitchen-cinematic .kc-stat-hero--cash {
+  background:
+    linear-gradient(135deg, #2e6b4a 0%, #1f5036 55%, #133a25 100%);
+}
+
+/* Variant: pix (Ajustes PIX) */
+.kitchen-cinematic .kc-stat-hero--pix {
+  background:
+    linear-gradient(135deg, #2a5dba 0%, #1c4493 55%, #122f6a 100%);
+}
+
+.kitchen-cinematic .kc-stat-hero__row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.kitchen-cinematic .kc-stat-hero__main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.kitchen-cinematic .kc-stat-hero__label {
+  font-family: "Manrope", sans-serif !important;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.7);
+  display: inline-flex;
+  align-items: center;
+}
+
+.kitchen-cinematic .kc-stat-hero__value {
+  font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", "Roboto Mono", monospace !important;
+  font-feature-settings: "tnum" 1, "lnum" 1;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: clamp(2rem, 4.5vw, 3.2rem);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: #ffffff;
+  text-shadow: 0 2px 24px rgba(0, 0, 0, 0.35);
+}
+
+/* Hero with main + side (Total do Dia) */
+.kitchen-cinematic .kc-stat-hero:not(.kc-stat-hero--cash):not(.kc-stat-hero--pix) {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 24px;
+}
+
+.kitchen-cinematic .kc-stat-hero__side {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  padding-left: 24px;
+  border-left: 1px solid rgba(255, 255, 255, 0.18);
+  min-height: 56px;
+  justify-content: center;
+}
+
+.kitchen-cinematic .kc-stat-hero__sublabel {
+  font-family: "Manrope", sans-serif !important;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.kitchen-cinematic .kc-stat-hero__subvalue {
+  font-family: "JetBrains Mono", "IBM Plex Mono", monospace !important;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 1.8rem;
+  line-height: 1;
+  color: #ffffff;
+}
+
+/* Actions row in cash & pix cards */
+.kitchen-cinematic .kc-stat-hero__actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.kitchen-cinematic .kc-stat-btn {
+  background: rgba(255, 255, 255, 0.16) !important;
+  border: 1px solid rgba(255, 255, 255, 0.25) !important;
+  color: #ffffff !important;
+  height: 34px;
+  padding: 0 12px !important;
+  font-size: 0.8rem !important;
+  font-weight: 600;
+  border-radius: 10px !important;
+  backdrop-filter: blur(8px);
+  transition: all 0.25s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+.kitchen-cinematic .kc-stat-btn:hover:not([disabled]) {
+  background: rgba(255, 255, 255, 0.28) !important;
+  border-color: rgba(255, 255, 255, 0.45) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+}
+
+.kitchen-cinematic .kc-stat-btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.kitchen-cinematic .kc-stat-btn--danger {
+  background: rgba(255, 75, 90, 0.4) !important;
+  border-color: rgba(255, 120, 130, 0.5) !important;
+}
+
+.kitchen-cinematic .kc-stat-btn--danger:hover:not([disabled]) {
+  background: rgba(255, 75, 90, 0.6) !important;
+}
+
+/* Mini grid (Saldo Inicial / Vendas / Retiradas) */
+.kitchen-cinematic .kc-mini-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.kitchen-cinematic .kc-mini {
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 12px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  backdrop-filter: blur(8px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  transition: all 0.25s ease;
+}
+
+.kitchen-cinematic .kc-mini:hover {
+  background: rgba(0, 0, 0, 0.38);
+  border-color: rgba(255, 255, 255, 0.28);
+  transform: translateY(-1px);
+}
+
+.kitchen-cinematic .kc-mini__label {
+  font-family: "Manrope", sans-serif !important;
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.kitchen-cinematic .kc-mini__value {
+  font-family: "JetBrains Mono", "IBM Plex Mono", monospace !important;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 1.25rem;
+  line-height: 1.05;
+  color: #ffffff;
+  letter-spacing: -0.01em;
+}
+
+.kitchen-cinematic .kc-mini--positive .kc-mini__value {
+  color: #b6f0c1;
+  text-shadow: 0 0 14px rgba(110, 245, 150, 0.35);
+}
+
+.kitchen-cinematic .kc-mini--negative .kc-mini__value {
+  color: #ffc7c7;
+  text-shadow: 0 0 14px rgba(255, 130, 130, 0.35);
+}
+
+/* Foot line (Hoje: ...) */
+.kitchen-cinematic .kc-stat-hero__foot {
+  position: relative;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.2);
+  font-family: "Manrope", sans-serif !important;
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.72);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Lists (withdrawals / pix adjustments) */
+.kitchen-cinematic .kc-list-block {
+  position: relative;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.kitchen-cinematic .kc-list-block__title {
+  font-family: "Manrope", sans-serif !important;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.65);
+  margin-bottom: 8px;
+}
+
+.kitchen-cinematic .kc-list-block__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 140px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.kitchen-cinematic .kc-list-block__body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.kitchen-cinematic .kc-list-block__body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.25);
+  border-radius: 999px;
+}
+
+.kitchen-cinematic .kc-list-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 0.82rem;
+  color: rgba(255, 255, 255, 0.92);
+  transition: background 0.2s ease;
+}
+
+.kitchen-cinematic .kc-list-row:hover {
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.kitchen-cinematic .kc-list-row__value {
+  font-family: "JetBrains Mono", "IBM Plex Mono", monospace !important;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  font-size: 0.95rem;
+  letter-spacing: -0.01em;
+}
+
+.kitchen-cinematic .kc-list-row__value--pos { color: #b6f0c1; }
+.kitchen-cinematic .kc-list-row__value--neg { color: #ffc7c7; }
+
+.kitchen-cinematic .kc-list-row__remove {
+  height: 24px !important;
+  width: 24px !important;
+  padding: 0 !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: rgba(255, 255, 255, 0.7) !important;
+  border-radius: 8px !important;
+}
+
+.kitchen-cinematic .kc-list-row__remove:hover {
+  background: rgba(255, 100, 100, 0.4) !important;
+  color: #fff !important;
+}
+
+/* Responsive: stack mini-grid on small screens */
+@media (max-width: 640px) {
+  .kitchen-cinematic .kc-mini-grid {
+    grid-template-columns: 1fr;
+  }
+  .kitchen-cinematic .kc-stat-hero__value {
+    font-size: 2.2rem;
+  }
+  .kitchen-cinematic .kc-stat-hero__row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+/* Override cinematic Bodoni serif for these values */
+.kitchen-cinematic .kc-stat-hero .text-2xl,
+.kitchen-cinematic .kc-stat-hero .text-xl {
+  font-family: "JetBrains Mono", "IBM Plex Mono", monospace !important;
+}
