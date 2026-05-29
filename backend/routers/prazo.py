@@ -123,22 +123,34 @@ def _mask_phone(phone: str) -> str:
 async def lookup_prazo_customers(q: str = "", store: str = None):
     """Public-facing search for prazo customers used in the checkout flow.
     - Returns all customers (limited to 50) when `q` is empty.
-    - Filters by name match (case-insensitive) when `q` has 1+ chars.
+    - Accent-insensitive name match: typing "paulao" matches "Paulão".
     - Masks phone numbers (only last 4 digits visible).
-    - Returns NO credit, debt, history or financial info.
     """
-    q = (q or "").strip()
+    import unicodedata
 
+    def _normalize(s: str) -> str:
+        if not s:
+            return ""
+        nfd = unicodedata.normalize("NFD", str(s))
+        no_diacritics = "".join(ch for ch in nfd if unicodedata.category(ch) != "Mn")
+        return no_diacritics.casefold()
+
+    q = (q or "").strip()
     query = {}
-    if q:
-        query["name"] = {"$regex": q, "$options": "i"}
     if store:
         query["store"] = store
 
+    # Fetch a generous slice and filter in Python for diacritic-insensitive match.
     docs = await db.prazo_customers.find(
         query,
         {"_id": 0, "id": 1, "name": 1, "phone": 1, "store": 1}
-    ).sort("name", 1).limit(50).to_list(50)
+    ).sort("name", 1).to_list(500)
+
+    q_norm = _normalize(q)
+    if q_norm:
+        docs = [d for d in docs if q_norm in _normalize(d.get("name", ""))]
+
+    docs = docs[:50]
 
     return {
         "customers": [

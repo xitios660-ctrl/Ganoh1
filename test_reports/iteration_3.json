@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 3 (Jan 2026) - validated 2 bug fixes: (a) Cardápio add item accepts price with comma decimal (e.g., '0,50'), (b) Prazo customer lookup is accent + case insensitive. All backend pytest cases passed (4/4) and all relevant Playwright UI flows passed. No regressions found.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bugfixes_iteration3_jan2026.py",
+    "/app/test_reports/pytest/iteration3_results.xml"
+  ],
+  "action_items": [
+    "Optional: add data-testid to non-menu TabsTrigger elements (dashboard, chart, gastos, prazo, whatsapp) at /app/frontend/src/pages/GestorPage.js lines 1271-1286 for easier automation; currently only 'gestor-tab-menu' has a testid."
+  ],
+  "critical_code_review_comments": [
+    "/app/frontend/src/pages/GestorPage.js price input handler (line 2206-2214) correctly normalizes comma->dot and strips non-digits; stores numeric string in state and parseFloat is called at submit (line 349,357). Works for both 0,50 and 0.50.",
+    "/app/backend/routers/prazo.py lookup uses unicodedata NFD strip diacritics in Python — correct approach since MongoDB regex is not accent-insensitive without $text or collation. Lookup correctly returns matches for 'paulao' -> 'Paulão' and 'joao' -> 'João'.",
+    "Test data cleanup: tests use TEST_ prefix and DELETE endpoints — leftover items were cleaned during this iteration."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bugfixes_iteration3_jan2026.py"
+  ],
+  "success_rate": {"backend": "100% (4/4)", "frontend": "100% (Chiclete comma, Chiclete dot, Paulão accent-insensitive, PAUL case-insensitive all verified)"},
+  "test_credentials": "gestor / ganoh2024 (from problem statement)",
+  "seed_data_creation": "Tests create TEST_-prefixed customers/menu items via API and delete them at the end. Verified no leftover items remain.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Two bugs reported by production (Chiclete with comma + Paulão accent search) are fixed and verified. Key behaviors: (1) POST /api/gestor/menu creates the item in BOTH stores with one call and returns {items: [...]} containing 2 entries (runner + gym-londres); item IDs are `{base_id}-{store}`. (2) GET /api/prazo/customers/lookup?q=... with optional store param applies Python NFD-strip-diacritic + casefold matching. (3) Frontend price input is type=text inputMode=decimal and replaces comma with dot before storing in state. Only TabsTrigger 'menu' has data-testid; others can be located via role=tab name='Prazo' etc.",
+  "rca of the issue": "Production bug 1 RCA: HTML5 <input type=number> in pt-BR mobile browsers rejects comma as decimal separator, so typing '0,50' produced an empty value and the disabled !newItem.price guard kept the Adicionar button greyed out. Fix: switch to type=text inputMode=decimal and normalize comma->dot in onChange handler. Verified: typing 0,50 produces stored value '0.50' and the button enables. Production bug 2 RCA: MongoDB regex matching is case-insensitive only via /i flag but never accent-insensitive (would need $text index w/ proper collation or @@@ unicode normalization). The previous implementation used a Mongo $regex on the original string so 'paulao' could not match 'Paulão'. Fix: fetch the candidate set from Mongo and filter in Python using unicodedata.normalize('NFD') + remove combining marks + casefold. Verified for both 'paulao'->'Paulão' and 'joao'->'João'."
+}

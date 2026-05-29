@@ -294,10 +294,11 @@ export const PrazoTab = ({ prazoCustomers, prazoDebts, onOpenNewCustomer, onDele
   }, [debtsByStore]);
 
   const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
+    const norm = (s) => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const q = norm(query.trim());
     const list = customersByStore;
     if (!q) return list;
-    return list.filter((c) => (c.name || '').toLowerCase().includes(q) || (c.phone || '').includes(q));
+    return list.filter((c) => norm(c.name).includes(q) || (c.phone || '').includes(q));
   }, [customersByStore, query]);
 
   const customersWithDebt = useMemo(() => {

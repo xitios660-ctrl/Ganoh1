@@ -2200,11 +2200,19 @@ export const GestorPage = () => {
               <div>
                 <Label>Preço *</Label>
                 <Input 
-                  type="number" 
-                  step="0.01"
+                  type="text"
+                  inputMode="decimal"
                   value={newItem.price} 
-                  onChange={(e) => setNewItem({...newItem, price: e.target.value})}
-                  placeholder="0.00"
+                  onChange={(e) => {
+                    // Accept comma OR dot for decimal, keep only numbers and a single separator
+                    let v = e.target.value.replace(/[^\d.,]/g, '');
+                    // Replace comma with dot, but only keep first separator
+                    v = v.replace(',', '.');
+                    const parts = v.split('.');
+                    if (parts.length > 2) v = parts[0] + '.' + parts.slice(1).join('');
+                    setNewItem({...newItem, price: v});
+                  }}
+                  placeholder="0,50"
                 />
               </div>
               <div>
