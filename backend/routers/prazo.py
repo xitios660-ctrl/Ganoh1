@@ -122,24 +122,23 @@ def _mask_phone(phone: str) -> str:
 @router.get("/customers/lookup")
 async def lookup_prazo_customers(q: str = "", store: str = None):
     """Public-facing search for prazo customers used in the checkout flow.
-    - Requires at least 2 characters in `q` to return any results.
+    - Returns all customers (limited to 50) when `q` is empty.
+    - Filters by name match (case-insensitive) when `q` has 1+ chars.
     - Masks phone numbers (only last 4 digits visible).
     - Returns NO credit, debt, history or financial info.
-    - Limits to 15 results.
-    This prevents exposure of the full customer list to the public cardápio.
     """
     q = (q or "").strip()
-    if len(q) < 2:
-        return {"customers": []}
 
-    query = {"name": {"$regex": q, "$options": "i"}}
+    query = {}
+    if q:
+        query["name"] = {"$regex": q, "$options": "i"}
     if store:
         query["store"] = store
 
     docs = await db.prazo_customers.find(
         query,
         {"_id": 0, "id": 1, "name": 1, "phone": 1, "store": 1}
-    ).limit(15).to_list(15)
+    ).sort("name", 1).limit(50).to_list(50)
 
     return {
         "customers": [

@@ -77,23 +77,19 @@ export const CheckoutModal = ({ isOpen, onClose, onSubmit, isLoading, store = 'r
     };
   }, []);
 
-  // Fetch prazo customers only when user searches (privacy fix)
+  // Fetch prazo customers when prazo is selected (also supports searching)
   useEffect(() => {
     if (!isOpen || paymentMethod !== 'prazo') {
       setPrazoCustomers([]);
       return;
     }
     const q = (prazoSearchTerm || '').trim();
-    if (q.length < 2) {
-      setPrazoCustomers([]);
-      return;
-    }
     const ctrl = new AbortController();
     const timer = setTimeout(() => {
       axios.get(`${API}/prazo/customers/lookup`, { params: { q, store }, signal: ctrl.signal })
         .then(res => setPrazoCustomers(res.data.customers || []))
         .catch(() => {});
-    }, 250);
+    }, q ? 250 : 0);
     return () => { clearTimeout(timer); ctrl.abort(); };
   }, [isOpen, paymentMethod, prazoSearchTerm, store]);
 

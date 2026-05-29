@@ -156,6 +156,14 @@ export const GestorPage = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chartStoreFilter]);
 
+  // Refetch expenses/Gastos KPIs when the Gastos store filter changes
+  useEffect(() => {
+    if (isAuthenticated) {
+      fetchExpenses();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expenseStoreFilter]);
+
   // Auto-authenticate from localStorage on mount.
   // AuthPage stores credentials in localStorage.gestor_auth after a successful
   // tenant login, so the user shouldn't have to type the password a second time
@@ -331,6 +339,7 @@ export const GestorPage = () => {
     if (!auth) return;
     
     const [user, pass] = atob(auth).split(':');
+    const targetStore = newItem.store || selectedStore || 'runner';
     
     try {
       if (editingItem) {
@@ -352,9 +361,11 @@ export const GestorPage = () => {
       setShowMenuDialog(false);
       setEditingItem(null);
       setNewItem({ name: '', description: '', price: '', category: menuCategories[0] || '', store: 'runner', image_url: '' });
-      fetchMenuItems(newItem.store);
+      // Refresh the menu of the store the item was added/edited to
+      fetchMenuItems(targetStore);
     } catch (error) {
-      toast.error('Erro ao salvar item');
+      const msg = error?.response?.data?.detail || 'Erro ao salvar item';
+      toast.error(typeof msg === 'string' ? msg : 'Erro ao salvar item');
     }
   };
 
@@ -425,7 +436,7 @@ export const GestorPage = () => {
   };
 
   // ==================== EXPENSES (GASTOS) FUNCTIONS ====================
-  const fetchExpenses = async (period = expensesPeriod, date = expensesSelectedDate, month = expensesSelectedMonth, year = expensesSelectedYear) => {
+  const fetchExpenses = async (period = expensesPeriod, date = expensesSelectedDate, month = expensesSelectedMonth, year = expensesSelectedYear, storeFilter = expenseStoreFilter) => {
     const auth = localStorage.getItem('gestor_auth');
     if (!auth) return;
     
@@ -444,6 +455,11 @@ export const GestorPage = () => {
       } else if (period === 'year') {
         params = { year };
         chartEndpoint = `${API}/gestor/chart/yearly-with-expenses`;
+      }
+
+      // Send the store filter so backend computes Receita/Gastos/Lucro per loja
+      if (storeFilter && storeFilter !== 'all') {
+        params.store = storeFilter;
       }
       
       const [expensesRes, chartRes] = await Promise.all([

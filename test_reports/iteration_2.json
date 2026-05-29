@@ -1,0 +1,44 @@
+{
+  "summary": "Validated 3 bug fixes from iteration 2: (1) Gastos store filter, (2) Prazo customer list w/o typing, (3) Menu add with new 'Pão Doce' category. All 11 backend tests pass. Frontend Gastos filter + Pão Doce dropdown verified via Playwright. Prazo UI flow verified by backend lookup endpoint + code review of CheckoutModal.js (UI checkout could not be fully traversed by automation due to cart drawer animation timing, but underlying API + code change confirmed).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "POST /api/gestor/menu", "issue": "Endpoint ignores the 'store' field in the payload and always inserts items into BOTH 'runner' and 'gym-londres'. Returned message: 'Item adicionado em ambas as lojas!'. If business intent is to add to selected store only, backend needs change. The frontend's targetStore choice currently only controls which list is refetched after add."},
+      {"endpoint": "/api/gestor/menu/{store}", "issue": "Route is defined twice: in /app/backend/server.py (returns {menu, count}) AND /app/backend/routers/menu.py (returns {items}). Server.py wins. Recommend removing duplicate to avoid confusion."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Cart drawer / CheckoutModal", "issues": ["Console warning: 'DialogContent requires a DialogTitle for screen reader users' — add a (visually hidden) DialogTitle for a11y."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_bugfixes_iteration2_jan2026.py",
+    "/app/test_reports/pytest/iteration2_results.xml"
+  ],
+  "action_items": [
+    "Decide whether POST /api/gestor/menu should respect the 'store' field; current behavior adds to both stores regardless.",
+    "Remove the duplicate /gestor/menu/{store} route in routers/menu.py (server.py route is active).",
+    "Add a (VisuallyHidden) DialogTitle to CheckoutModal / cart drawer to fix the radix a11y warning."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 5849 lines — far exceeds the 700-line guideline. Should be split into routers (already partially started in /app/backend/routers/). Many endpoints (menu, gestor) are now duplicated across server.py and routers/, causing route-resolution ambiguity.",
+    "POST /api/gestor/menu silently ignores the documented 'store' field — the API contract and frontend expectation diverge from implementation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_bugfixes_iteration2_jan2026.py (new)"
+  ],
+  "success_rate": {"backend": "100% (11/11)", "frontend": "Gastos filter + Pão Doce dropdown: PASS. Prazo UI flow: not fully executed via Playwright, but backend + code path confirmed."},
+  "test_credentials": "gestor / ganoh2024",
+  "seed_data_creation": "Two TEST_-prefixed menu items created and deleted within tests (test_add_pao_doce_item_to_runner, test_add_item_to_gym).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Backend test suite at /app/backend/tests/test_bugfixes_iteration2_jan2026.py covers all 3 bug fixes. The cart-drawer → checkout → Prazo Playwright flow is tricky: the shopping-bag icon must be clicked exactly once (a second click closes the drawer). After Finalizar, the CheckoutModal requires filling 2 visible inputs (name, phone) and toggling 5 [role=switch] elements before the 'Prazo' payment option appears.",
+  "rca_of_the_issue": {
+    "bug1_gastos_filter": "FIXED. monthly/daily/yearly-with-expenses now accept 'store' param and frontend fetchExpenses passes it; KPI values for Runner/GYM Londres/Combined match expected (29890.60 / 15889.65 / 45780.25).",
+    "bug2_prazo_list": "FIXED. /api/prazo/customers/lookup returns 50 (runner) and 13 (gym-londres) customers when q is empty. CheckoutModal.js useEffect no longer requires q.length>=2.",
+    "bug3_menu_add_pao_doce": "PARTIALLY ADDRESSED. 'Pão Doce' is selectable in the Categoria dropdown and is in /api/categories. POST /api/gestor/menu accepts payloads with category='Pão Doce' and persists them. However, the backend always inserts into BOTH stores (not just the targetStore selected in the dialog) — the frontend targetStore variable only controls which list refetches, not which store actually receives the item. Confirm with product whether this is the desired behaviour."
+  }
+}

@@ -493,7 +493,8 @@ CATEGORIES = [
     "Bebidas Quentes",
     "Bebidas Geladas",
     "Suplementos",
-    "Doces"
+    "Doces",
+    "Pão Doce"
 ]
 
 ADICIONAIS = [
@@ -4727,8 +4728,8 @@ Obrigado! ☕"""
 
 # ==================== UPDATED CHART DATA WITH EXPENSES ====================
 @api_router.get("/gestor/chart/monthly-with-expenses")
-async def get_monthly_chart_with_expenses(month: int = None, year: int = None, username: str = Depends(verify_gestor)):
-    """Get daily sales AND expenses data for a specific month"""
+async def get_monthly_chart_with_expenses(month: int = None, year: int = None, store: str = None, username: str = Depends(verify_gestor)):
+    """Get daily sales AND expenses data for a specific month, optionally filtered by store"""
     now = datetime.now(timezone.utc)
     
     target_month = month if month else now.month
@@ -4744,16 +4745,22 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, u
     import calendar
     days_in_month = calendar.monthrange(target_year, target_month)[1]
     
-    # Get all completed orders this month
-    orders = await db.orders.find({
+    # Get all completed orders this month (filter by store if provided)
+    orders_query = {
         "status": {"$in": ["ready", "delivered", "received"]},
         "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
-    }, {"_id": 0, "created_at": 1, "total": 1, "store": 1}).to_list(10000)
+    }
+    if store and store != "all":
+        orders_query["store"] = store
+    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "store": 1}).to_list(10000)
     
-    # Get all expenses this month
-    expenses = await db.expenses.find({
+    # Get all expenses this month (filter by store if provided)
+    expenses_query = {
         "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
-    }, {"_id": 0}).to_list(1000)
+    }
+    if store and store != "all":
+        expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
+    expenses = await db.expenses.find(expenses_query, {"_id": 0}).to_list(1000)
     
     # Group by day
     daily_data = {}
@@ -4815,8 +4822,8 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, u
     }
 
 @api_router.get("/gestor/chart/daily-with-expenses")
-async def get_daily_chart_with_expenses(date: str = None, username: str = Depends(verify_gestor)):
-    """Get hourly sales AND expenses data for a specific day"""
+async def get_daily_chart_with_expenses(date: str = None, store: str = None, username: str = Depends(verify_gestor)):
+    """Get hourly sales AND expenses data for a specific day, optionally filtered by store"""
     now = datetime.now(timezone.utc)
     
     if date:
@@ -4827,15 +4834,21 @@ async def get_daily_chart_with_expenses(date: str = None, username: str = Depend
     day_start = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
     day_end = day_start + timedelta(days=1)
     
-    # Get orders and expenses for this day
-    orders = await db.orders.find({
+    # Get orders and expenses for this day (filter by store if provided)
+    orders_query = {
         "status": {"$in": ["ready", "delivered", "received"]},
         "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
-    }, {"_id": 0, "created_at": 1, "total": 1}).to_list(10000)
+    }
+    if store and store != "all":
+        orders_query["store"] = store
+    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1}).to_list(10000)
     
-    expenses = await db.expenses.find({
+    expenses_query = {
         "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
-    }, {"_id": 0}).to_list(1000)
+    }
+    if store and store != "all":
+        expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
+    expenses = await db.expenses.find(expenses_query, {"_id": 0}).to_list(1000)
     
     # Group by hour
     hourly_data = {}
@@ -4884,22 +4897,28 @@ async def get_daily_chart_with_expenses(date: str = None, username: str = Depend
     }
 
 @api_router.get("/gestor/chart/yearly-with-expenses")
-async def get_yearly_chart_with_expenses(year: int = None, username: str = Depends(verify_gestor)):
-    """Get monthly sales AND expenses data for a specific year"""
+async def get_yearly_chart_with_expenses(year: int = None, store: str = None, username: str = Depends(verify_gestor)):
+    """Get monthly sales AND expenses data for a specific year, optionally filtered by store"""
     now = datetime.now(timezone.utc)
     target_year = year if year else now.year
     
     year_start = datetime(target_year, 1, 1, tzinfo=timezone.utc)
     year_end = datetime(target_year + 1, 1, 1, tzinfo=timezone.utc)
     
-    orders = await db.orders.find({
+    orders_query = {
         "status": {"$in": ["ready", "delivered", "received"]},
         "created_at": {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
-    }, {"_id": 0, "created_at": 1, "total": 1}).to_list(100000)
+    }
+    if store and store != "all":
+        orders_query["store"] = store
+    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1}).to_list(100000)
     
-    expenses = await db.expenses.find({
+    expenses_query = {
         "created_at": {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
-    }, {"_id": 0}).to_list(10000)
+    }
+    if store and store != "all":
+        expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
+    expenses = await db.expenses.find(expenses_query, {"_id": 0}).to_list(10000)
     
     month_names = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
     monthly_data = {}
