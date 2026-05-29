@@ -1,0 +1,48 @@
+{
+  "summary": "Validated iteration-4 prazo customer lookup fixes — backend (cross-store fallback + accent-insensitive) and frontend (label text + immediate list + cross-store badge). 7/7 backend tests pass; all 4 frontend assertions pass on the gym-londres CheckoutModal.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "CheckoutModal prazo customer list",
+        "issue": "Store badge has no left margin/space — name and badge run together (e.g. 'PATY DE PAULARunner' instead of 'PATY DE PAULA  Runner'). Confirmed in DOM text and screenshot.",
+        "selector": "[data-testid^='prazo-customer-'] span.badge / sibling element",
+        "priority": "LOW"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {
+        "screen": "CheckoutModal",
+        "issues": [
+          "Radix Dialog warnings in console: 'DialogContent requires a DialogTitle' and 'Missing Description or aria-describedby' — accessibility issue, fires on product details modal and checkout modal."
+        ]
+      }
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_prazo_lookup_iteration4_jan2026.py",
+    "/app/test_reports/pytest/iteration4_results.xml"
+  ],
+  "action_items": [
+    "Add a small margin/space between customer name and the store badge in CheckoutModal.js so 'PATY DE PAULA' and 'Runner' don't render glued together (cosmetic).",
+    "(Optional) Add DialogTitle/Description (or VisuallyHidden wrapper) to product details + checkout Dialog components to silence Radix a11y console warnings."
+  ],
+  "critical_code_review_comments": [
+    "Duplicate POST /prazo/customers handlers: server.py registers an auth-gated /prazo/customers (gestor required) while routers/prazo.py declares its own non-auth POST /customers under the same prefix. FastAPI uses the first match, so the unauthenticated router endpoint becomes unreachable — confirm this is intentional; otherwise remove the dead route.",
+    "server.py is 5849 lines — exceeds the 700-line guideline; recommend splitting into feature routers."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_prazo_lookup_iteration4_jan2026.py"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "100%"},
+  "test_credentials": "gestor / ganoh2024 (used by POST/DELETE /api/prazo/customers in the accent-insensitive test)",
+  "seed_data_creation": "Test creates and then deletes a TEST_Paulão customer in gym-londres inside test_lookup_accent_insensitive_paulao (auto-cleanup via try/finally).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend prazo lookup with cross-store fallback works as designed. Frontend CheckoutModal prazo flow verified end-to-end on gym-londres: clicking 'add-to-cart-X' opens a product details dialog → click 'Adicionar' to add → open via [data-testid=cart-button] → click [data-testid=checkout-button] → fill [data-testid=customer-name-input] → click [data-testid=payment-prazo] → list appears under [data-testid=prazo-search-input] with rows [data-testid^=prazo-customer-]. Only cosmetic issue: missing space between customer name and store badge.",
+  "rca of the issue": "Original bug: (a) hard-coded 2-char gate in JSX prevented the list from rendering until 2 chars typed; (b) backend lookup filtered strictly by store, so 'Pau' in gym-londres returned empty. Fix verified: gate removed, fallback returns runner customers when current store has no match, badge marks cross-store rows."
+}

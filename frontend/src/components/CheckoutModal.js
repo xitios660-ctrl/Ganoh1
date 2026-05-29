@@ -506,7 +506,7 @@ export const CheckoutModal = ({ isOpen, onClose, onSubmit, isLoading, store = 'r
 
                   <div className="space-y-2">
                     <Label className={`text-sm ${isDark ? 'text-white/60' : 'text-muted-foreground'}`}>
-                      Buscar cliente cadastrado (opcional, mínimo 2 letras)
+                      Buscar cliente cadastrado (opcional)
                     </Label>
 
                     {/* Search input for prazo customers - server-side, name-only */}
@@ -534,40 +534,43 @@ export const CheckoutModal = ({ isOpen, onClose, onSubmit, isLoading, store = 'r
                       )}
                     </div>
 
-                    {/* Result list - only shows when 2+ chars typed */}
-                    {prazoSearchTerm.trim().length >= 2 && (
-                      <div className={`max-h-48 overflow-y-auto rounded-lg ${isDark ? 'bg-white/[0.03] border border-white/10' : 'bg-black/[0.02]'}`}>
-                        {prazoCustomers.map((c) => (
-                          <button
-                            key={c.id}
-                            type="button"
-                            className={`w-full text-left px-3 py-2 transition-colors ${
-                              isDark ? 'text-white/90 hover:bg-white/[0.05]' : 'hover:bg-black/[0.04]'
-                            } ${
-                              selectedPrazoCustomer === c.name ? (isDark ? 'bg-amber-400/15 text-amber-200 font-medium' : 'bg-amber-50 text-amber-700 font-medium') : ''
-                            }`}
-                            onClick={() => {
-                              setSelectedPrazoCustomer(c.name);
-                              setCustomerName(c.name);
-                              setPrazoSearchTerm('');
-                            }}
-                            data-testid={`prazo-customer-${c.id}`}
-                          >
-                            {c.name}
-                            {c.phone_masked && (
-                              <span className={`text-xs ml-2 ${isDark ? 'text-white/40' : 'text-muted-foreground'}`}>
-                                ({c.phone_masked})
-                              </span>
-                            )}
-                          </button>
-                        ))}
-                        {prazoCustomers.length === 0 && (
-                          <p className={`px-3 py-2 text-sm ${isDark ? 'text-white/50' : 'text-muted-foreground'}`}>
-                            Nenhum cliente encontrado
-                          </p>
-                        )}
-                      </div>
-                    )}
+                    {/* Result list - shows as soon as Prazo is selected */}
+                    <div className={`max-h-48 overflow-y-auto rounded-lg ${isDark ? 'bg-white/[0.03] border border-white/10' : 'bg-black/[0.02]'}`}>
+                      {prazoCustomers.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          className={`w-full text-left px-3 py-2 transition-colors ${
+                            isDark ? 'text-white/90 hover:bg-white/[0.05]' : 'hover:bg-black/[0.04]'
+                          } ${
+                            selectedPrazoCustomer === c.name ? (isDark ? 'bg-amber-400/15 text-amber-200 font-medium' : 'bg-amber-50 text-amber-700 font-medium') : ''
+                          }`}
+                          onClick={() => {
+                            setSelectedPrazoCustomer(c.name);
+                            setCustomerName(c.name);
+                            setPrazoSearchTerm('');
+                          }}
+                          data-testid={`prazo-customer-${c.id}`}
+                        >
+                          {c.name}
+                          {c.store && c.store !== store && (
+                            <span className={`text-xs ml-2 px-1.5 py-0.5 rounded ${isDark ? 'bg-amber-400/15 text-amber-300' : 'bg-amber-100 text-amber-700'}`}>
+                              {c.store === 'runner' ? 'Runner' : 'GYM Londres'}
+                            </span>
+                          )}
+                          {c.phone_masked && (
+                            <span className={`text-xs ml-2 ${isDark ? 'text-white/40' : 'text-muted-foreground'}`}>
+                              ({c.phone_masked})
+                            </span>
+                          )}
+                        </button>
+                      ))}
+                      {prazoCustomers.length === 0 && (
+                        <p className={`px-3 py-2 text-sm ${isDark ? 'text-white/50' : 'text-muted-foreground'}`}>
+                          Nenhum cliente encontrado
+                        </p>
+                      )}
+                    </div>
 
                     {selectedPrazoCustomer && (
                       <p className={`text-xs ${isDark ? 'text-amber-300' : 'text-amber-600'}`}>

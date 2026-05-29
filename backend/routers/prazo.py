@@ -122,7 +122,8 @@ def _mask_phone(phone: str) -> str:
 @router.get("/customers/lookup")
 async def lookup_prazo_customers(q: str = "", store: str = None):
     """Public-facing search for prazo customers used in the checkout flow.
-    - Returns all customers (limited to 50) when `q` is empty.
+    - Returns customers from the current store first; falls back to ALL stores when
+      a search query is provided and the store-filtered set is empty.
     - Accent-insensitive name match: typing "paulao" matches "Paulão".
     - Masks phone numbers (only last 4 digits visible).
     """
@@ -136,19 +137,26 @@ async def lookup_prazo_customers(q: str = "", store: str = None):
         return no_diacritics.casefold()
 
     q = (q or "").strip()
-    query = {}
-    if store:
-        query["store"] = store
-
-    # Fetch a generous slice and filter in Python for diacritic-insensitive match.
-    docs = await db.prazo_customers.find(
-        query,
-        {"_id": 0, "id": 1, "name": 1, "phone": 1, "store": 1}
-    ).sort("name", 1).to_list(500)
-
     q_norm = _normalize(q)
-    if q_norm:
-        docs = [d for d in docs if q_norm in _normalize(d.get("name", ""))]
+
+    async def _fetch(store_filter):
+        query = {}
+        if store_filter:
+            query["store"] = store_filter
+        docs_ = await db.prazo_customers.find(
+            query,
+            {"_id": 0, "id": 1, "name": 1, "phone": 1, "store": 1}
+        ).sort("name", 1).to_list(500)
+        if q_norm:
+            docs_ = [d for d in docs_ if q_norm in _normalize(d.get("name", ""))]
+        return docs_
+
+    # 1) prefer customers from the current store
+    docs = await _fetch(store) if store else await _fetch(None)
+
+    # 2) if user is searching and got no hits, broaden to all stores
+    if q_norm and not docs and store:
+        docs = await _fetch(None)
 
     docs = docs[:50]
 
