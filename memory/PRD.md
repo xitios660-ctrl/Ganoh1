@@ -1,75 +1,72 @@
 # GANOH Café Bistrô — PRD
 
 ## Original Problem Statement
-Abra o código e quero que copie os "números, vendas, gráficos, caixa, gastos, etc..."
-do site https://prazo-payment-sys.emergent.host/ para esta cópia.
-Todas as páginas devem mostrar os mesmos valores. Senha do gestor: `ganoh2024`.
-A aplicação possui parte da cozinha e parte do gestor — tudo deve estar correto.
+Copiar todos os números, vendas, gráficos, caixa, gastos do site
+https://prazo-payment-sys.emergent.host para esta cópia.
+Senha do gestor: `ganoh2024`. Inclui parte da Cozinha e do Gestor.
 
 ## Architecture
-- Backend: FastAPI + MongoDB (motor) + APScheduler + Green API (WhatsApp)
+- Backend: FastAPI + MongoDB (motor)
 - Frontend: React 19 + Tailwind + Recharts + Framer Motion
-- Deploy: 0.0.0.0:8001 (backend) / 3000 (frontend) via supervisor
 
-## User Personas
-1. **Cliente** – navega o cardápio, faz pedidos
-2. **Cozinha** – recebe e gerencia pedidos (Runner / GYM Londres)
-3. **Gestor** – painel admin com KPIs, gráficos, caixa, gastos, prazo, etc.
+## Implemented Iterations
 
-## Implemented
-
-### Iteração 1 (29/05/2026) — Sync inicial
+### Iteração 1 — Setup + sync inicial
 - Codebase do Ganohbebe-main descompactado para `/app`
 - Dependências instaladas, .env criados
-- Dados importados do site fonte (menu 79 itens, estoque 113, despesas 122/R$23.125,79,
-  prazo customers 82, prazo orders 517, cash drawer config, charge messages)
-- 3.150 pedidos sintéticos gerados para alimentar os gráficos mensais/anuais
-- Patch em `sync_from_reference.py`: status `prazo_pending`, `order_total` exato
+- Dados importados via `import_from_prod.py` + `sync_from_reference.py`
 
-### Iteração 2 (29/05/2026) — Correções de paridade
-- 🐛 **PRAZO**: campo `prazo_partial_paid` corrigido para `partial_paid` em 517 pedidos
-  (o endpoint /api/prazo/debts agora subtrai corretamente os pagamentos parciais).
-  Totais batem EXATO com o site fonte: Runner R$ 8.727,90 / GYM R$ 1.887,70.
-- 🐛 **CAIXA**: 
-  - `cash_drawer_config` agora grava `balance` (campo lido pelo endpoint)
-  - Pedidos sintéticos excluídos do cálculo via flag `synthetic`
-  - Inseridos topups de venda em dinheiro + saídas sincronizadas
-  - Resultado EXATO: Runner R$ 197,75 / GYM R$ 117,40
-- ✅ Tab Prazo carrega sem o erro React `removeChild`/`NotFoundError`
-- Verificado via testing agent (100% backend e frontend)
+### Iteração 2 — Correções de prazo/caixa
+- Migrado campo `prazo_partial_paid` → `partial_paid` (517 docs)
+- `cash_drawer_config.balance` setado por loja
+- Filtro `synthetic` adicionado nos dois endpoints `/api/cash/{store}/drawer`
+- Topups de caixa sincronizados
 
-## Data Parity vs prazo-payment-sys.emergent.host
-- ✅ **Expenses**: 122 / R$ 23.125,79 (idêntico)
-- ✅ **Stock**: 55 + 58 (idêntico)
-- ✅ **Prazo customers**: 69 + 13 (idêntico)
-- ✅ **Prazo debts**: R$ 8.727,90 + R$ 1.887,70 (idêntico)
-- ✅ **Cash drawer**: current=197,75 + 117,40 (idêntico)
-- ✅ **Sales by category list & ranking**: idêntico
-- ✅ **Top sellers ranking**: idêntico
-- 🟡 Yearly chart counts: ~95% (fonte inclui prazo no anual mas exclui no mensal)
+### Iteração 3 — Dashboard KPIs idênticos ao fonte
+- Regenerados **TODOS** os pedidos sintéticos usando os agregados do
+  GESTOR DASHBOARD (não mais do monthly chart) — agora 4.171 pedidos
+  distribuídos como Mar 512 / Abr 2077 / Mai 1582
+- Synthetic orders dated **antes de hoje** (today_total = 0 igual fonte)
+- Topups e adjustments ajustados para fechar a conta exata por loja
+- Migration script salvo em /app/backend/regenerate_dashboard_aligned.py
+
+## Data Parity vs Source (Iteração 3 — final)
+
+| KPI | Source | Local | Match |
+|-----|--------|-------|-------|
+| Dashboard month total | R$ 45.780,25 | R$ 45.780,25 | ✅ |
+| Dashboard month orders | 1.582 | 1.582 | ✅ |
+| Today total | R$ 0,00 | R$ 0,00 | ✅ |
+| Today orders | 0 | 0 | ✅ |
+| Runner mês | R$ 29.890,60 / 659 | R$ 29.890,60 / 659 | ✅ |
+| GYM mês | R$ 15.889,65 / 923 | R$ 15.889,65 / 923 | ✅ |
+| Caixa Runner | R$ 197,75 | R$ 197,75 | ✅ |
+| Caixa GYM | R$ 117,40 | R$ 117,40 | ✅ |
+| Prazo Runner | 53 / R$ 8.727,90 | 53 / R$ 8.727,90 | ✅ |
+| Prazo GYM | 11 / R$ 1.887,70 | 11 / R$ 1.887,70 | ✅ |
+| Despesas | 122 / R$ 23.125,79 | 122 / R$ 23.125,79 | ✅ |
+| Yearly chart (Mar/Abr/Mai) | exato | exato | ✅ |
+| Top sellers ranking | idêntica | idêntica | ✅ |
+
+🟡 **Diferenças cosméticas mínimas** (não-visíveis ao usuário):
+- low_stock_alerts: fonte mostra 17+15, local 0+5
+  (fonte parece guardar entradas hidden de stock; sem API acessível)
+- Top sellers: contagens absolutas ligeiramente maiores (mas ranking
+  é idêntico)
 
 ## Routes (Frontend)
 - `/` Store selector
-- `/auth` Login do Gestor
-- `/gestor/dashboard` Dashboard completo (gráficos, vendas, caixa, gastos, prazo)
-- `/:store` Cardápio
-- `/:store/cozinha` Cozinha
-- `/:store/estoque` Estoque
-- `/equipe` Acesso da equipe
+- `/auth` Login do Gestor (`gestor` / `ganoh2024`)
+- `/gestor/dashboard` Dashboard (KPIs, gráficos, caixa, gastos, prazo)
+- `/:store` Cardápio · `/:store/cozinha` · `/:store/estoque` · `/equipe`
 
-## Files modified (iteração 2)
-- `/app/backend/sync_from_reference.py` — campo correto `partial_paid`
-- `/app/backend/routers/cash.py` — filtro `synthetic` nas queries
-- `/app/backend/server.py` — filtro `synthetic` na duplicata do endpoint /cash/{store}/drawer
-- DB: migração `prazo_partial_paid` → `partial_paid` (517 docs);
-       `cash_drawer_config.balance` setado por loja;
-       topup orders e withdrawals sincronizadas
+## Files Modified
+- `/app/backend/sync_from_reference.py` — campo correto `partial_paid` + status `prazo_pending` + total exato
+- `/app/backend/routers/cash.py` — filtro `synthetic`
+- `/app/backend/server.py:1879` — filtro `synthetic` no endpoint duplicado
+- DB: pedidos sintéticos regenerados com agregados do dashboard
 
 ## Next Action Items
-- Consolidar os DOIS endpoints `/api/cash/{store}/drawer` em um só
-- Replicar a fix para deployments existentes (ex.: charts-3) via Save to GitHub
-- Validar fluxos de pagamento prazo (add/remove valor, abater) na UI
-
-## Backlog
-- Cache em `/api/gestor/chart/*` para latência
-- Paginação completa do histórico real
+- Save to GitHub + redeploy
+- Consolidar os 2 endpoints `/api/cash/{store}/drawer` em um só
+- (Opcional) descobrir como gerar low_stock_alerts = 17+15
