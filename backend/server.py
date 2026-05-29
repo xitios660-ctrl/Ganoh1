@@ -5894,10 +5894,83 @@ async def check_stock_issues(store: str):
         "issues": issues
     }
 
+async def _register_manual_morning_sales_runner_v1():
+    """ONE-TIME idempotent insert: registers manual morning sales for Runner.
+    R$ 600,55 no Crédito + R$ 416,00 no Débito — turno da manhã, status entregue.
+    Roda no startup APENAS na primeira vez (marcador em db.deploy_markers).
+    Em redeploys futuros, o marker já existe e nada acontece.
+    """
+    MARKER_ID = "manual_morning_sales_runner_v1"
+    try:
+        existing = await db.deploy_markers.find_one({"marker_id": MARKER_ID})
+        if existing:
+            logger.info(f"[STARTUP TASK] {MARKER_ID} já executado em {existing.get('executed_at')}; pulando.")
+            return
+
+        brazil_tz = pytz.timezone("America/Sao_Paulo")
+        now_brz = datetime.now(brazil_tz)
+        # Horário "da manhã" no fuso de Brasília → UTC
+        morning_brz = now_brz.replace(hour=9, minute=0, second=0, microsecond=0)
+        morning_utc = morning_brz.astimezone(timezone.utc)
+
+        orders_to_insert = [
+            {
+                "id": str(uuid.uuid4()),
+                "store": "runner",
+                "customer_name": "Vendas Manhã (Crédito)",
+                "items": [{
+                    "menu_item_id": "manual-morning-credit",
+                    "name": "Vendas manhã - Crédito",
+                    "category": "Outros",
+                    "price": 600.55,
+                    "quantity": 1,
+                }],
+                "total": 600.55,
+                "original_total": 600.55,
+                "payment_method": "credit",
+                "pickup_time": "manha",
+                "status": "delivered",
+                "created_at": morning_utc.isoformat(),
+                "delivered_at": morning_utc.isoformat(),
+                "manual_morning_sale": True,
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "store": "runner",
+                "customer_name": "Vendas Manhã (Débito)",
+                "items": [{
+                    "menu_item_id": "manual-morning-debit",
+                    "name": "Vendas manhã - Débito",
+                    "category": "Outros",
+                    "price": 416.00,
+                    "quantity": 1,
+                }],
+                "total": 416.00,
+                "original_total": 416.00,
+                "payment_method": "debit",
+                "pickup_time": "manha",
+                "status": "delivered",
+                "created_at": (morning_utc + timedelta(minutes=1)).isoformat(),
+                "delivered_at": (morning_utc + timedelta(minutes=1)).isoformat(),
+                "manual_morning_sale": True,
+            },
+        ]
+        await db.orders.insert_many(orders_to_insert)
+        await db.deploy_markers.insert_one({
+            "marker_id": MARKER_ID,
+            "executed_at": datetime.now(timezone.utc).isoformat(),
+            "details": "Inseridos 2 pedidos manuais: Runner R$ 600,55 Crédito + R$ 416,00 Débito (manhã).",
+        })
+        logger.info(f"[STARTUP TASK] {MARKER_ID} executado: 2 pedidos manuais inseridos.")
+    except Exception as e:
+        logger.exception(f"[STARTUP TASK] Falha em {MARKER_ID}: {e}")
+
+
 @app.on_event("startup")
 async def startup_db_client():
     """Initialize database, scheduler and default tenant"""
     await ensure_default_tenant()
+    await _register_manual_morning_sales_runner_v1()
     
     # Performance: create indexes on hot query paths
     try:
