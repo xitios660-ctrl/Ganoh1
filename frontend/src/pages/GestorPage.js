@@ -91,7 +91,7 @@ export const GestorPage = () => {
   const [prazoCustomers, setPrazoCustomers] = useState([]);
   const [prazoDebts, setPrazoDebts] = useState({ debts: [], total_prazo: 0 });
   const [showPrazoDialog, setShowPrazoDialog] = useState(false);
-  const [newPrazoCustomer, setNewPrazoCustomer] = useState({ name: '', phone: '', notes: '' });
+  const [newPrazoCustomer, setNewPrazoCustomer] = useState({ name: '', phone: '', notes: '', store: 'runner' });
   
   // Chart view mode
   const [chartViewMode, setChartViewMode] = useState('month'); // 'month' or 'group'
@@ -411,7 +411,7 @@ export const GestorPage = () => {
       });
       toast.success('Cliente cadastrado!');
       setShowPrazoDialog(false);
-      setNewPrazoCustomer({ name: '', phone: '', notes: '' });
+      setNewPrazoCustomer({ name: '', phone: '', notes: '', store: 'runner' });
       fetchPrazoData();
     } catch (error) {
       toast.error(error.response?.data?.detail || 'Erro ao cadastrar');
@@ -2344,14 +2344,32 @@ export const GestorPage = () => {
                 placeholder="Ex: Paga toda sexta"
               />
             </div>
+            <div>
+              <Label>Loja *</Label>
+              <Select 
+                value={newPrazoCustomer.store} 
+                onValueChange={(v) => setNewPrazoCustomer({...newPrazoCustomer, store: v})}
+              >
+                <SelectTrigger data-testid="prazo-new-customer-store">
+                  <SelectValue placeholder="Selecione a loja" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="runner">🏃 Runner</SelectItem>
+                  <SelectItem value="gym-londres">🏋️ GYM Londres</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground mt-1">
+                O cliente aparecerá no Prazo (Fiado) dessa loja na hora do pedido.
+              </p>
+            </div>
             <div className="flex gap-2">
-              <Button variant="outline" className="flex-1" onClick={() => { setShowPrazoDialog(false); setNewPrazoCustomer({ name: '', phone: '', notes: '' }); }}>
+              <Button variant="outline" className="flex-1" onClick={() => { setShowPrazoDialog(false); setNewPrazoCustomer({ name: '', phone: '', notes: '', store: 'runner' }); }}>
                 Cancelar
               </Button>
               <Button 
                 className="flex-1 bg-amber-600 hover:bg-amber-700" 
                 onClick={handleAddPrazoCustomer}
-                disabled={!newPrazoCustomer.name}
+                disabled={!newPrazoCustomer.name || !newPrazoCustomer.store}
               >
                 Cadastrar
               </Button>

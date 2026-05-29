@@ -661,18 +661,17 @@ def _normalize_name(name: str) -> str:
     return (name or "").strip().lower()
 
 # Test-data / promotional items that should be hidden from the public menu
-# (low-value placeholders typically used during development)
-TEST_ITEM_NAME_TOKENS = ("promo", "promoção", "promocao", "teste", "placeholder")
-TEST_ITEM_MAX_PRICE = 1.0  # items priced under R$1 in 'Outros' / unknown categories
+# Only filter by explicit name tokens. Do NOT filter by price - small items like
+# candies (chiclete R$0.50) are legitimate products.
+TEST_ITEM_NAME_TOKENS = ("placeholder",)
 
 def _is_test_item(item: dict) -> bool:
-    """Identify likely test/promo items so they can be hidden in production."""
+    """Identify likely test/placeholder items so they can be hidden in production.
+    Conservative: matches only explicit name tokens. Low-price legitimate items
+    (e.g. candies) must remain visible.
+    """
     name_low = (item.get("name") or "").lower()
-    price = float(item.get("price") or 0)
     if any(tok in name_low for tok in TEST_ITEM_NAME_TOKENS):
-        return True
-    # Below R$1.00 - almost certainly a placeholder
-    if price > 0 and price < TEST_ITEM_MAX_PRICE:
         return True
     return False
 
@@ -3259,10 +3258,14 @@ async def get_prazo_customers(store: str = None):
 @api_router.post("/prazo/customers")
 async def create_prazo_customer(customer: PrazoCustomerCreate, username: str = Depends(verify_gestor)):
     """Register a new prazo customer"""
-    # Check if customer already exists
-    existing = await db.prazo_customers.find_one({"name": {"$regex": f"^{customer.name}$", "$options": "i"}})
+    # Check if customer already exists IN THIS STORE
+    # (Same name allowed in different stores - e.g. "Paulão" can exist in both Runner and GYM Londres)
+    existing = await db.prazo_customers.find_one({
+        "name": {"$regex": f"^{customer.name}$", "$options": "i"},
+        "store": customer.store
+    })
     if existing:
-        raise HTTPException(status_code=400, detail="Cliente já cadastrado")
+        raise HTTPException(status_code=400, detail="Cliente já cadastrado nesta loja")
     
     new_customer = {
         "id": str(uuid.uuid4()),
@@ -4729,7 +4732,9 @@ Obrigado! ☕"""
 # ==================== UPDATED CHART DATA WITH EXPENSES ====================
 @api_router.get("/gestor/chart/monthly-with-expenses")
 async def get_monthly_chart_with_expenses(month: int = None, year: int = None, store: str = None, username: str = Depends(verify_gestor)):
-    """Get daily sales AND expenses data for a specific month, optionally filtered by store"""
+    """Get daily sales AND expenses data for a specific month, optionally filtered by store.
+    Revenue = order totals (excl. prazo) + PIX manual adjustments + prazo payments received.
+    """
     now = datetime.now(timezone.utc)
     
     target_month = month if month else now.month
@@ -4747,12 +4752,12 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
     
     # Get all completed orders this month (filter by store if provided)
     orders_query = {
-        "status": {"$in": ["ready", "delivered", "received"]},
+        "status": {"$in": ["ready", "delivered", "received", "preparing"]},
         "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
     }
     if store and store != "all":
         orders_query["store"] = store
-    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "store": 1}).to_list(10000)
+    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "store": 1, "payment_method": 1}).to_list(10000)
     
     # Get all expenses this month (filter by store if provided)
     expenses_query = {
@@ -4761,6 +4766,25 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
     if store and store != "all":
         expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
     expenses = await db.expenses.find(expenses_query, {"_id": 0}).to_list(1000)
+
+    # PIX manual adjustments (real revenue not represented as orders)
+    pix_query = {
+        "removed": {"$ne": True},
+        "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
+    }
+    if store and store != "all":
+        pix_query["store"] = store
+    pix_adjustments = await db.pix_adjustments.find(pix_query, {"_id": 0}).to_list(10000)
+
+    # Prazo payments (cash actually received from customers paying their debt)
+    prazo_query = {
+        "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
+    }
+    if store and store != "all":
+        prazo_query["store"] = store
+    prazo_payments = await db.prazo_payments.find(prazo_query, {"_id": 0}).to_list(10000)
+    prazo_partial_payments = await db.prazo_partial_payments.find(prazo_query, {"_id": 0}).to_list(10000)
+    all_prazo_payments = prazo_payments + prazo_partial_payments
     
     # Group by day
     daily_data = {}
@@ -4778,10 +4802,23 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
         }
     
     for order in orders:
+        # Skip prazo orders - they're not real revenue until paid
+        if order.get("payment_method") == "prazo":
+            continue
         date = order.get("created_at", "")[:10]
         if date in daily_data:
             daily_data[date]["revenue"] += order.get("total", 0)
             daily_data[date]["order_count"] += 1
+
+    for adj in pix_adjustments:
+        date = adj.get("created_at", "")[:10]
+        if date in daily_data:
+            daily_data[date]["revenue"] += adj.get("amount", 0)
+
+    for payment in all_prazo_payments:
+        date = payment.get("created_at", "")[:10]
+        if date in daily_data:
+            daily_data[date]["revenue"] += payment.get("amount", 0)
     
     for exp in expenses:
         date = exp.get("created_at", "")[:10]
@@ -4823,7 +4860,9 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
 
 @api_router.get("/gestor/chart/daily-with-expenses")
 async def get_daily_chart_with_expenses(date: str = None, store: str = None, username: str = Depends(verify_gestor)):
-    """Get hourly sales AND expenses data for a specific day, optionally filtered by store"""
+    """Get hourly sales AND expenses data for a specific day, optionally filtered by store.
+    Revenue = order totals (excl. prazo) + PIX manual adjustments + prazo payments received.
+    """
     now = datetime.now(timezone.utc)
     
     if date:
@@ -4836,12 +4875,12 @@ async def get_daily_chart_with_expenses(date: str = None, store: str = None, use
     
     # Get orders and expenses for this day (filter by store if provided)
     orders_query = {
-        "status": {"$in": ["ready", "delivered", "received"]},
+        "status": {"$in": ["ready", "delivered", "received", "preparing"]},
         "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
     }
     if store and store != "all":
         orders_query["store"] = store
-    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1}).to_list(10000)
+    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "payment_method": 1}).to_list(10000)
     
     expenses_query = {
         "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
@@ -4849,6 +4888,24 @@ async def get_daily_chart_with_expenses(date: str = None, store: str = None, use
     if store and store != "all":
         expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
     expenses = await db.expenses.find(expenses_query, {"_id": 0}).to_list(1000)
+
+    # PIX manual adjustments + Prazo payments
+    pix_query = {
+        "removed": {"$ne": True},
+        "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
+    }
+    if store and store != "all":
+        pix_query["store"] = store
+    pix_adjustments = await db.pix_adjustments.find(pix_query, {"_id": 0}).to_list(10000)
+
+    prazo_query = {
+        "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
+    }
+    if store and store != "all":
+        prazo_query["store"] = store
+    prazo_payments = await db.prazo_payments.find(prazo_query, {"_id": 0}).to_list(10000)
+    prazo_partial_payments = await db.prazo_partial_payments.find(prazo_query, {"_id": 0}).to_list(10000)
+    all_prazo_payments = prazo_payments + prazo_partial_payments
     
     # Group by hour
     hourly_data = {}
@@ -4862,11 +4919,30 @@ async def get_daily_chart_with_expenses(date: str = None, store: str = None, use
         }
     
     for order in orders:
+        # Skip prazo orders - they're not real revenue until paid
+        if order.get("payment_method") == "prazo":
+            continue
         try:
             order_time = datetime.fromisoformat(order.get("created_at", "").replace("Z", "+00:00"))
             brazil_hour = (order_time.hour - 3) % 24
             hourly_data[brazil_hour]["revenue"] += order.get("total", 0)
             hourly_data[brazil_hour]["order_count"] += 1
+        except:
+            pass
+
+    for adj in pix_adjustments:
+        try:
+            adj_time = datetime.fromisoformat(adj.get("created_at", "").replace("Z", "+00:00"))
+            brazil_hour = (adj_time.hour - 3) % 24
+            hourly_data[brazil_hour]["revenue"] += adj.get("amount", 0)
+        except:
+            pass
+
+    for payment in all_prazo_payments:
+        try:
+            p_time = datetime.fromisoformat(payment.get("created_at", "").replace("Z", "+00:00"))
+            brazil_hour = (p_time.hour - 3) % 24
+            hourly_data[brazil_hour]["revenue"] += payment.get("amount", 0)
         except:
             pass
     
@@ -4898,7 +4974,9 @@ async def get_daily_chart_with_expenses(date: str = None, store: str = None, use
 
 @api_router.get("/gestor/chart/yearly-with-expenses")
 async def get_yearly_chart_with_expenses(year: int = None, store: str = None, username: str = Depends(verify_gestor)):
-    """Get monthly sales AND expenses data for a specific year, optionally filtered by store"""
+    """Get monthly sales AND expenses data for a specific year, optionally filtered by store.
+    Revenue = order totals (excl. prazo) + PIX manual adjustments + prazo payments received.
+    """
     now = datetime.now(timezone.utc)
     target_year = year if year else now.year
     
@@ -4906,12 +4984,12 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
     year_end = datetime(target_year + 1, 1, 1, tzinfo=timezone.utc)
     
     orders_query = {
-        "status": {"$in": ["ready", "delivered", "received"]},
+        "status": {"$in": ["ready", "delivered", "received", "preparing"]},
         "created_at": {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
     }
     if store and store != "all":
         orders_query["store"] = store
-    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1}).to_list(100000)
+    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "payment_method": 1}).to_list(100000)
     
     expenses_query = {
         "created_at": {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
@@ -4919,6 +4997,24 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
     if store and store != "all":
         expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
     expenses = await db.expenses.find(expenses_query, {"_id": 0}).to_list(10000)
+
+    # PIX manual adjustments + Prazo payments
+    pix_query = {
+        "removed": {"$ne": True},
+        "created_at": {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
+    }
+    if store and store != "all":
+        pix_query["store"] = store
+    pix_adjustments = await db.pix_adjustments.find(pix_query, {"_id": 0}).to_list(100000)
+
+    prazo_query = {
+        "created_at": {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
+    }
+    if store and store != "all":
+        prazo_query["store"] = store
+    prazo_payments = await db.prazo_payments.find(prazo_query, {"_id": 0}).to_list(100000)
+    prazo_partial_payments = await db.prazo_partial_payments.find(prazo_query, {"_id": 0}).to_list(100000)
+    all_prazo_payments = prazo_payments + prazo_partial_payments
     
     month_names = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
     monthly_data = {}
@@ -4933,10 +5029,27 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
         }
     
     for order in orders:
+        # Skip prazo orders - they're not real revenue until paid
+        if order.get("payment_method") == "prazo":
+            continue
         try:
             order_date = datetime.fromisoformat(order.get("created_at", "").replace("Z", "+00:00"))
             monthly_data[order_date.month]["revenue"] += order.get("total", 0)
             monthly_data[order_date.month]["order_count"] += 1
+        except:
+            pass
+
+    for adj in pix_adjustments:
+        try:
+            adj_date = datetime.fromisoformat(adj.get("created_at", "").replace("Z", "+00:00"))
+            monthly_data[adj_date.month]["revenue"] += adj.get("amount", 0)
+        except:
+            pass
+
+    for payment in all_prazo_payments:
+        try:
+            p_date = datetime.fromisoformat(payment.get("created_at", "").replace("Z", "+00:00"))
+            monthly_data[p_date.month]["revenue"] += payment.get("amount", 0)
         except:
             pass
     
