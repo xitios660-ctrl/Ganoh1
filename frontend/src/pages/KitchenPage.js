@@ -966,13 +966,13 @@ export const KitchenPage = () => {
       const response = await axios.post(`${API}/prazo/customers/${creditCustomer.id}/add-credit`, {
         amount: parseFloat(creditAmount)
       });
-      toast.success(response.data.message);
+      toast.success(response.data.message, { duration: 5000 });
       setShowAddCreditDialog(false);
       setCreditCustomer(null);
       setCreditAmount('');
       fetchData();
     } catch (error) {
-      toast.error('Erro ao adicionar crédito');
+      toast.error(error?.response?.data?.detail || 'Erro ao adicionar crédito');
     }
   };
 
@@ -2520,6 +2520,11 @@ export const KitchenPage = () => {
                   className="h-10 text-lg"
                   autoFocus
                 />
+                <p className="text-[11px] text-muted-foreground mt-1.5 leading-tight">
+                  💡 Se o cliente tiver pedidos prazo em aberto, o valor abate
+                  automaticamente da dívida (do mais antigo p/ o mais recente).
+                  Só o que sobrar entra como crédito.
+                </p>
               </div>
               
               <div className="flex gap-2">

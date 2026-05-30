@@ -3630,6 +3630,35 @@ async def add_prazo_credit(customer_id: str, credit_data: PrazoCreditAdd):
         {"$set": {"credit": new_credit}},
     )
 
+    # Audit log entry (mirrors routers/prazo.py _log_prazo_event)
+    try:
+        notes_parts = []
+        if applied_to_debt > 0:
+            notes_parts.append(
+                f"Abatido R$ {applied_to_debt:.2f} de {orders_paid_off} pedido(s) liquidados"
+                if orders_paid_off
+                else f"Abatido R$ {applied_to_debt:.2f} em pedido(s) pendente(s)"
+            )
+        if remaining > 0:
+            notes_parts.append(f"R$ {remaining:.2f} para o saldo de crédito")
+        if credit_data.notes:
+            notes_parts.append(credit_data.notes)
+        await db.prazo_history.insert_one({
+            "id": str(uuid.uuid4()),
+            "customer_id": customer_id,
+            "customer_name": name,
+            "store": customer.get("store", ""),
+            "event_type": "credit_added",
+            "amount": float(amount),
+            "previous_credit": float(previous_credit),
+            "new_credit": float(new_credit),
+            "credit_generated": float(remaining),
+            "notes": " | ".join(notes_parts) if notes_parts else None,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception as _e:
+        logger.warning(f"prazo_history insert failed: {_e}")
+
     if applied_to_debt > 0 and remaining > 0:
         msg = (
             f"R$ {amount:.2f} adicionados! Abatido R$ {applied_to_debt:.2f} da dívida "
