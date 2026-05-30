@@ -3209,6 +3209,7 @@ class PrazoPayment(BaseModel):
 
 class PrazoCreditAdd(BaseModel):
     amount: float  # Valor a adicionar ao crédito
+    notes: Optional[str] = ""
 
 class PrazoAbaterRequest(BaseModel):
     amount: float  # Valor a abater da dívida
@@ -3551,25 +3552,107 @@ async def delete_single_prazo_debt(order_id: str, password: str = None):
 
 @api_router.post("/prazo/customers/{customer_id}/add-credit")
 async def add_prazo_credit(customer_id: str, credit_data: PrazoCreditAdd):
-    """Add credit to a prazo customer's account"""
+    """Add credit to a prazo customer's account.
+    AUTO-APPLY behaviour:
+      1. The amount first settles UNPAID prazo orders (FIFO — oldest first).
+         Each order has its `partial_paid` increased; when fully covered it
+         is marked `prazo_paid=True`.
+      2. Whatever is left over goes to the customer's `credit` balance.
+      3. Result: customer never has BOTH a debt AND a positive credit at once.
+    """
     customer = await db.prazo_customers.find_one({"id": customer_id})
     if not customer:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
-    
-    current_credit = customer.get("credit", 0)
-    new_credit = current_credit + credit_data.amount
-    
+
+    amount = float(credit_data.amount or 0)
+    if amount <= 0:
+        raise HTTPException(status_code=400, detail="Valor deve ser maior que zero")
+
+    name = customer["name"]
+    previous_credit = float(customer.get("credit", 0) or 0)
+
+    unpaid_orders = await db.orders.find(
+        {
+            "customer_name": {"$regex": f"^{name}$", "$options": "i"},
+            "payment_method": "prazo",
+            "prazo_paid": {"$ne": True},
+        },
+        {"_id": 0, "id": 1, "total": 1, "partial_paid": 1, "created_at": 1, "store": 1},
+    ).sort("created_at", 1).to_list(1000)
+
+    remaining = amount
+    applied_to_debt = 0.0
+    orders_paid_off = 0
+    payment_records = []
+
+    for order in unpaid_orders:
+        if remaining <= 0:
+            break
+        already_paid = float(order.get("partial_paid", 0) or 0)
+        order_total = float(order.get("total", 0) or 0)
+        debt = round(order_total - already_paid, 2)
+        if debt <= 0:
+            continue
+        apply = round(min(remaining, debt), 2)
+        new_partial = round(already_paid + apply, 2)
+        is_paid = new_partial >= round(order_total - 0.005, 2)
+
+        update_set = {"partial_paid": new_partial}
+        if is_paid:
+            update_set["prazo_paid"] = True
+            update_set["paid_at"] = datetime.now(timezone.utc).isoformat()
+            orders_paid_off += 1
+
+        await db.orders.update_one({"id": order["id"]}, {"$set": update_set})
+
+        payment_records.append({
+            "id": str(uuid.uuid4()),
+            "customer_id": customer_id,
+            "customer_name": name,
+            "store": order.get("store", customer.get("store", "")),
+            "order_id": order["id"],
+            "amount": apply,
+            "type": "partial_payment",
+            "source": "credit_auto_apply",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "notes": credit_data.notes or "Abate automático ao adicionar crédito",
+        })
+
+        remaining = round(remaining - apply, 2)
+        applied_to_debt = round(applied_to_debt + apply, 2)
+
+    if payment_records:
+        await db.prazo_partial_payments.insert_many(payment_records)
+
+    new_credit = round(previous_credit + remaining, 2)
     await db.prazo_customers.update_one(
         {"id": customer_id},
-        {"$set": {"credit": new_credit}}
+        {"$set": {"credit": new_credit}},
     )
-    
+
+    if applied_to_debt > 0 and remaining > 0:
+        msg = (
+            f"R$ {amount:.2f} adicionados! Abatido R$ {applied_to_debt:.2f} da dívida "
+            f"e R$ {remaining:.2f} foi para o saldo (atual: R$ {new_credit:.2f})."
+        )
+    elif applied_to_debt > 0:
+        msg = (
+            f"R$ {amount:.2f} adicionados — abateu R$ {applied_to_debt:.2f} da dívida"
+            + (f" ({orders_paid_off} pedido(s) quitado(s))" if orders_paid_off else "")
+            + f". Saldo de crédito: R$ {new_credit:.2f}"
+        )
+    else:
+        msg = f"Crédito adicionado! Saldo: R$ {new_credit:.2f}"
+
     return {
-        "success": True, 
-        "message": f"Crédito adicionado! Saldo: R$ {new_credit:.2f}",
-        "previous_credit": current_credit,
-        "added": credit_data.amount,
-        "new_credit": new_credit
+        "success": True,
+        "message": msg,
+        "previous_credit": previous_credit,
+        "added": amount,
+        "applied_to_debt": applied_to_debt,
+        "orders_paid_off": orders_paid_off,
+        "remaining_credit_added": remaining,
+        "new_credit": new_credit,
     }
 
 @api_router.post("/prazo/customers/{customer_id}/use-credit")

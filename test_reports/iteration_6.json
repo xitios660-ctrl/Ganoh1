@@ -1,0 +1,37 @@
+{
+  "summary": "Backend-only validation of the auto-apply behavior of POST /api/prazo/customers/{id}/add-credit. Wrote 11 pytest cases covering FIFO debt settlement, excess-to-credit, no-debt full credit, invalid amounts, 404 path, prazo_partial_payments collection contents, debts endpoint reduction, customer credit reflection, post-clearance behavior, and case-insensitive name matching. All 11 tests passed (100%). TEST_ prefixed data fully cleaned up.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/prazo/customers/{id}", "issue": "Endpoint described in review request does not exist - only the list endpoint /api/prazo/customers is available. Tests use the list endpoint and filter by id. Not a blocker but worth adding a single-customer GET for cleaner frontend access."},
+      {"endpoint": "POST /api/prazo/customers/{id}/add-credit", "issue": "Endpoint has NO auth dependency (no Depends(verify_gestor)), unlike POST /api/prazo/customers which requires gestor auth. Inconsistent and a potential security gap - any caller can mutate customer credit balances and mark prazo orders as paid without credentials."},
+      {"endpoint": "POST /api/prazo/customers/{id}/add-credit", "issue": "No prazo_history audit log entry is written for the auto-apply event (the helper _log_prazo_event lives in routers/prazo.py and is not invoked in server.py). The duplicate endpoint in routers/prazo.py does log; this divergence makes audit incomplete since server.py is the one actually serving requests."}
+    ]
+  },
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [
+    "/app/backend/tests/test_prazo_add_credit_autoapply_jan2026.py",
+    "/app/test_reports/pytest/iteration_6_add_credit.xml"
+  ],
+  "action_items": [
+    "Consider adding @Depends(verify_gestor) to the add-credit endpoint at server.py:3553 for consistency with create/delete prazo customer endpoints.",
+    "Consider invoking _log_prazo_event (or an equivalent inline insert into db.prazo_history) inside the server.py add-credit endpoint so the auto-apply event is auditable.",
+    "Remove the duplicate add_prazo_credit definition in routers/prazo.py:233 (or wire only one of them through the router) to avoid future drift between the two implementations.",
+    "(Optional) Add GET /api/prazo/customers/{id} for cleaner frontend lookups."
+  ],
+  "critical_code_review_comments": [
+    "Duplicate endpoint definitions for add_prazo_credit in server.py (line 3553) and routers/prazo.py (line 233) — risk of behavioural drift. server.py wins routing today; the version in routers/prazo.py is dead code.",
+    "server.py is 6205 lines — significantly above the 700-line guideline. Several large feature areas (kitchen, prazo, gestor analytics) should be moved to focused routers; the prazo router file already exists and could absorb these endpoints.",
+    "add-credit endpoint lacks authentication while sibling write endpoints (POST/DELETE /api/prazo/customers, /api/prazo/pay/{order_id}) require it. Recommend gating the endpoint with verify_gestor or the PRAZO_PASSWORD pattern used by pay endpoints.",
+    "The FIFO sort is `created_at` ascending using ISO-8601 string comparison on the field as stored. This works because the codebase consistently writes UTC ISO timestamps, but if any historical order lacks created_at the comparison is undefined — consider a fallback (e.g. by _id) or schema validation."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_prazo_add_credit_autoapply_jan2026.py (new)"
+  ],
+  "success_rate": {"backend": "100%", "frontend": "N/A (frontend testing skipped per request)"},
+  "test_credentials": "gestor / ganoh2024 (read from /app/backend/.env)",
+  "seed_data_creation": "All test data prefixed with TEST_PRAZO_CRED_ and inserted/deleted within each test via autouse fixture. Mongo verified empty of prefix after run.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Reusable pytest file at /app/backend/tests/test_prazo_add_credit_autoapply_jan2026.py covers T1-T10 plus a duplicate-invalid-amount case. It uses direct MongoDB inserts for unpaid prazo orders since there's no convenient public endpoint to create them, and uses the gestor-authed /api/prazo/customers POST for customer setup. The add-credit endpoint itself currently has no auth requirement."
+}
