@@ -1,0 +1,48 @@
+{
+  "summary": "Verified the re.escape() fix for all prazo endpoints that match customers/orders by regex on customer_name. Tested 9 regex-special characters (including the production bug with parentheses), backwards compatibility for plain names, and negative cases. 14/14 pytest tests passing. Test data cleaned up.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {
+        "endpoint": "POST /api/prazo/abater/{customer_name}",
+        "issue": "Response uses 'paid' as the field name for the amount paid, but the duplicate router in routers/prazo.py uses 'amount_paid'. Frontend should tolerate both; otherwise schemas should be unified."
+      },
+      {
+        "endpoint": "Duplicate route registration",
+        "issue": "api_router.include_router(prazo.router) is included AFTER several /prazo/* routes are already declared in server.py (e.g., /prazo/abater, /prazo/pay-all/, /prazo/debt/, /prazo/customers/{id}/add-credit). FastAPI will match the first-declared one, so the duplicate handlers in routers/prazo.py are effectively dead code. Either remove the duplicates or move include_router above the server.py declarations. Not blocking, but means edits to routers/prazo.py for these paths have no effect in production."
+      },
+      {
+        "endpoint": "GET /api/prazo/customers/by-name/{customer_name}",
+        "issue": "Endpoint referenced in the review request does not exist in the codebase (no route handler found). If the frontend relies on it, it will 404. If unused, remove from the bug list."
+      }
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_prazo_regex_escape_jan2026.py",
+    "/app/test_reports/pytest/iteration_7_regex_escape.xml"
+  ],
+  "action_items": [
+    "Consider removing duplicate /prazo/* handlers in /app/backend/routers/prazo.py since the server.py versions shadow them. Edits to the router file (including re.escape fixes there) have no runtime effect because of the ordering of api_router.include_router(prazo.router) at line 6228.",
+    "Confirm whether GET /api/prazo/customers/by-name/{customer_name} is required (review request lists it but no handler exists)."
+  ],
+  "critical_code_review_comments": [
+    "server.py is 6235 lines — should be split into routers per domain (prazo, kitchen, orders, etc).",
+    "Multiple endpoints are duplicated in routers/prazo.py and server.py with diverging response schemas (e.g., 'paid' vs 'amount_paid'). This is fragile and confused the testing schema validation.",
+    "re.escape() is applied consistently to all 19 customer_name $regex patterns. Verified by grep: 12 in server.py and 7 in routers/prazo.py. No remaining unescaped patterns found for customer_name."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_prazo_regex_escape_jan2026.py (new)"
+  ],
+  "success_rate": {"backend": "100% (14/14 pytest)", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "gestor / ganoh2024 (HTTP Basic) + Prazo password 1234 — both worked",
+  "seed_data_creation": "Created and torn down 12 prazo customers + 12 prazo orders under names like 'TEST_PRZX_{run_hash}_Erick Ramos (personal)', 'TEST_PRZX_{run_hash}_Joao A.', 'TEST_PRZX_{run_hash}_TEST plus + extra', 'Cli [teste]', 'Star * Marcus', 'Quem? Carlos', 'Or | bar', 'Caret ^ guy', 'Dollar $ Bill', 'Maria (vip)', 'Pedro (alt)', 'Paulo Henrique', 'Auth (chk)'. All cleaned up via autouse fixture (verified via Mongo count = 0).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The pytest file at /app/backend/tests/test_prazo_regex_escape_jan2026.py is reusable as a regression suite. It uses HTTPBasicAuth(gestor/ganoh2024) for /api/prazo/customers creation, seeds prazo orders directly via MongoDB (db.orders insert), then calls /api/prazo/abater/{name} (URL-encoded), /api/prazo/customers/{id}/add-credit, /api/prazo/customers/{id}/history, and asserts persistence in db.orders.partial_paid. PRAZO_PASSWORD env var (defaults to 1234) is read by the test. The fix added re.escape() to 19 patterns; if any new endpoint introduces another f'^{name}$' regex without escape, this suite must be extended.",
+  "rca of the issue": "Original bug: MongoDB $regex pattern f'^{customer_name}$' treated regex metacharacters in the customer name as syntax. Specifically '(personal)' was parsed as a capture group, so 'Erick Ramos (personal)' did not match its own stored value, returning 'Cliente não tem dívidas no prazo' (404). Fix: f'^{re.escape(customer_name)}$' applied at 19 locations (server.py lines 818, 3289, 3354, 3578, 3728, 3747, 3974, 4063, 4159, 4885, 4896, 5969 and routers/prazo.py lines 95, 181, 261, 532, 555, 807, 911). Verified end-to-end with 9 regex-special characters: '(', ')', '.', '+', '[', ']', '*', '?', '|', '^', '$'. All passed. Plain name 'Paulo Henrique' also works (no regression). Wrong password still returns 403, unknown customer still returns 404 — the escape did not break match boundaries."
+}

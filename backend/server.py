@@ -9,6 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Optional
 import uuid
+import re
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 import secrets
@@ -814,7 +815,7 @@ async def create_order(order_input: OrderCreate):
     if order_input.payment_method == PaymentMethod.PRAZO and order_input.customer_name:
         # Look for customer with credit
         customer = await db.prazo_customers.find_one({
-            "name": {"$regex": f"^{order_input.customer_name}$", "$options": "i"}
+            "name": {"$regex": f"^{re.escape(order_input.customer_name)}$", "$options": "i"}
         })
         
         if customer and customer.get("credit", 0) > 0:
@@ -3284,7 +3285,7 @@ async def create_prazo_customer_kitchen(customer: PrazoCustomerCreate):
     """Register a new prazo customer from kitchen"""
     # Verificar por nome E loja
     existing = await db.prazo_customers.find_one({
-        "name": {"$regex": f"^{customer.name}$", "$options": "i"},
+        "name": {"$regex": f"^{re.escape(customer.name)}$", "$options": "i"},
         "store": customer.store
     })
     if existing:
@@ -3349,7 +3350,7 @@ async def create_prazo_customer(customer: PrazoCustomerCreate, username: str = D
     # Check if customer already exists IN THIS STORE
     # (Same name allowed in different stores - e.g. "Paulão" can exist in both Runner and GYM Londres)
     existing = await db.prazo_customers.find_one({
-        "name": {"$regex": f"^{customer.name}$", "$options": "i"},
+        "name": {"$regex": f"^{re.escape(customer.name)}$", "$options": "i"},
         "store": customer.store
     })
     if existing:
@@ -3573,7 +3574,7 @@ async def add_prazo_credit(customer_id: str, credit_data: PrazoCreditAdd):
 
     unpaid_orders = await db.orders.find(
         {
-            "customer_name": {"$regex": f"^{name}$", "$options": "i"},
+            "customer_name": {"$regex": f"^{re.escape(name)}$", "$options": "i"},
             "payment_method": "prazo",
             "prazo_paid": {"$ne": True},
         },
@@ -3723,7 +3724,7 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     
     # Get unpaid prazo orders for this customer
     prazo_orders = await db.orders.find({
-        "customer_name": {"$regex": f"^{customer_name}$", "$options": "i"},
+        "customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
         "payment_method": "prazo",
         "prazo_paid": {"$ne": True}
     }, {"_id": 0}).sort("created_at", 1).to_list(1000)  # Oldest first
@@ -3742,7 +3743,7 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     
     # Check if customer has credit (only consume when payment_method == 'saldo')
     customer = await db.prazo_customers.find_one({
-        "name": {"$regex": f"^{customer_name}$", "$options": "i"}
+        "name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"}
     })
     
     previous_credit = 0
@@ -3969,7 +3970,7 @@ async def charge_single_prazo_customer(customer_name: str):
     total = sum(o.get("total", 0) for o in prazo_orders)
     
     # Get customer info
-    customer = await db.prazo_customers.find_one({"name": {"$regex": f"^{customer_name}$", "$options": "i"}})
+    customer = await db.prazo_customers.find_one({"name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"}})
     credit = customer.get("credit", 0) if customer else 0
     phone = customer.get("phone", "") if customer else ""
     
@@ -4058,7 +4059,7 @@ async def get_prazo_charge_message(customer_name: str):
     total = sum(o.get("total", 0) for o in prazo_orders)
     
     # Get customer info
-    customer = await db.prazo_customers.find_one({"name": {"$regex": f"^{customer_name}$", "$options": "i"}})
+    customer = await db.prazo_customers.find_one({"name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"}})
     credit = customer.get("credit", 0) if customer else 0
     phone = customer.get("phone", "") if customer else ""
     
@@ -4154,7 +4155,7 @@ async def get_prazo_charge_messages(store: Optional[str] = None):
     
     for customer_name, debt_info in debts_by_customer.items():
         # Get customer info
-        customer = await db.prazo_customers.find_one({"name": {"$regex": f"^{customer_name}$", "$options": "i"}})
+        customer = await db.prazo_customers.find_one({"name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"}})
         phone = customer.get("phone", "") if customer else ""
         
         if not phone:
@@ -4880,7 +4881,7 @@ Responda APENAS com o JSON, sem texto adicional."""
 async def get_prazo_whatsapp_link(customer_name: str):
     """Generate WhatsApp link for prazo collection"""
     # Get customer info
-    customer = await db.prazo_customers.find_one({"name": {"$regex": f"^{customer_name}$", "$options": "i"}})
+    customer = await db.prazo_customers.find_one({"name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"}})
     
     if not customer:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
@@ -4891,7 +4892,7 @@ async def get_prazo_whatsapp_link(customer_name: str):
     
     # Get total debt
     prazo_orders = await db.orders.find({
-        "customer_name": {"$regex": f"^{customer_name}$", "$options": "i"},
+        "customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
         "payment_method": "prazo",
         "prazo_paid": {"$ne": True}
     }, {"_id": 0}).to_list(1000)
@@ -5964,7 +5965,7 @@ async def get_prazo_audit_log(
     if customer_id:
         q["customer_id"] = customer_id
     if customer_name:
-        q["customer_name"] = {"$regex": f"^{customer_name}$", "$options": "i"}
+        q["customer_name"] = {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"}
     if action:
         q["event_type"] = action
     rows = await db.prazo_history.find(q, {"_id": 0}).sort("created_at", -1).to_list(min(max(1, limit), 500))

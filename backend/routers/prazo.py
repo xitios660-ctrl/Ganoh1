@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
+import re
 import logging
 
 router = APIRouter(prefix="/prazo", tags=["Prazo"])
@@ -90,7 +91,7 @@ async def _log_prazo_event(
 async def _get_customer_total_debt(customer_name: str) -> float:
     """Sum unpaid prazo orders for a given customer name (case-insensitive)."""
     orders = await db.orders.find({
-        "customer_name": {"$regex": f"^{customer_name}$", "$options": "i"},
+        "customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
         "payment_method": "prazo",
         "prazo_paid": {"$ne": True},
     }, {"_id": 0}).to_list(2000)
@@ -176,7 +177,7 @@ async def lookup_prazo_customers(q: str = "", store: str = None):
 async def create_prazo_customer(customer: PrazoCustomerCreate):
     """Register a new prazo customer"""
     existing = await db.prazo_customers.find_one({
-        "name": {"$regex": f"^{customer.name}$", "$options": "i"},
+        "name": {"$regex": f"^{re.escape(customer.name)}$", "$options": "i"},
         "store": customer.store
     })
     if existing:
@@ -256,7 +257,7 @@ async def add_prazo_credit(customer_id: str, credit_data: PrazoCreditAdd):
     # 1) Fetch unpaid prazo orders for this customer (oldest first)
     unpaid_orders = await db.orders.find(
         {
-            "customer_name": {"$regex": f"^{name}$", "$options": "i"},
+            "customer_name": {"$regex": f"^{re.escape(name)}$", "$options": "i"},
             "payment_method": "prazo",
             "prazo_paid": {"$ne": True},
         },
@@ -527,7 +528,7 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
         raise HTTPException(status_code=403, detail="Senha incorreta")
     
     prazo_orders = await db.orders.find({
-        "customer_name": {"$regex": f"^{customer_name}$", "$options": "i"},
+        "customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
         "payment_method": "prazo",
         "prazo_paid": {"$ne": True}
     }, {"_id": 0}).sort("created_at", 1).to_list(1000)
@@ -550,7 +551,7 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     # For any other payment method (cash/pix/debit/credit-card), the credit balance must NOT
     # be touched - the customer is paying with real money.
     customer = await db.prazo_customers.find_one({
-        "name": {"$regex": f"^{customer_name}$", "$options": "i"}
+        "name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"}
     })
     
     previous_credit = 0
@@ -802,7 +803,7 @@ async def remove_prazo_debt(customer_id: str, data: PrazoDebtAdjust):
 
     # Fetch unpaid prazo orders (oldest first) to apply payment
     prazo_orders = await db.orders.find({
-        "customer_name": {"$regex": f"^{customer_name}$", "$options": "i"},
+        "customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
         "payment_method": "prazo",
         "prazo_paid": {"$ne": True},
     }, {"_id": 0}).sort("created_at", 1).to_list(2000)
@@ -906,7 +907,7 @@ async def get_customer_prazo_history(customer_id: str, limit: int = 200):
         {
             "$or": [
                 {"customer_id": customer_id},
-                {"customer_name": {"$regex": f"^{customer_name}$", "$options": "i"}},
+                {"customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"}},
             ]
         },
         {"_id": 0},
