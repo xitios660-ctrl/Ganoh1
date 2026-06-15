@@ -3124,34 +3124,65 @@ async def create_menu_item(item: MenuItemCreate, username: str = Depends(verify_
 
 @api_router.put("/gestor/menu/{item_id}")
 async def update_menu_item(item_id: str, update: MenuItemUpdate, username: str = Depends(verify_gestor)):
-    """Update a menu item"""
+    """Update a menu item. Updates **all stores** that have this product so prices
+    stay in sync across Runner and GYM Londres.
+
+    Supports both ID styles:
+    - Plain ID (e.g. '48'): updates every doc whose id == '48' (one per store)
+    - Store-suffixed ID (e.g. 'uuid-runner'): also updates the sibling
+      'uuid-gym-londres' so a single edit propagates to both stores.
+    """
     update_data = {k: v for k, v in update.dict().items() if v is not None}
     if not update_data:
         raise HTTPException(status_code=400, detail="Nenhum dado para atualizar")
-    
+
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
-    result = await db.menu.update_one({"id": item_id}, {"$set": update_data})
+
+    # Try direct match first
+    ids_to_update = {item_id}
+    # If item_id ends with -runner or -gym-londres, derive the sibling id base
+    for suffix in ("-runner", "-gym-londres"):
+        if item_id.endswith(suffix):
+            base = item_id[: -len(suffix)]
+            ids_to_update.update({f"{base}-runner", f"{base}-gym-londres"})
+            break
+
+    result = await db.menu.update_many({"id": {"$in": list(ids_to_update)}}, {"$set": update_data})
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="Item não encontrado")
-    
-    # Update stock name if name changed
+
+    # Update stock name if name changed (across all matched stock entries)
     if "name" in update_data:
-        await db.stock.update_many({"menu_item_id": item_id}, {"$set": {"name": update_data["name"]}})
-    
-    return {"success": True, "message": "Item atualizado"}
+        await db.stock.update_many(
+            {"menu_item_id": {"$in": list(ids_to_update)}},
+            {"$set": {"name": update_data["name"]}},
+        )
+
+    return {
+        "success": True,
+        "message": f"Item atualizado em {result.modified_count} loja(s)",
+        "matched_count": result.matched_count,
+        "modified_count": result.modified_count,
+    }
 
 @api_router.delete("/gestor/menu/{item_id}")
 async def delete_menu_item(item_id: str, username: str = Depends(verify_gestor)):
-    """Delete a menu item"""
-    result = await db.menu.delete_one({"id": item_id})
+    """Delete a menu item from **all stores** (Runner + GYM Londres siblings)."""
+    ids_to_delete = {item_id}
+    for suffix in ("-runner", "-gym-londres"):
+        if item_id.endswith(suffix):
+            base = item_id[: -len(suffix)]
+            ids_to_delete.update({f"{base}-runner", f"{base}-gym-londres"})
+            break
+
+    result = await db.menu.delete_many({"id": {"$in": list(ids_to_delete)}})
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Item não encontrado")
-    
+
     # Also remove from stock
-    await db.stock.delete_many({"menu_item_id": item_id})
-    
-    return {"success": True, "message": "Item removido"}
+    await db.stock.delete_many({"menu_item_id": {"$in": list(ids_to_delete)}})
+
+    return {"success": True, "message": f"Item removido de {result.deleted_count} loja(s)"}
 
 # ==================== ADICIONAIS ROUTES ====================
 

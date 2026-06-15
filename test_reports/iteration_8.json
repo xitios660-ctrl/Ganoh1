@@ -1,0 +1,34 @@
+{
+  "summary": "Backend regression testing for menu sync bugfix (PUT/DELETE update_many across Runner + GYM Londres). 16/16 pytest cases passed. Validated POST creates in both stores with {base}-runner/{base}-gym-londres IDs + stock entries; PUT with suffix ID propagates to sibling (matched=2/modified=2); PUT with plain id '48' updates both stores (verified original=99.99/4.50 → unified after PUT, then restored); PUT only-price preserves description/category/image_url; PUT name change syncs to stock collection; PUT nonexistent → 404; PUT empty body → 400; DELETE removes from both stores + stock with message 'Item removido de 2 loja(s)'; DELETE nonexistent → 404; public /api/menu/{store} reflects updated prices; low-price 'TEST_Chiclete' R$0.50 NOT filtered (filter only blocks 'placeholder'); custom 'Pão Doce' category works; price persists across 3x refetch (F5 simulation); /api/gestor/menu/runner returns 100 items in {menu,count} shape proving server.py wins routing over the stubbed routers/menu.py. All TEST_ data cleaned up — residual=0.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_menu_sync_persistence_jan2026.py",
+    "/app/test_reports/pytest/menu_sync_jan2026.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "server.py is 6283 lines — should be split into routers per domain (menu, stock, gestor, sales, etc.). The empty routers/menu.py is good prep, but no logic has actually been moved yet.",
+    "POST /api/gestor/menu accepts a 'store' field in MenuItemCreate but ignores it (always creates in both stores). Either remove the field from the model to avoid client confusion or honor it.",
+    "MenuItemUpdate uses `= None` defaults (untyped) instead of `Optional[T] = None`. Works on Pydantic v1/v2 by coercion, but inconsistent with AdicionalUpdate (which uses Optional[...]). Cosmetic.",
+    "Plain-id PUT path (`'48'`) currently only matches docs whose `id` is literally '48'. If MENU_DATA later migrates with store-suffixed IDs but some old docs still have plain ids, no double-sync. Consider also matching by a stable 'base_id' / 'sku' field for future-proofing.",
+    "Stock collection is created unconditionally on POST (even for non-STOCK_CATEGORIES like Doces/Salgados). Harmless but wastes docs; either gate by `category in STOCK_CATEGORIES` or document the intent."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_menu_sync_persistence_jan2026.py (new)"
+  ],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "gestor / ganoh2024 (read from /app/memory/test_credentials.md)",
+  "seed_data_creation": "All test items created with TEST_ prefix and deleted in module teardown; verified 0 residual TEST_ items remain post-run. Plain-id '48' price was modified during test_put_plain_id_updates_both_stores and restored in the same test's finally block.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Bugfix verified end-to-end. Reusable regression file: /app/backend/tests/test_menu_sync_persistence_jan2026.py — covers POST/PUT/DELETE/public-menu/persistence. The public endpoint /api/menu/{store} returns {items, categories, adicionais, milk_options, store} (NOT 'menu' key). The gestor endpoint /api/gestor/menu/{store} returns {menu, count}. routers/menu.py is intentionally an empty stub — do not re-add endpoints there without first removing the duplicates in server.py:3085-3185.",
+  "rca of the issue": "Pre-fix: PUT/DELETE used update_one/delete_one. When MENU_DATA was migrated, docs sometimes shared the same plain `id` (e.g. '48') across both stores; update_one would touch only one doc, leaving stores out of sync. Post-fix (server.py:3125-3185): update_many/delete_many with an ID set that includes both `{base}-runner` and `{base}-gym-londres` siblings when a suffixed ID is given, AND naturally matches all duplicates when a plain id is given. Verified by post-PUT GET on both stores showing identical price and matched_count=2."
+}
