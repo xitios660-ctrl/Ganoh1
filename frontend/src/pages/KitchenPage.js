@@ -462,6 +462,7 @@ export const KitchenPage = () => {
   const [showAddCreditDialog, setShowAddCreditDialog] = useState(false);
   const [creditCustomer, setCreditCustomer] = useState(null);
   const [creditAmount, setCreditAmount] = useState('');
+  const [creditPaymentMethod, setCreditPaymentMethod] = useState('cash');
   // Edit customer dialog state
   const [showEditCustomerDialog, setShowEditCustomerDialog] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(null);
@@ -619,7 +620,7 @@ export const KitchenPage = () => {
   useEffect(() => {
     if (store) {
       // Remember last kitchen store opened so /equipe can pre-select it
-      try { localStorage.setItem('ganoh_last_kitchen_store', store); } catch {}
+      try { localStorage.setItem('ganoh_last_kitchen_store', store); } catch { /* ignore quota errors */ }
       // Initialize stock (best-effort, ignore failures when offline)
       axios.post(`${API}/stock/${store}/initialize`).catch(() => {}).then(() => fetchData());
       // Visibility-aware polling: 6s when active, paused when tab hidden
@@ -964,12 +965,14 @@ export const KitchenPage = () => {
     
     try {
       const response = await axios.post(`${API}/prazo/customers/${creditCustomer.id}/add-credit`, {
-        amount: parseFloat(creditAmount)
+        amount: parseFloat(creditAmount),
+        payment_method: creditPaymentMethod,
       });
       toast.success(response.data.message, { duration: 5000 });
       setShowAddCreditDialog(false);
       setCreditCustomer(null);
       setCreditAmount('');
+      setCreditPaymentMethod('cash');
       fetchData();
     } catch (error) {
       toast.error(error?.response?.data?.detail || 'Erro ao adicionar crédito');
@@ -1234,7 +1237,7 @@ export const KitchenPage = () => {
                 value={store}
                 onValueChange={(newStore) => {
                   if (newStore && newStore !== store) {
-                    try { localStorage.setItem('ganoh_last_kitchen_store', newStore); } catch {}
+                    try { localStorage.setItem('ganoh_last_kitchen_store', newStore); } catch { /* ignore quota errors */ }
                     navigate(`/${newStore}/cozinha`);
                   }
                 }}
@@ -2524,6 +2527,24 @@ export const KitchenPage = () => {
                   💡 Se o cliente tiver pedidos prazo em aberto, o valor abate
                   automaticamente da dívida (do mais antigo p/ o mais recente).
                   Só o que sobrar entra como crédito.
+                </p>
+              </div>
+              <div>
+                <Label className="text-sm">Forma de pagamento</Label>
+                <select
+                  value={creditPaymentMethod}
+                  onChange={(e) => setCreditPaymentMethod(e.target.value)}
+                  className="w-full border rounded-md px-2 py-2 text-sm bg-background h-10"
+                  data-testid="credit-payment-method"
+                >
+                  <option value="cash">Dinheiro</option>
+                  <option value="pix">PIX</option>
+                  <option value="credit">Crédito</option>
+                  <option value="debit">Débito</option>
+                </select>
+                <p className="text-[11px] text-muted-foreground mt-1 leading-tight">
+                  ⚠️ Importante: define como o dinheiro entrou. Se for <b>Dinheiro</b>,
+                  o valor abatido da dívida soma no caixa em dinheiro.
                 </p>
               </div>
               

@@ -1973,13 +1973,14 @@ async def get_cash_drawer_debug(store: StoreLocation):
     cash_query = {
         "store": store.value,
         "status": {"$in": ["ready", "delivered"]},
-        "payment_method": "cash"
+        "payment_method": "cash",
+        "synthetic": {"$ne": True},
     }
     if last_reset_at:
         cash_query["created_at"] = {"$gte": last_reset_at}
     
     # Get all cash orders with details
-    cash_orders = await db.orders.find(cash_query, {"_id": 0, "customer_name": 1, "total": 1, "created_at": 1, "status": 1}).to_list(1000)
+    cash_orders = await db.orders.find(cash_query, {"_id": 0, "id": 1, "customer_name": 1, "total": 1, "created_at": 1, "status": 1, "manual_sale": 1}).sort("created_at", 1).to_list(1000)
     total_cash_sales = sum(o.get("total", 0) for o in cash_orders)
     
     # Get prazo payments made in CASH
@@ -1990,15 +1991,25 @@ async def get_cash_drawer_debug(store: StoreLocation):
     if last_reset_at:
         prazo_cash_query["created_at"] = {"$gte": last_reset_at}
     
-    prazo_full_payments = await db.prazo_payments.find(prazo_cash_query, {"_id": 0}).to_list(1000)
-    prazo_partial_payments = await db.prazo_partial_payments.find(prazo_cash_query, {"_id": 0}).to_list(1000)
+    prazo_full_payments = await db.prazo_payments.find(prazo_cash_query, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    prazo_partial_payments = await db.prazo_partial_payments.find(prazo_cash_query, {"_id": 0}).sort("created_at", 1).to_list(1000)
     total_prazo_cash = sum(p.get("amount", 0) for p in prazo_full_payments) + sum(p.get("amount", 0) for p in prazo_partial_payments)
-    
+
+    # Also fetch prazo partial_payments WITHOUT payment_method (auto-apply records) — NOT counted, but shown for awareness
+    auto_apply_no_pm_query = {
+        "store": store.value,
+        "source": "credit_auto_apply",
+        "payment_method": None,
+    }
+    if last_reset_at:
+        auto_apply_no_pm_query["created_at"] = {"$gte": last_reset_at}
+    auto_apply_no_pm = await db.prazo_partial_payments.find(auto_apply_no_pm_query, {"_id": 0}).sort("created_at", 1).to_list(1000)
+
     # Get withdrawals
     withdrawal_query = {"store": store.value}
     if last_reset_at:
         withdrawal_query["created_at"] = {"$gte": last_reset_at}
-    all_withdrawals = await db.cash_withdrawals.find(withdrawal_query, {"_id": 0}).to_list(1000)
+    all_withdrawals = await db.cash_withdrawals.find(withdrawal_query, {"_id": 0}).sort("created_at", 1).to_list(1000)
     total_withdrawn = sum(w.get("amount", 0) for w in all_withdrawals)
     
     current_balance = initial_balance + total_cash_sales + total_prazo_cash - total_withdrawn
@@ -2014,10 +2025,14 @@ async def get_cash_drawer_debug(store: StoreLocation):
         "prazo_cash_payments": prazo_full_payments + prazo_partial_payments,
         "prazo_cash_count": len(prazo_full_payments) + len(prazo_partial_payments),
         "total_prazo_cash": round(total_prazo_cash, 2),
+        "auto_apply_without_payment_method": auto_apply_no_pm,
+        "auto_apply_without_payment_method_count": len(auto_apply_no_pm),
+        "auto_apply_without_payment_method_total": round(sum(p.get("amount", 0) for p in auto_apply_no_pm), 2),
+        "auto_apply_warning": "Esses ajustes de crédito automático NÃO estão sendo somados ao caixa porque não têm forma de pagamento definida. Se foram pagos em dinheiro, eles deveriam contar." if auto_apply_no_pm else None,
         "withdrawals": all_withdrawals,
         "total_withdrawn": round(total_withdrawn, 2),
         "current_balance": round(current_balance, 2),
-        "formula": f"{initial_balance} + {total_cash_sales} (vendas) + {total_prazo_cash} (prazo em dinheiro) - {total_withdrawn} = {current_balance}"
+        "formula": f"{initial_balance} (inicial) + {round(total_cash_sales,2)} (vendas dinheiro) + {round(total_prazo_cash,2)} (prazo em dinheiro) - {round(total_withdrawn,2)} (saídas) = R$ {round(current_balance,2)}"
     }
 
 @api_router.post("/cash/{store}/set-balance")
@@ -3211,6 +3226,7 @@ class PrazoPayment(BaseModel):
 class PrazoCreditAdd(BaseModel):
     amount: float  # Valor a adicionar ao crédito
     notes: Optional[str] = ""
+    payment_method: Optional[str] = None  # "cash" | "pix" | "credit" | "debit" — afeta o caixa quando abate dívida
 
 class PrazoAbaterRequest(BaseModel):
     amount: float  # Valor a abater da dívida
@@ -3615,6 +3631,7 @@ async def add_prazo_credit(customer_id: str, credit_data: PrazoCreditAdd):
             "amount": apply,
             "type": "partial_payment",
             "source": "credit_auto_apply",
+            "payment_method": credit_data.payment_method,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "notes": credit_data.notes or "Abate automático ao adicionar crédito",
         })
