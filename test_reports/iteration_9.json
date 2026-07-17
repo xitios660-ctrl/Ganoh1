@@ -1,0 +1,31 @@
+{
+  "summary": "Backend regression for /api/menu/{store} override fix (server.py:686-732). 8/8 pytest cases passed against public URL. Verified: (1) PUT price on default MENU_DATA id=53 (Capuccino) 9→10 reflects immediately in BOTH /api/menu/runner and /api/menu/gym-londres; (2) PUT description+category also propagates; (3) restore to original 9.00 works; (4) POST custom TEST_ProdutoNovo appears in both public menus with price 5.50 and category 'Doces'; (5) PUT on custom item (5.50→7.25) reflects in both stores; (6) DELETE custom removes from both stores; (7) public payload keeps items, categories, adicionais, milk_options (4), store metadata and prep_time on defaults; (8) cleanup verifies zero TEST_ residuals and default price/category restored to 9.00 / 'Bebidas Quentes'. Confirmed live via curl on charts-3.preview.emergentagent.com after run.",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_menu_public_override_jan2026.py",
+    "/app/test_reports/pytest/menu_public_override_jan2026.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "MenuItemCreate REQUIRES 'store' field but POST /gestor/menu ignores it and always creates in both stores. Either remove the field or honor it — currently confusing (a request without 'store' returns 422 even though semantics don't need it).",
+    "server.py get_menu override loop (line 719) uses `if field in override and override[field] not in (None, '')`. If a gestor legitimately wants to set price=0 or available=False, current logic will drop those updates for `price` (float 0 is truthy for the check but 0.0 is not in (None,'') so ok) — but explicitly `available=False` will pass the `not in (None,'')` filter since False is not in that set. Confirmed OK. Just document behavior.",
+    "Override lookup priority is by-id first then by-normalized-name. If a custom doc has a name matching a MENU_DATA default but stored with different id AND a legitimate different id-based override also exists, only id override applies. This is the desired behavior but worth a comment in code."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_menu_public_override_jan2026.py (new)"
+  ],
+  "success_rate": {"backend": "100% (8/8)", "frontend": "not tested (backend-only request)"},
+  "test_credentials": "gestor / ganoh2024 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "TEST_ProdutoNovo and TEST_ToDelete created transiently via POST /api/gestor/menu; both deleted in-test and re-checked at end. Default id=53 (Capuccino) price/description/category restored to 9.00 / 'Bebida cremosa com espuma de leite' / 'Bebidas Quentes'.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Menu override fix verified. Reusable regression file: /app/backend/tests/test_menu_public_override_jan2026.py — pytest module-scoped fixture creates one custom item, tests share it. Reads REACT_APP_BACKEND_URL from env or falls back to /app/frontend/.env. Public endpoint returns 'items' (not 'menu'). POST /api/gestor/menu currently REQUIRES 'store' field (422 without it) even though backend creates in both stores anyway."
+}

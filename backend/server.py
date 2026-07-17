@@ -690,15 +690,35 @@ async def get_menu(store: StoreLocation):
             {"store": {"$exists": False}}  # Items without store filter apply to all
         ]
     }, {"_id": 0}).to_list(1000)
-    
+
+    # Build override maps: gestor edits win over MENU_DATA defaults.
+    # Two possible matches: by exact id OR by normalized name.
+    overrides_by_id = {}
+    overrides_by_norm_name = {}
+    for c in custom_items:
+        cid = c.get("id")
+        if cid:
+            overrides_by_id[cid] = c
+        nname = _normalize_name(c.get("name", ""))
+        if nname:
+            # Only set as name-override if no better id-override exists yet
+            overrides_by_norm_name.setdefault(nname, c)
+
     # Add availability based on stock (only for bebidas)
     items_with_stock = []
     seen_ids = set()
     seen_names = {}  # normalized name -> index in items_with_stock (dedup)
-    
-    # First add default menu items
+
+    # First add default menu items, applying gestor overrides when they exist
     for item in MENU_DATA:
         item_copy = item.copy()
+        # Apply override from db.menu if the gestor edited this item
+        norm_name = _normalize_name(item_copy.get("name", ""))
+        override = overrides_by_id.get(item["id"]) or overrides_by_norm_name.get(norm_name)
+        if override:
+            for field in ("name", "description", "price", "category", "image_url", "available"):
+                if field in override and override[field] not in (None, ""):
+                    item_copy[field] = override[field]
         # Normalize the category
         item_copy["category"] = _normalize_category(item_copy.get("category", ""))
         if item["category"] in STOCK_CATEGORIES:
@@ -713,6 +733,9 @@ async def get_menu(store: StoreLocation):
         items_with_stock.append(item_copy)
         seen_ids.add(item["id"])
         seen_names[_normalize_name(item_copy["name"])] = len(items_with_stock) - 1
+        # Also mark the override id (if different) as seen so it doesn't get re-added below
+        if override and override.get("id") and override["id"] != item["id"]:
+            seen_ids.add(override["id"])
     
     # Then add custom items from gestor (avoid duplicates by id AND by normalized name)
     for custom_item in custom_items:
