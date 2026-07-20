@@ -1,0 +1,18 @@
+{
+  "summary": "Retest of new-order-alert 0->1 transition fix on /runner/cozinha. All 3 sub-checks PASSED: (1) no false alert on initial load with 0 pending orders after ~9s seed, (2) modal appeared within ~10s after creating a single order via POST /api/orders (0->1 transition now correctly fires), (3) modal dismissed on data-testid='new-order-alert-close' click. Portuguese content confirmed ('Novo pedido!', 'Ver Pedidos', 'Silenciar', toast 'Novo pedido chegou!'). Test order cleaned up via DELETE /api/orders/runner/{id}.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {"ui_bugs": [], "integration_issues": [], "design_issues": []},
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "KitchenPage.js is 2955 lines — should be split into smaller focused modules (well above the 700-line guideline). Not blocking, but worth flagging for future refactor.",
+    "server.py create_order returns the raw document with `_id: null` field visible in JSON response. Minor: exclude _id from response for cleanliness."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "seed_data_creation": "Created and deleted one TEST_alert_retest order during test (id auto-cleaned).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "The 0->1 first-order alert fix using hasSeededOrderCountRef is verified working. Kitchen at /runner/cozinha starts with 0 received + 0 pending PIX (prazo_pending orders don't count toward the alert counter). Use curl (not urllib) for POST /api/orders — urllib is blocked by 403 (likely UA filter). Model requires items[].menu_item_id.",
+  "rca of the issue": "Original bug: prevOrderCount.current was initialized to 0. On first fetch, if there were 0 pending orders, newPendingCount (0) was not > prevOrderCount.current (0), so no alert. But when the first ever order arrived (0->1), the condition `newPendingCount > prevOrderCount.current` (1>0) would fire — however, the earlier seed-guard used a boolean that was already true after the mount, causing a false alert on the FIRST page load when orders existed. The fix separates concerns: hasSeededOrderCountRef starts false, is set true only AFTER the first fetch stores prevOrderCount. Now on first fetch: alert is suppressed (ref is false). On any subsequent fetch where count increases: alert fires correctly, including the 0->1 first-order case. Verified end-to-end."
+}

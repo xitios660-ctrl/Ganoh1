@@ -482,6 +482,7 @@ export const KitchenPage = () => {
   const [showPrazoHistory, setShowPrazoHistory] = useState(false);
   
   const prevOrderCount = useRef(0);
+  const hasSeededOrderCountRef = useRef(false);
   const audioRef = useRef(null);
   const alarmIntervalRef = useRef(null);
   const [newOrderAlert, setNewOrderAlert] = useState(null); // { orders: [...], open: bool }
@@ -570,7 +571,7 @@ export const KitchenPage = () => {
       if (ordersRes && pixRes) {
         const newOrders = ordersRes.data.orders.filter(o => !['delivered', 'pending_payment', 'payment_rejected'].includes(o.status));
         const newPendingCount = newOrders.filter(o => o.status === 'received').length + pixRes.data.orders.length;
-        if (prevOrderCount.current > 0 && newPendingCount > prevOrderCount.current) {
+        if (hasSeededOrderCountRef.current && newPendingCount > prevOrderCount.current) {
           // Detected a NEW incoming order → capture the freshest received ones
           const receivedNow = newOrders
             .filter(o => o.status === 'received')
@@ -581,6 +582,7 @@ export const KitchenPage = () => {
           toast.info('Novo pedido chegou!', { duration: 5000 });
         }
         prevOrderCount.current = newPendingCount;
+        hasSeededOrderCountRef.current = true;
         setOrders(newOrders);
         setPendingPixOrders(pixRes.data.orders);
       }
