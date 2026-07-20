@@ -82,10 +82,35 @@ Senha do gestor: `ganoh2024`. Inclui parte da Cozinha e do Gestor.
   corrigido com `hasSeededOrderCountRef` em KitchenPage.js (~484, ~574)
 - Testes: iteration_10.json (5/6, achou o bug) + iteration_11.json (100%)
 
+### Iteração 6 — Nomes cortados + Caixa + Tema Claro global (Jul 2026) ✅ TESTADO
+- FIX: nomes das categorias cortados no cardápio — causa: `overflow:hidden`
+  global em buttons (index.css) permitia flex-shrink; removido + flex-shrink-0
+- CAIXA (investigação sem JSON de produção — 2 bugs reais achados no código):
+  1. Comparação de datas por STRING com offsets mistos (-03:00 vs +00:00):
+     após "zerar caixa", até 3h de vendas pré-reset vazavam de volta.
+     FIX: helpers `_parse_iso_utc`/`_filter_since` em server.py; drawer,
+     drawer-debug, today e pix-adjustments agora filtram timezone-safe;
+     reset/saques/ajustes PIX gravam em UTC
+  2. Crédito adicionado em DINHEIRO: sobra além da dívida nunca entrava no
+     caixa. FIX: nova coleção `cash_credit_topups` somada ao drawer;
+     auto-abates agora gravam payment_method (pay_method normalizado)
+  - Regressão OK: Runner R$ 197,75 / GYM R$ 117,40 inalterados
+  - Registros antigos de auto-abate sem payment_method continuam listados em
+    `auto_apply_without_payment_method` no drawer-debug (decisão do gestor)
+- TEMA CLARO em TODAS as páginas (pedido da cliente):
+  - ThemeContext: claro é o padrão global (escuro só via toggle, persistido)
+  - Cozinha: classe condicional kitchen-daylight (claro) vs kitchen-cinematic
+  - Gestor: bloco claro em gestor-cinematic.css (remap de --gx-* sob
+    html:not(.dark)) — todas as abas OK
+  - /, /auth, /equipe: classe `ganoh-dark-scene` + overrides claros em index.css
+  - CinematicBackground theme-aware; /runner/live permanece escuro (painel TV)
+- Testes: iteration_12.json (backend 6/6 + frontend, 1 issue) e
+  iteration_13.json (Gestor claro 100%)
+
 ## Next Action Items
-- (P1) Divergência de caixa em PRODUÇÃO: aguardando usuário enviar JSON de
-  `https://charts-3.emergent.host/api/cash/runner/drawer-debug`
-  (procurar `auto_apply_without_payment_method` e saques duplicados)
+- (P1) Divergência de caixa em PRODUÇÃO: 2 causas corrigidas no código
+  (timezone no reset + crédito em dinheiro). Após redeploy, se ainda divergir,
+  pedir JSON de https://charts-3.emergent.host/api/cash/runner/drawer-debug
 - Save to GitHub + redeploy para levar as correções à produção
 - Consolidar os 2 endpoints `/api/cash/{store}/drawer` em um só
 - (P2) Tema claro completo em todos componentes, se o toggle não bastar
