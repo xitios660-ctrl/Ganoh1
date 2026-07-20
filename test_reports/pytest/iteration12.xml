@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="2" skipped="0" tests="6" time="1.375" timestamp="2026-07-20T17:18:00.034531+00:00" hostname="agent-env-0b70e0ff-bd72-49a6-9a5e-947a6db8f30e"><testcase classname="backend.tests.test_iteration12_light_theme_cash" name="test_drawer_runner_balance" time="0.296" /><testcase classname="backend.tests.test_iteration12_light_theme_cash" name="test_drawer_gym_balance" time="0.133" /><testcase classname="backend.tests.test_iteration12_light_theme_cash" name="test_drawer_debug_new_fields" time="0.121" /><testcase classname="backend.tests.test_iteration12_light_theme_cash" name="test_cash_today_200" time="0.192" /><testcase classname="backend.tests.test_iteration12_light_theme_cash" name="test_pix_adjustments_200" time="0.132"><failure message="AssertionError: assert False&#10; +  where False = isinstance({'adjustments': [], 'store': 'runner', 'total_added': 0}, list)&#10; +    where {'adjustments': [], 'store': 'runner', 'total_added': 0} = json()&#10; +      where json = &lt;Response [200]&gt;.json">backend/tests/test_iteration12_light_theme_cash.py:64: in test_pix_adjustments_200
+    assert isinstance(r.json(), list)
+E   AssertionError: assert False
+E    +  where False = isinstance({'adjustments': [], 'store': 'runner', 'total_added': 0}, list)
+E    +    where {'adjustments': [], 'store': 'runner', 'total_added': 0} = json()
+E    +      where json = &lt;Response [200]&gt;.json</failure></testcase><testcase classname="backend.tests.test_iteration12_light_theme_cash" name="test_add_credit_cash_flow_with_cleanup" time="0.332"><failure message="AssertionError: {&quot;detail&quot;:&quot;Not authenticated&quot;}&#10;assert 401 in (200, 201)&#10; +  where 401 = &lt;Response [401]&gt;.status_code">backend/tests/test_iteration12_light_theme_cash.py:80: in test_add_credit_cash_flow_with_cleanup
+    assert rc.status_code in (200, 201), rc.text
+E   AssertionError: {"detail":"Not authenticated"}
+E   assert 401 in (200, 201)
+E    +  where 401 = &lt;Response [401]&gt;.status_code</failure></testcase></testsuite></testsuites>

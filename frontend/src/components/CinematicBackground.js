@@ -1,10 +1,13 @@
 import React, { useEffect, useRef } from 'react';
+import { useTheme } from '../context/ThemeContext';
 
 /**
  * CinematicBackground - parallax mouse-aware ambient layer.
  * PERFORMANCE: usa ref + rAF direto no DOM (sem setState), zero rerenders no mousemove.
  */
 export const CinematicBackground = ({ accent = '#a8d96b' }) => {
+  const { theme } = useTheme();
+  const dark = theme === 'dark';
   const orb1 = useRef(null);
   const orb2 = useRef(null);
   const beam = useRef(null);
@@ -78,7 +81,7 @@ export const CinematicBackground = ({ accent = '#a8d96b' }) => {
 
       {/* film grain — static SVG (no animation = no cost) */}
       <div
-        className="absolute inset-0 opacity-[0.06] mix-blend-overlay"
+        className={`absolute inset-0 mix-blend-overlay ${dark ? 'opacity-[0.06]' : 'opacity-[0.03]'}`}
         style={{
           backgroundImage:
             "url(\"data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E\")",
@@ -88,7 +91,7 @@ export const CinematicBackground = ({ accent = '#a8d96b' }) => {
       {/* vignette */}
       <div
         className="absolute inset-0"
-        style={{ background: 'radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.6) 100%)' }}
+        style={{ background: dark ? 'radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,0.6) 100%)' : 'radial-gradient(ellipse at center, transparent 55%, rgba(124,179,66,0.10) 100%)' }}
       />
     </div>
   );

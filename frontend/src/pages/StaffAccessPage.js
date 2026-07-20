@@ -54,7 +54,7 @@ export const StaffAccessPage = () => {
 
   if (!unlocked) {
     return (
-      <div className="relative min-h-screen bg-[#070707] text-white overflow-hidden">
+      <div className="ganoh-dark-scene relative min-h-screen bg-[#070707] text-white overflow-hidden">
         <CinematicBackground />
         <button
           onClick={() => navigate('/')}
@@ -137,7 +137,7 @@ export const StaffAccessPage = () => {
   }
 
   return (
-    <div className="relative min-h-screen bg-[#070707] text-white overflow-hidden">
+    <div className="ganoh-dark-scene relative min-h-screen bg-[#070707] text-white overflow-hidden">
       <CinematicBackground />
 
       <button

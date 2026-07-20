@@ -790,3 +790,99 @@ button.gx-nav-btn[size="sm"] {
   100% { background-position: -200% 0; }
 }
 
+
+/* ============================================================
+   TEMA CLARO DO GESTOR — ativo quando <html> NÃO tem .dark
+   Remapeia as variáveis --gx-* e ajusta fundos/textos fixos.
+   ============================================================ */
+html:not(.dark) {
+  --gx-bg-0: #f6f8f1;
+  --gx-bg-1: #eef2e4;
+  --gx-bg-2: #e8eeda;
+  --gx-ink: #22301c;
+  --gx-ink-soft: #35462b;
+  --gx-mute: #64735a;
+  --gx-line: rgba(63, 102, 32, 0.16);
+  --gx-line-strong: rgba(63, 102, 32, 0.34);
+  --gx-green: #4f8b1d;
+  --gx-green-2: #3f7317;
+  --gx-green-deep: #2e5411;
+  --gx-green-soft: #6ba33b;
+  --gx-gold: #4f8b1d;
+  --gx-gold-2: #3f7317;
+  --gx-amber: #a96f0a;
+  --gx-emerald: #0b8a5f;
+  --gx-cyan: #0e7ec2;
+  --gx-violet: #6d4fd0;
+  --gx-rose: #cf2f54;
+  --gx-shadow-soft: 0 22px 46px -26px rgba(63, 102, 32, 0.28);
+  --gx-shadow-hard: 0 40px 90px -50px rgba(63, 102, 32, 0.35);
+  --gx-shadow-glow: 0 0 32px -12px rgba(107, 163, 59, 0.35);
+}
+
+html:not(.dark) .gx-app {
+  background:
+    radial-gradient(1200px 700px at 12% -10%, rgba(107, 163, 59, 0.12), transparent 60%),
+    radial-gradient(900px 500px at 100% 10%, rgba(107, 163, 59, 0.08), transparent 55%),
+    linear-gradient(180deg, var(--gx-bg-0) 0%, var(--gx-bg-1) 60%, var(--gx-bg-2) 100%);
+}
+html:not(.dark) .gx-app::before { opacity: 0.12; }
+html:not(.dark) .gx-orb { opacity: 0.14; }
+html:not(.dark) .gx-orb-3 { opacity: 0.10; }
+
+html:not(.dark) .gx-header {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 255, 255, 0.72));
+}
+
+html:not(.dark) .gx-brand-title {
+  background: linear-gradient(180deg, #2c3a22, #4f8b1d);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+html:not(.dark) .gx-section-title {
+  background: linear-gradient(180deg, #2c3a22, #55831f);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+/* Logo original já é escura — sem inversão no claro */
+html:not(.dark) .gx-logo-img { filter: none; }
+
+/* Botões/abas ativas: verde mais escuro pede texto branco */
+html:not(.dark) .gx-nav-btn.gx-active,
+html:not(.dark) .gx-nav-btn.active,
+html:not(.dark) .gx-nav-btn[data-state="active"] {
+  color: #ffffff !important;
+  box-shadow: 0 12px 26px -12px rgba(63, 102, 32, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+html:not(.dark) .gx-seg-btn.active {
+  color: #ffffff;
+  box-shadow: 0 8px 20px -10px rgba(63, 102, 32, 0.45);
+}
+html:not(.dark) .gx-btn-gold {
+  color: #ffffff;
+  box-shadow: 0 12px 26px -12px rgba(63, 102, 32, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.3);
+}
+html:not(.dark) .gx-btn-gold:hover {
+  box-shadow: 0 18px 36px -14px rgba(63, 102, 32, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.4);
+}
+
+/* Cards e superfícies levemente brancas no claro */
+html:not(.dark) .gx-card,
+html:not(.dark) .gx-kpi {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.6)) !important;
+}
+html:not(.dark) .gx-app .gx-dark-card,
+html:not(.dark) .gx-app [data-gx-dark="true"] {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.85), rgba(255, 255, 255, 0.65)) !important;
+}
+html:not(.dark) .gx-chart-shell {
+  background: rgba(255, 255, 255, 0.6);
+}
+html:not(.dark) .gx-input {
+  background: rgba(255, 255, 255, 0.8);
+}
+html:not(.dark) .gx-icon-btn,
+html:not(.dark) .gx-btn-ghost {
+  background: rgba(255, 255, 255, 0.7);
+}

@@ -98,7 +98,7 @@ export const StoreSelectorPage = () => {
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#070707] text-white">
+    <div className="ganoh-dark-scene relative min-h-screen overflow-hidden bg-[#070707] text-white">
       <CinematicBackground />
 
       {!introDone && <CinematicIntro onDone={finishIntro} />}

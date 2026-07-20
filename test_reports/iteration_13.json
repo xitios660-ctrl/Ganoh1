@@ -1,0 +1,29 @@
+{
+  "summary": "Retested /gestor/dashboard light theme fix (iteration 13). Confirmed light theme is now applied to all Gestor tabs. Theme toggle works both directions and persists across reload.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Theme toggle uses View Transitions API and the DOM class flips only after the transition completes (~2-3s). Not a bug but tests should wait accordingly."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "seed_data_creation": "None",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Iteration 13 verified: /gestor/dashboard now renders in light theme by default (html class empty, body bg rgb(255,255,255), text rgb(34,48,28) dark green readable). KPI testids kpi-receita-hoje/kpi-receita-mes/kpi-pedidos-hoje/kpi-pedidos-mes all present and readable (R$ 0,00 in July 2026 is expected as noted). Tabs Gráfico/Gastos/Prazo/Cardápio/WhatsApp all render in light theme without unreadable text or broken layout. Runner and GYM Londres store switcher visible and functional on Dashboard. Theme toggle (data-testid=theme-toggle) toggles between light and dark cinematic; persists across reload (ganoh_theme + ganoh_theme_user set to 'dark' after user-initiated switch; back to 'light' on second toggle). Dark cinematic look preserved. Header logo visible in both themes. Nav pills show active state dark-green with white text as expected. No white-on-white or dark-on-dark issues detected.",
+  "verified_flows": [
+    "Fresh localStorage + login gestor/ganoh2024 -> /gestor/dashboard opens in LIGHT theme",
+    "KPI cards render with proper contrast (light bg, dark green text)",
+    "Tabs Gráfico/Gastos/Prazo/Cardápio/WhatsApp render acceptably in light theme",
+    "Theme toggle light -> dark works, ls persists (ganoh_theme=dark, ganoh_theme_user=dark)",
+    "Reload preserves dark theme (html.dark restored)",
+    "Theme toggle dark -> light works (ls back to light)",
+    "Store switcher Runner / GYM Londres present on Dashboard"
+  ]
+}

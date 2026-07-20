@@ -438,7 +438,7 @@ button:not(:disabled):active::after,
     opacity: 1;
     transition-duration: 0ms;
 }
-button, [role="button"] { position: relative; overflow: hidden; }
+button, [role="button"] { position: relative; }
 
 /* Cursor pointer on ALL interactive by default */
 button:not(:disabled),
@@ -455,5 +455,58 @@ select:focus-visible,
 textarea:focus-visible {
     outline: 2px solid rgba(16,185,129,0.7);
     outline-offset: 2px;
+}
+
+/* ============================================================
+   TEMA CLARO — Cozinha (o JSX original é claro; .kitchen-cinematic
+   é o override escuro. Sem ele, só precisamos do fundo e header)
+   ============================================================ */
+.kitchen-daylight {
+    background: linear-gradient(180deg, #f7f8f3 0%, #edf0e5 100%);
+    color: #22301c;
+}
+.kitchen-daylight > header {
+    background: rgba(255, 255, 255, 0.92) !important;
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(124, 179, 66, 0.22) !important;
+}
+.kitchen-daylight [role="tablist"] {
+    background: rgba(255, 255, 255, 0.85) !important;
+    border: 1px solid rgba(124, 179, 66, 0.18);
+}
+
+/* ============================================================
+   TEMA CLARO — Páginas cinematográficas (Seleção de loja, Login
+   do Gestor, Acesso da Equipe). O JSX é escuro fixo; estas regras
+   clareiam tudo quando o tema global é claro.
+   ============================================================ */
+html:not(.dark) .ganoh-dark-scene {
+    background: linear-gradient(180deg, #f7f8f3 0%, #edf0e5 100%) !important;
+    color: #26331f !important;
+}
+html:not(.dark) .ganoh-dark-scene [class*="text-white/"] {
+    color: rgba(38, 51, 31, 0.62) !important;
+}
+html:not(.dark) .ganoh-dark-scene .text-white {
+    color: #26331f !important;
+}
+html:not(.dark) .ganoh-dark-scene [class*="bg-white/"] {
+    background-color: rgba(255, 255, 255, 0.85) !important;
+}
+html:not(.dark) .ganoh-dark-scene [class*="border-white/"] {
+    border-color: rgba(124, 179, 66, 0.32) !important;
+}
+html:not(.dark) .ganoh-dark-scene [class*="text-[#a8d96b]"] {
+    color: #55831f !important;
+}
+html:not(.dark) .ganoh-dark-scene img[src*="ganoh-logo"] {
+    filter: none !important;
+}
+html:not(.dark) .ganoh-dark-scene input {
+    color: #26331f !important;
+}
+html:not(.dark) .ganoh-dark-scene input::placeholder {
+    color: rgba(38, 51, 31, 0.4) !important;
 }
 

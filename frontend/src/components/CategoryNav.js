@@ -35,7 +35,7 @@ export const CategoryNav = ({ categories, activeCategory, onCategoryChange }) =>
             aria-selected={isActive}
             data-testid={`category-${category.replace(/\s+/g, '-').toLowerCase()}`}
             className={cn(
-              "whitespace-nowrap px-5 py-2.5 rounded-full border transition-all duration-200 font-medium text-sm",
+              "whitespace-nowrap flex-shrink-0 px-5 py-2.5 rounded-full border transition-all duration-200 font-medium text-sm",
               isActive
                 ? "bg-brand-600 text-white border-brand-600 shadow-md"
                 : "bg-white text-foreground border-border hover:bg-brand-50 hover:border-brand-200"

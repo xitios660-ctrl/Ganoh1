@@ -1796,12 +1796,12 @@ async def get_today_cash(store: StoreLocation):
         "created_at": {"$gte": today_utc.isoformat()}
     }, {"_id": 0}).to_list(1000)
     
-    # Get manual PIX adjustments for today
+    # Get manual PIX adjustments for today (Python filter — DB has mixed timezone offsets)
     pix_adjustments = await db.pix_adjustments.find({
         "store": store.value,
         "removed": {"$ne": True},
-        "created_at": {"$gte": today_utc.isoformat()}
-    }, {"_id": 0}).to_list(1000)
+    }, {"_id": 0}).to_list(2000)
+    pix_adjustments = _filter_since(pix_adjustments, today_utc)
     pix_manual_total = sum(a.get("amount", 0) for a in pix_adjustments)
     
     # Separate PIX adjustments by shift
@@ -1900,6 +1900,24 @@ class CashBalanceAdjust(BaseModel):
     balance: float
     notes: Optional[str] = None
 
+def _parse_iso_utc(value):
+    """Parse an ISO timestamp with ANY offset into an aware UTC datetime (None on failure)."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+def _filter_since(items, since_dt, field="created_at"):
+    """Timezone-safe filter: DB has mixed offsets (-03:00 and +00:00), so string $gte is unreliable."""
+    if not since_dt:
+        return items
+    return [i for i in items if (_parse_iso_utc(i.get(field)) or datetime.min.replace(tzinfo=timezone.utc)) >= since_dt]
+
 @api_router.get("/cash/{store}/drawer")
 async def get_cash_drawer(store: StoreLocation):
     """Get current cash drawer status - persistent balance that only resets manually"""
@@ -1912,53 +1930,53 @@ async def get_cash_drawer(store: StoreLocation):
     drawer_config = await db.cash_drawer_config.find_one({"store": store.value}, {"_id": 0})
     initial_balance = drawer_config.get("balance", 0) if drawer_config else 0
     last_reset_at = drawer_config.get("last_reset_at") if drawer_config else None
+    last_reset_dt = _parse_iso_utc(last_reset_at)
     
-    # Build query for cash orders SINCE last reset (not just today)
+    # Cash orders since last reset — filtered in Python (timezone-safe)
     cash_query = {
         "store": store.value,
         "status": {"$in": ["ready", "delivered"]},
         "payment_method": "cash",
         "synthetic": {"$ne": True},
     }
-    if last_reset_at:
-        cash_query["created_at"] = {"$gte": last_reset_at}
-    
-    # Get all cash orders since last reset
     cash_orders = await db.orders.find(cash_query, {"_id": 0, "total": 1, "created_at": 1}).to_list(100000)
+    cash_orders = _filter_since(cash_orders, last_reset_dt)
     total_cash_sales = sum(o.get("total", 0) for o in cash_orders)
     
-    # Get prazo payments made in CASH since last reset
-    prazo_cash_query = {
-        "store": store.value,
-        "payment_method": "cash"
-    }
-    if last_reset_at:
-        prazo_cash_query["created_at"] = {"$gte": last_reset_at}
+    # Prazo payments made in CASH since last reset
+    prazo_cash_query = {"store": store.value, "payment_method": "cash"}
+    prazo_full_payments = _filter_since(
+        await db.prazo_payments.find(prazo_cash_query, {"_id": 0, "amount": 1, "created_at": 1}).to_list(10000),
+        last_reset_dt)
+    prazo_partial_payments = _filter_since(
+        await db.prazo_partial_payments.find(prazo_cash_query, {"_id": 0, "amount": 1, "created_at": 1}).to_list(10000),
+        last_reset_dt)
     
-    prazo_full_payments = await db.prazo_payments.find(prazo_cash_query, {"_id": 0, "amount": 1, "created_at": 1}).to_list(10000)
-    prazo_partial_payments = await db.prazo_partial_payments.find(prazo_cash_query, {"_id": 0, "amount": 1, "created_at": 1}).to_list(10000)
+    # Crédito adicionado em dinheiro além da dívida — dinheiro físico que entrou no caixa
+    credit_topups = _filter_since(
+        await db.cash_credit_topups.find(prazo_cash_query, {"_id": 0, "amount": 1, "created_at": 1}).to_list(10000),
+        last_reset_dt)
+    total_credit_topups = sum(t.get("amount", 0) for t in credit_topups)
     
-    total_prazo_cash = sum(p.get("amount", 0) for p in prazo_full_payments) + sum(p.get("amount", 0) for p in prazo_partial_payments)
+    total_prazo_cash = (sum(p.get("amount", 0) for p in prazo_full_payments)
+                        + sum(p.get("amount", 0) for p in prazo_partial_payments)
+                        + total_credit_topups)
     
-    # Build query for withdrawals SINCE last reset
-    withdrawal_query = {"store": store.value}
-    if last_reset_at:
-        withdrawal_query["created_at"] = {"$gte": last_reset_at}
-    
-    # Get all withdrawals since last reset
-    all_withdrawals = await db.cash_withdrawals.find(withdrawal_query, {"_id": 0}).to_list(10000)
+    # Withdrawals since last reset
+    all_withdrawals = _filter_since(
+        await db.cash_withdrawals.find({"store": store.value}, {"_id": 0}).to_list(10000),
+        last_reset_dt)
     total_withdrawn = sum(w.get("amount", 0) for w in all_withdrawals)
     
-    # Today's data for display only
-    today_cash_orders = [o for o in cash_orders if o.get("created_at", "") >= today_utc.isoformat()]
+    # Today's data for display only (timezone-safe)
+    today_cash_orders = _filter_since(cash_orders, today_utc)
     today_cash_in = sum(o.get("total", 0) for o in today_cash_orders)
     
-    # Today's prazo cash payments (use UTC consistently since DB stores UTC)
-    today_prazo_full = [p for p in prazo_full_payments if p.get("created_at", "") >= today_utc.isoformat()]
-    today_prazo_partial = [p for p in prazo_partial_payments if p.get("created_at", "") >= today_utc.isoformat()]
-    today_prazo_cash = sum(p.get("amount", 0) for p in today_prazo_full) + sum(p.get("amount", 0) for p in today_prazo_partial)
+    today_prazo_cash = (sum(p.get("amount", 0) for p in _filter_since(prazo_full_payments, today_utc))
+                        + sum(p.get("amount", 0) for p in _filter_since(prazo_partial_payments, today_utc))
+                        + sum(t.get("amount", 0) for t in _filter_since(credit_topups, today_utc)))
     
-    today_withdrawals = [w for w in all_withdrawals if w.get("created_at", "") >= today_utc.isoformat()]
+    today_withdrawals = _filter_since(all_withdrawals, today_utc)
     today_withdrawn = sum(w.get("amount", 0) for w in today_withdrawals)
     
     # Current balance = initial + all sales since reset + prazo cash payments - all withdrawals since reset
@@ -1969,7 +1987,8 @@ async def get_cash_drawer(store: StoreLocation):
         "date": now_brazil.strftime("%d/%m/%Y"),
         "initial_balance": round(initial_balance, 2),
         "total_cash_sales": round(total_cash_sales, 2),
-        "total_prazo_cash": round(total_prazo_cash, 2),  # Prazo payments made in cash
+        "total_prazo_cash": round(total_prazo_cash, 2),  # Prazo payments made in cash (incl. crédito antecipado)
+        "total_credit_topups": round(total_credit_topups, 2),
         "total_withdrawals": round(total_withdrawn, 2),
         "current_balance": round(current_balance, 2),
         # Today's data (for reference)
@@ -1991,32 +2010,37 @@ async def get_cash_drawer_debug(store: StoreLocation):
     drawer_config = await db.cash_drawer_config.find_one({"store": store.value}, {"_id": 0})
     initial_balance = drawer_config.get("balance", 0) if drawer_config else 0
     last_reset_at = drawer_config.get("last_reset_at") if drawer_config else None
+    last_reset_dt = _parse_iso_utc(last_reset_at)
     
-    # Build query for cash orders SINCE last reset
+    # Cash orders since last reset — filtered in Python (timezone-safe)
     cash_query = {
         "store": store.value,
         "status": {"$in": ["ready", "delivered"]},
         "payment_method": "cash",
         "synthetic": {"$ne": True},
     }
-    if last_reset_at:
-        cash_query["created_at"] = {"$gte": last_reset_at}
-    
-    # Get all cash orders with details
-    cash_orders = await db.orders.find(cash_query, {"_id": 0, "id": 1, "customer_name": 1, "total": 1, "created_at": 1, "status": 1, "manual_sale": 1}).sort("created_at", 1).to_list(1000)
+    cash_orders = await db.orders.find(cash_query, {"_id": 0, "id": 1, "customer_name": 1, "total": 1, "created_at": 1, "status": 1, "manual_sale": 1}).sort("created_at", 1).to_list(5000)
+    cash_orders = _filter_since(cash_orders, last_reset_dt)
     total_cash_sales = sum(o.get("total", 0) for o in cash_orders)
     
     # Get prazo payments made in CASH
-    prazo_cash_query = {
-        "store": store.value,
-        "payment_method": "cash"
-    }
-    if last_reset_at:
-        prazo_cash_query["created_at"] = {"$gte": last_reset_at}
-    
-    prazo_full_payments = await db.prazo_payments.find(prazo_cash_query, {"_id": 0}).sort("created_at", 1).to_list(1000)
-    prazo_partial_payments = await db.prazo_partial_payments.find(prazo_cash_query, {"_id": 0}).sort("created_at", 1).to_list(1000)
-    total_prazo_cash = sum(p.get("amount", 0) for p in prazo_full_payments) + sum(p.get("amount", 0) for p in prazo_partial_payments)
+    prazo_cash_query = {"store": store.value, "payment_method": "cash"}
+    prazo_full_payments = _filter_since(
+        await db.prazo_payments.find(prazo_cash_query, {"_id": 0}).sort("created_at", 1).to_list(1000),
+        last_reset_dt)
+    prazo_partial_payments = _filter_since(
+        await db.prazo_partial_payments.find(prazo_cash_query, {"_id": 0}).sort("created_at", 1).to_list(1000),
+        last_reset_dt)
+
+    # Crédito adicionado em dinheiro além da dívida (entra fisicamente no caixa)
+    credit_topups = _filter_since(
+        await db.cash_credit_topups.find(prazo_cash_query, {"_id": 0}).sort("created_at", 1).to_list(1000),
+        last_reset_dt)
+    total_credit_topups = sum(t.get("amount", 0) for t in credit_topups)
+
+    total_prazo_cash = (sum(p.get("amount", 0) for p in prazo_full_payments)
+                        + sum(p.get("amount", 0) for p in prazo_partial_payments)
+                        + total_credit_topups)
 
     # Also fetch prazo partial_payments WITHOUT payment_method (auto-apply records) — NOT counted, but shown for awareness
     auto_apply_no_pm_query = {
@@ -2024,15 +2048,14 @@ async def get_cash_drawer_debug(store: StoreLocation):
         "source": "credit_auto_apply",
         "payment_method": None,
     }
-    if last_reset_at:
-        auto_apply_no_pm_query["created_at"] = {"$gte": last_reset_at}
-    auto_apply_no_pm = await db.prazo_partial_payments.find(auto_apply_no_pm_query, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    auto_apply_no_pm = _filter_since(
+        await db.prazo_partial_payments.find(auto_apply_no_pm_query, {"_id": 0}).sort("created_at", 1).to_list(1000),
+        last_reset_dt)
 
     # Get withdrawals
-    withdrawal_query = {"store": store.value}
-    if last_reset_at:
-        withdrawal_query["created_at"] = {"$gte": last_reset_at}
-    all_withdrawals = await db.cash_withdrawals.find(withdrawal_query, {"_id": 0}).sort("created_at", 1).to_list(1000)
+    all_withdrawals = _filter_since(
+        await db.cash_withdrawals.find({"store": store.value}, {"_id": 0}).sort("created_at", 1).to_list(1000),
+        last_reset_dt)
     total_withdrawn = sum(w.get("amount", 0) for w in all_withdrawals)
     
     current_balance = initial_balance + total_cash_sales + total_prazo_cash - total_withdrawn
@@ -2048,6 +2071,8 @@ async def get_cash_drawer_debug(store: StoreLocation):
         "prazo_cash_payments": prazo_full_payments + prazo_partial_payments,
         "prazo_cash_count": len(prazo_full_payments) + len(prazo_partial_payments),
         "total_prazo_cash": round(total_prazo_cash, 2),
+        "credit_topups_cash": credit_topups,
+        "total_credit_topups": round(total_credit_topups, 2),
         "auto_apply_without_payment_method": auto_apply_no_pm,
         "auto_apply_without_payment_method_count": len(auto_apply_no_pm),
         "auto_apply_without_payment_method_total": round(sum(p.get("amount", 0) for p in auto_apply_no_pm), 2),
@@ -2055,7 +2080,7 @@ async def get_cash_drawer_debug(store: StoreLocation):
         "withdrawals": all_withdrawals,
         "total_withdrawn": round(total_withdrawn, 2),
         "current_balance": round(current_balance, 2),
-        "formula": f"{initial_balance} (inicial) + {round(total_cash_sales,2)} (vendas dinheiro) + {round(total_prazo_cash,2)} (prazo em dinheiro) - {round(total_withdrawn,2)} (saídas) = R$ {round(current_balance,2)}"
+        "formula": f"{initial_balance} (inicial) + {round(total_cash_sales,2)} (vendas dinheiro) + {round(total_prazo_cash,2)} (prazo em dinheiro, incl. {round(total_credit_topups,2)} de crédito antecipado) - {round(total_withdrawn,2)} (saídas) = R$ {round(current_balance,2)}"
     }
 
 @api_router.post("/cash/{store}/set-balance")
@@ -2094,14 +2119,14 @@ async def reset_cash_drawer(store: StoreLocation):
     brazil_tz = pytz.timezone('America/Sao_Paulo')
     now_brazil = datetime.now(brazil_tz)
     
-    # Set last_reset_at to now - this makes all previous orders/withdrawals not count
+    # Set last_reset_at to now (stored in UTC — comparisons are timezone-safe)
     await db.cash_drawer_config.update_one(
         {"store": store.value},
         {"$set": {
             "balance": 0,
-            "last_reset_at": now_brazil.isoformat(),
+            "last_reset_at": datetime.now(timezone.utc).isoformat(),
             "notes": f"Caixa zerado em {now_brazil.strftime('%d/%m/%Y %H:%M')}",
-            "updated_at": now_brazil.isoformat()
+            "updated_at": datetime.now(timezone.utc).isoformat()
         }},
         upsert=True
     )
@@ -2133,14 +2158,14 @@ async def withdraw_cash(store: StoreLocation, withdrawal: CashWithdrawal):
     if withdrawal.amount > current_drawer["current_balance"]:
         raise HTTPException(status_code=400, detail="Saldo insuficiente no caixa")
     
-    # Create withdrawal record
+    # Create withdrawal record (UTC — comparisons are timezone-safe)
     withdrawal_record = {
         "id": str(uuid.uuid4()),
         "store": store.value,
         "amount": withdrawal.amount,
         "category": withdrawal.category,
         "description": withdrawal.description or ("Vale Transporte" if withdrawal.category == "vt" else "Retirada de caixa"),
-        "created_at": now_brazil.isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
     
     await db.cash_withdrawals.insert_one({**withdrawal_record})
@@ -2154,7 +2179,7 @@ async def withdraw_cash(store: StoreLocation, withdrawal: CashWithdrawal):
             "category": "vt",
             "store": store.value,
             "notes": f"Retirado do caixa em {now_brazil.strftime('%d/%m/%Y %H:%M')}",
-            "created_at": now_brazil.isoformat(),
+            "created_at": datetime.now(timezone.utc).isoformat(),
             "image_url": ""
         }
         await db.expenses.insert_one({**expense})
@@ -2183,12 +2208,12 @@ async def get_pix_adjustments(store: str):
     now_brazil = datetime.now(brazil_tz)
     today_brazil = now_brazil.replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # Get all adjustments for this store (today) that are not removed
+    # Get all adjustments for this store (today) that are not removed (timezone-safe filter)
     adjustments = await db.pix_adjustments.find({
         "store": store,
         "removed": {"$ne": True},
-        "created_at": {"$gte": today_brazil.isoformat()}
-    }, {"_id": 0}).to_list(1000)
+    }, {"_id": 0}).to_list(2000)
+    adjustments = _filter_since(adjustments, today_brazil.astimezone(pytz.UTC))
     
     total_added = sum(a.get("amount", 0) for a in adjustments)
     
@@ -2210,7 +2235,7 @@ async def add_pix_adjustment(adjustment: PixAdjustment):
         "amount": adjustment.amount,
         "description": adjustment.description or "Ajuste manual PIX",
         "removed": False,
-        "created_at": now_brazil.isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat()
     }
     
     await db.pix_adjustments.insert_one({**new_adjustment})
@@ -3639,6 +3664,7 @@ async def add_prazo_credit(customer_id: str, credit_data: PrazoCreditAdd):
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Valor deve ser maior que zero")
 
+    pay_method = (credit_data.payment_method or "cash").lower()
     name = customer["name"]
     previous_credit = float(customer.get("credit", 0) or 0)
 
@@ -3685,7 +3711,7 @@ async def add_prazo_credit(customer_id: str, credit_data: PrazoCreditAdd):
             "amount": apply,
             "type": "partial_payment",
             "source": "credit_auto_apply",
-            "payment_method": credit_data.payment_method,
+            "payment_method": pay_method,
             "created_at": datetime.now(timezone.utc).isoformat(),
             "notes": credit_data.notes or "Abate automático ao adicionar crédito",
         })
@@ -3701,6 +3727,19 @@ async def add_prazo_credit(customer_id: str, credit_data: PrazoCreditAdd):
         {"id": customer_id},
         {"$set": {"credit": new_credit}},
     )
+
+    # Sobra em dinheiro além da dívida = dinheiro físico que entrou no caixa
+    if remaining > 0 and pay_method == "cash":
+        await db.cash_credit_topups.insert_one({
+            "id": str(uuid.uuid4()),
+            "store": customer.get("store", ""),
+            "customer_id": customer_id,
+            "customer_name": name,
+            "amount": remaining,
+            "payment_method": "cash",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "notes": "Crédito adicionado em dinheiro (valor além da dívida)",
+        })
 
     # Audit log entry (mirrors routers/prazo.py _log_prazo_event)
     try:

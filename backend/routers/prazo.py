@@ -300,6 +300,7 @@ async def add_prazo_credit(customer_id: str, credit_data: PrazoCreditAdd):
             "amount": apply,
             "type": "partial_payment",
             "source": "credit_auto_apply",
+            "payment_method": (credit_data.payment_method or "cash").lower(),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "notes": credit_data.notes or "Abate automático ao adicionar crédito",
         })
@@ -316,6 +317,19 @@ async def add_prazo_credit(customer_id: str, credit_data: PrazoCreditAdd):
         {"id": customer_id},
         {"$set": {"credit": new_credit}},
     )
+
+    # Sobra em dinheiro além da dívida = dinheiro físico que entrou no caixa
+    if remaining > 0 and (credit_data.payment_method or "cash").lower() == "cash":
+        await db.cash_credit_topups.insert_one({
+            "id": str(uuid.uuid4()),
+            "store": customer.get("store", ""),
+            "customer_id": customer_id,
+            "customer_name": name,
+            "amount": remaining,
+            "payment_method": "cash",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "notes": "Crédito adicionado em dinheiro (valor além da dívida)",
+        })
 
     # 3) Log a single consolidated event
     notes_summary = []

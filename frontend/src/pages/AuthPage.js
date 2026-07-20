@@ -122,7 +122,7 @@ export const AuthPage = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#070707] flex items-center justify-center p-4 relative overflow-hidden">
+    <div className="ganoh-dark-scene min-h-screen bg-[#070707] flex items-center justify-center p-4 relative overflow-hidden">
       <Toaster richColors position="top-center" />
 
       <CinematicBackground accent="#a8d96b" />

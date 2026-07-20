@@ -17,6 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Toaster, toast } from 'sonner';
 import { useKitchenBell } from '../hooks/useKitchenBell';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { useTheme } from '../context/ThemeContext';
 import { Bell, BellOff } from 'lucide-react';
 import { KitchenStage3D } from '../components/KitchenStage3D';
 import '../styles/kitchen-cinematic.css';
@@ -483,6 +484,8 @@ export const KitchenPage = () => {
   
   const prevOrderCount = useRef(0);
   const hasSeededOrderCountRef = useRef(false);
+  const { theme: uiTheme } = useTheme();
+  const isDarkKitchen = uiTheme === 'dark';
   const audioRef = useRef(null);
   const alarmIntervalRef = useRef(null);
   const [newOrderAlert, setNewOrderAlert] = useState(null); // { orders: [...], open: bool }
@@ -1211,16 +1214,16 @@ export const KitchenPage = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center relative overflow-hidden" style={{ background: 'radial-gradient(ellipse at center, #0a1410 0%, #050805 60%, #000000 100%)' }}>
-        <KitchenStage3D />
+      <div className="min-h-screen flex items-center justify-center relative overflow-hidden" style={{ background: isDarkKitchen ? 'radial-gradient(ellipse at center, #0a1410 0%, #050805 60%, #000000 100%)' : 'linear-gradient(180deg, #f7f8f3 0%, #edf0e5 100%)' }}>
+        {isDarkKitchen && <KitchenStage3D />}
         <div className="relative z-10 flex flex-col items-center gap-6">
           <div className="relative">
             <div className="w-16 h-16 border-4 border-transparent rounded-full animate-spin" style={{ borderTopColor: '#a8d96b', borderRightColor: '#a8d96b', filter: 'drop-shadow(0 0 24px rgba(168,217,107,0.6))' }} />
             <div className="absolute inset-0 w-16 h-16 border-4 border-transparent rounded-full animate-spin" style={{ borderBottomColor: 'rgba(168,217,107,0.3)', animationDirection: 'reverse', animationDuration: '2s' }} />
           </div>
           <div className="text-center">
-            <p style={{ fontFamily: 'Bodoni Moda, serif', fontSize: '1.4rem', color: '#d4f0a4', letterSpacing: '0.3em' }}>GANOH</p>
-            <p style={{ fontFamily: 'Manrope, sans-serif', fontSize: '0.7rem', color: 'rgba(233,240,225,0.5)', letterSpacing: '0.4em', textTransform: 'uppercase', marginTop: 8 }}>Preparando cozinha</p>
+            <p style={{ fontFamily: 'Bodoni Moda, serif', fontSize: '1.4rem', color: isDarkKitchen ? '#d4f0a4' : '#55831f', letterSpacing: '0.3em' }}>GANOH</p>
+            <p style={{ fontFamily: 'Manrope, sans-serif', fontSize: '0.7rem', color: isDarkKitchen ? 'rgba(233,240,225,0.5)' : 'rgba(38,51,31,0.55)', letterSpacing: '0.4em', textTransform: 'uppercase', marginTop: 8 }}>Preparando cozinha</p>
           </div>
         </div>
       </div>
@@ -1228,9 +1231,9 @@ export const KitchenPage = () => {
   }
 
   return (
-    <div className="min-h-screen kitchen-cinematic" data-testid="kitchen-page">
-      <KitchenStage3D />
-      <Toaster position="top-center" richColors theme="dark" />
+    <div className={`min-h-screen ${isDarkKitchen ? 'kitchen-cinematic' : 'kitchen-daylight'}`} data-testid="kitchen-page">
+      {isDarkKitchen && <KitchenStage3D />}
+      <Toaster position="top-center" richColors theme={isDarkKitchen ? 'dark' : 'light'} />
       
       {/* Header - Cinematic */}
       <header className="border-b sticky top-0 z-50 px-2 py-2">
