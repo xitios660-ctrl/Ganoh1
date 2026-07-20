@@ -701,7 +701,7 @@
    Designed for high readability with tabular-nums, JetBrains Mono.
    ==================================================================== */
 
-.kitchen-cinematic .kc-stat-hero {
+[data-testid="kitchen-page"] .kc-stat-hero {
   position: relative;
   overflow: hidden;
   border-radius: 18px;
@@ -716,11 +716,11 @@
   -webkit-backdrop-filter: blur(20px) saturate(140%);
 }
 
-.kitchen-cinematic .kc-stat-hero + .kc-stat-hero {
+[data-testid="kitchen-page"] .kc-stat-hero + .kc-stat-hero {
   margin-top: 14px;
 }
 
-.kitchen-cinematic .kc-stat-hero__decor {
+[data-testid="kitchen-page"] .kc-stat-hero__decor {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -730,24 +730,24 @@
 }
 
 /* Variant: brand (Total do Dia) */
-.kitchen-cinematic .kc-stat-hero--brand {
+[data-testid="kitchen-page"] .kc-stat-hero--brand {
   background:
     linear-gradient(135deg, #6ea636 0%, #4e7d22 60%, #355615 100%);
 }
 
 /* Variant: cash (Caixa) */
-.kitchen-cinematic .kc-stat-hero--cash {
+[data-testid="kitchen-page"] .kc-stat-hero--cash {
   background:
     linear-gradient(135deg, #2e6b4a 0%, #1f5036 55%, #133a25 100%);
 }
 
 /* Variant: pix (Ajustes PIX) */
-.kitchen-cinematic .kc-stat-hero--pix {
+[data-testid="kitchen-page"] .kc-stat-hero--pix {
   background:
     linear-gradient(135deg, #2a5dba 0%, #1c4493 55%, #122f6a 100%);
 }
 
-.kitchen-cinematic .kc-stat-hero__row {
+[data-testid="kitchen-page"] .kc-stat-hero__row {
   position: relative;
   display: flex;
   align-items: center;
@@ -757,14 +757,14 @@
   flex-wrap: wrap;
 }
 
-.kitchen-cinematic .kc-stat-hero__main {
+[data-testid="kitchen-page"] .kc-stat-hero__main {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.kitchen-cinematic .kc-stat-hero__label {
+[data-testid="kitchen-page"] .kc-stat-hero__label {
   font-family: "Manrope", sans-serif !important;
   font-size: 0.7rem;
   font-weight: 600;
@@ -775,7 +775,7 @@
   align-items: center;
 }
 
-.kitchen-cinematic .kc-stat-hero__value {
+[data-testid="kitchen-page"] .kc-stat-hero__value {
   font-family: "JetBrains Mono", "IBM Plex Mono", "SF Mono", "Roboto Mono", monospace !important;
   font-feature-settings: "tnum" 1, "lnum" 1;
   font-variant-numeric: tabular-nums;
@@ -788,7 +788,7 @@
 }
 
 /* Hero with main + side (Total do Dia) */
-.kitchen-cinematic .kc-stat-hero:not(.kc-stat-hero--cash):not(.kc-stat-hero--pix) {
+[data-testid="kitchen-page"] .kc-stat-hero:not(.kc-stat-hero--cash):not(.kc-stat-hero--pix) {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
@@ -796,7 +796,7 @@
   gap: 24px;
 }
 
-.kitchen-cinematic .kc-stat-hero__side {
+[data-testid="kitchen-page"] .kc-stat-hero__side {
   position: relative;
   display: flex;
   flex-direction: column;
@@ -808,7 +808,7 @@
   justify-content: center;
 }
 
-.kitchen-cinematic .kc-stat-hero__sublabel {
+[data-testid="kitchen-page"] .kc-stat-hero__sublabel {
   font-family: "Manrope", sans-serif !important;
   font-size: 0.65rem;
   font-weight: 600;
@@ -817,7 +817,7 @@
   color: rgba(255, 255, 255, 0.65);
 }
 
-.kitchen-cinematic .kc-stat-hero__subvalue {
+[data-testid="kitchen-page"] .kc-stat-hero__subvalue {
   font-family: "JetBrains Mono", "IBM Plex Mono", monospace !important;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
@@ -827,13 +827,13 @@
 }
 
 /* Actions row in cash & pix cards */
-.kitchen-cinematic .kc-stat-hero__actions {
+[data-testid="kitchen-page"] .kc-stat-hero__actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
 }
 
-.kitchen-cinematic .kc-stat-btn {
+[data-testid="kitchen-page"] .kc-stat-btn {
   background: rgba(255, 255, 255, 0.16) !important;
   border: 1px solid rgba(255, 255, 255, 0.25) !important;
   color: #ffffff !important;
@@ -847,29 +847,29 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
 }
 
-.kitchen-cinematic .kc-stat-btn:hover:not([disabled]) {
+[data-testid="kitchen-page"] .kc-stat-btn:hover:not([disabled]) {
   background: rgba(255, 255, 255, 0.28) !important;
   border-color: rgba(255, 255, 255, 0.45) !important;
   transform: translateY(-1px);
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
 }
 
-.kitchen-cinematic .kc-stat-btn[disabled] {
+[data-testid="kitchen-page"] .kc-stat-btn[disabled] {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-.kitchen-cinematic .kc-stat-btn--danger {
+[data-testid="kitchen-page"] .kc-stat-btn--danger {
   background: rgba(255, 75, 90, 0.4) !important;
   border-color: rgba(255, 120, 130, 0.5) !important;
 }
 
-.kitchen-cinematic .kc-stat-btn--danger:hover:not([disabled]) {
+[data-testid="kitchen-page"] .kc-stat-btn--danger:hover:not([disabled]) {
   background: rgba(255, 75, 90, 0.6) !important;
 }
 
 /* Mini grid (Saldo Inicial / Vendas / Retiradas) */
-.kitchen-cinematic .kc-mini-grid {
+[data-testid="kitchen-page"] .kc-mini-grid {
   position: relative;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -877,7 +877,7 @@
   margin-top: 4px;
 }
 
-.kitchen-cinematic .kc-mini {
+[data-testid="kitchen-page"] .kc-mini {
   background: rgba(0, 0, 0, 0.28);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 12px;
@@ -890,13 +890,13 @@
   transition: all 0.25s ease;
 }
 
-.kitchen-cinematic .kc-mini:hover {
+[data-testid="kitchen-page"] .kc-mini:hover {
   background: rgba(0, 0, 0, 0.38);
   border-color: rgba(255, 255, 255, 0.28);
   transform: translateY(-1px);
 }
 
-.kitchen-cinematic .kc-mini__label {
+[data-testid="kitchen-page"] .kc-mini__label {
   font-family: "Manrope", sans-serif !important;
   font-size: 0.62rem;
   font-weight: 600;
@@ -905,7 +905,7 @@
   color: rgba(255, 255, 255, 0.62);
 }
 
-.kitchen-cinematic .kc-mini__value {
+[data-testid="kitchen-page"] .kc-mini__value {
   font-family: "JetBrains Mono", "IBM Plex Mono", monospace !important;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
@@ -915,18 +915,18 @@
   letter-spacing: -0.01em;
 }
 
-.kitchen-cinematic .kc-mini--positive .kc-mini__value {
+[data-testid="kitchen-page"] .kc-mini--positive .kc-mini__value {
   color: #b6f0c1;
   text-shadow: 0 0 14px rgba(110, 245, 150, 0.35);
 }
 
-.kitchen-cinematic .kc-mini--negative .kc-mini__value {
+[data-testid="kitchen-page"] .kc-mini--negative .kc-mini__value {
   color: #ffc7c7;
   text-shadow: 0 0 14px rgba(255, 130, 130, 0.35);
 }
 
 /* Foot line (Hoje: ...) */
-.kitchen-cinematic .kc-stat-hero__foot {
+[data-testid="kitchen-page"] .kc-stat-hero__foot {
   position: relative;
   margin-top: 14px;
   padding-top: 12px;
@@ -938,14 +938,14 @@
 }
 
 /* Lists (withdrawals / pix adjustments) */
-.kitchen-cinematic .kc-list-block {
+[data-testid="kitchen-page"] .kc-list-block {
   position: relative;
   margin-top: 14px;
   padding-top: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.16);
 }
 
-.kitchen-cinematic .kc-list-block__title {
+[data-testid="kitchen-page"] .kc-list-block__title {
   font-family: "Manrope", sans-serif !important;
   font-size: 0.66rem;
   font-weight: 600;
@@ -955,7 +955,7 @@
   margin-bottom: 8px;
 }
 
-.kitchen-cinematic .kc-list-block__body {
+[data-testid="kitchen-page"] .kc-list-block__body {
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -964,16 +964,16 @@
   padding-right: 4px;
 }
 
-.kitchen-cinematic .kc-list-block__body::-webkit-scrollbar {
+[data-testid="kitchen-page"] .kc-list-block__body::-webkit-scrollbar {
   width: 4px;
 }
 
-.kitchen-cinematic .kc-list-block__body::-webkit-scrollbar-thumb {
+[data-testid="kitchen-page"] .kc-list-block__body::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.25);
   border-radius: 999px;
 }
 
-.kitchen-cinematic .kc-list-row {
+[data-testid="kitchen-page"] .kc-list-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -987,11 +987,11 @@
   transition: background 0.2s ease;
 }
 
-.kitchen-cinematic .kc-list-row:hover {
+[data-testid="kitchen-page"] .kc-list-row:hover {
   background: rgba(0, 0, 0, 0.4);
 }
 
-.kitchen-cinematic .kc-list-row__value {
+[data-testid="kitchen-page"] .kc-list-row__value {
   font-family: "JetBrains Mono", "IBM Plex Mono", monospace !important;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
@@ -999,10 +999,10 @@
   letter-spacing: -0.01em;
 }
 
-.kitchen-cinematic .kc-list-row__value--pos { color: #b6f0c1; }
-.kitchen-cinematic .kc-list-row__value--neg { color: #ffc7c7; }
+[data-testid="kitchen-page"] .kc-list-row__value--pos { color: #b6f0c1; }
+[data-testid="kitchen-page"] .kc-list-row__value--neg { color: #ffc7c7; }
 
-.kitchen-cinematic .kc-list-row__remove {
+[data-testid="kitchen-page"] .kc-list-row__remove {
   height: 24px !important;
   width: 24px !important;
   padding: 0 !important;
@@ -1011,27 +1011,27 @@
   border-radius: 8px !important;
 }
 
-.kitchen-cinematic .kc-list-row__remove:hover {
+[data-testid="kitchen-page"] .kc-list-row__remove:hover {
   background: rgba(255, 100, 100, 0.4) !important;
   color: #fff !important;
 }
 
 /* Responsive: stack mini-grid on small screens */
 @media (max-width: 640px) {
-  .kitchen-cinematic .kc-mini-grid {
+  [data-testid="kitchen-page"] .kc-mini-grid {
     grid-template-columns: 1fr;
   }
-  .kitchen-cinematic .kc-stat-hero__value {
+  [data-testid="kitchen-page"] .kc-stat-hero__value {
     font-size: 2.2rem;
   }
-  .kitchen-cinematic .kc-stat-hero__row {
+  [data-testid="kitchen-page"] .kc-stat-hero__row {
     flex-direction: column;
     align-items: flex-start;
   }
 }
 
 /* Override cinematic Bodoni serif for these values */
-.kitchen-cinematic .kc-stat-hero .text-2xl,
-.kitchen-cinematic .kc-stat-hero .text-xl {
+[data-testid="kitchen-page"] .kc-stat-hero .text-2xl,
+[data-testid="kitchen-page"] .kc-stat-hero .text-xl {
   font-family: "JetBrains Mono", "IBM Plex Mono", monospace !important;
 }

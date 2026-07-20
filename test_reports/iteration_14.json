@@ -1,0 +1,26 @@
+{
+  "summary": "Iteration 14: visual sweep of GANOH app in LIGHT theme after kc-* scope fix ([data-testid=kitchen-page] .kc-*). MAIN FIX CONFIRMED on mobile 480x900 and desktop 1920x800: Vendas tab renders all styled cards (green gradient TOTAL DO DIA, dark-green CAIXA · DINHEIRO R$ 197,75, mini-grid Saldo/Vendas/Retiradas, blue AJUSTES MANUAIS PIX, all action buttons). Mini-grid is single column on mobile and 3 columns on desktop as expected. NO plain concatenated text detected. Dark theme regression PASS: same premium cinematic cards render with identical gradients. Full sweep of other kitchen tabs (PIX, Pedidos, Prazo, Est., Card., Adic.) and Gestor dashboard tabs (Dashboard, Gráfico, Gastos, Prazo, Cardápio, WhatsApp) plus /, /runner, /auth, /equipe: all render in styled light theme with proper contrast and layout.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Kitchen > Est. (Estoque)", "issues": ["Stock quantities with many digits (e.g. Café com Leite '5555555555490') overflow the input area and visually overlap the +/- buttons. Pure data quality issue — not related to the kc-* light-theme fix. Suggest adding max-width/overflow-hidden or clamping displayed digits."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "OPTIONAL: fix Estoque numeric overflow in kitchen Est. tab (cosmetic only, pre-existing bad data)."
+  ],
+  "critical_code_review_comments": [
+    "Fix in /app/frontend/src/styles/kitchen-cinematic.css scoping kc-* selectors under [data-testid=kitchen-page] is correct and does not regress dark cinematic mode (both themes still receive the theme-neutral colored hero gradients).",
+    "Kitchen root element correctly toggles between class 'kitchen-daylight' (light) and 'kitchen-cinematic' (dark). Fix does not depend on that class anymore for kc-* cards, which is what the user needed."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a", "frontend": "100%"},
+  "seed_data_creation": "None. Did not touch /api/cash endpoints — Caixa · Dinheiro still R$ 197,75, Saldo Inicial R$ 93,00, +Vendas R$ 185,00, -Retiradas R$ 230,25 as before.",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "kc-* fix verified in both mobile & desktop, both themes. Full app visual sweep is clean in light theme. Only cosmetic overflow found in Estoque tab (bad stock number data). Kitchen page uses data-testid='kitchen-page' on root; Vendas tab uses .kc-stat-hero + .kc-mini-grid classes; Gestor uses gx-* classes (unaffected, already fine). Test credentials: gestor/ganoh2024 works and lands on /gestor/dashboard.",
+  "test_credentials": "gestor / ganoh2024 (verified working via /auth)"
+}
