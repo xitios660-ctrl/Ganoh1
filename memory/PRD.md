@@ -107,6 +107,24 @@ Senha do gestor: `ganoh2024`. Inclui parte da Cozinha e do Gestor.
 - Testes: iteration_12.json (backend 6/6 + frontend, 1 issue) e
   iteration_13.json (Gestor claro 100%)
 
+### Iteração 7 — Aba Vendas quebrada no claro + varredura (Jul 2026) ✅ TESTADO
+- BUG (produção): aba Vendas da Cozinha em tema claro renderizava texto puro
+  sem cartões. Causa: classes kc-* estilizadas só sob `.kitchen-cinematic`.
+  FIX: escopo trocado para `[data-testid="kitchen-page"] .kc-` (45 seletores)
+  — cartões coloridos (neutros de tema) valem no claro e no escuro
+- Varredura completa (iteration_14, 100%): todas as abas da cozinha, gestor,
+  /, /auth, /equipe, cardápio OK no claro; regressão dark OK; caixa intacto
+- Cosmético: quantidades de estoque gigantes agora exibidas compactas
+  (ex: 5,6 tri) sem sobrepor botões +/- (KitchenPage StockItem)
+- ⚠️ Usuário precisa dar Save to GitHub + redeploy para levar à produção
+
+### Auditoria de Segurança (Jul 2026) — AGUARDANDO DECISÃO DO USUÁRIO
+- Resultado: FAIL. SEC-001 caixa sem auth (leitura/escrita pública);
+  SEC-002 PII de clientes exposta (prazo/orders/drawer-debug);
+  SEC-003 PRAZO_PASSWORD default "1234" + senha staff hardcoded no JS;
+  SEC-004 login gestor fraco, base64 em localStorage, sem rate limit
+- Plano proposto via ask_human (login de equipe no servidor etc.) — sem resposta ainda
+
 ## Next Action Items
 - (P1) Divergência de caixa em PRODUÇÃO: 2 causas corrigidas no código
   (timezone no reset + crédito em dinheiro). Após redeploy, se ainda divergir,

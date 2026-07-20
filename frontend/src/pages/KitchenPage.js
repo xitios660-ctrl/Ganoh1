@@ -306,10 +306,10 @@ const StockItem = ({ item, onUpdate }) => {
         ) : (
           <button 
             onClick={handleEditClick}
-            className="w-10 h-6 text-center text-xs font-bold hover:bg-gray-100 rounded cursor-pointer transition-colors"
-            title="Clique para editar"
+            className="min-w-10 max-w-16 px-1 h-6 text-center text-xs font-bold hover:bg-gray-100 rounded cursor-pointer transition-colors truncate"
+            title={`${qty} — clique para editar`}
           >
-            {qty}
+            {qty > 99999 ? new Intl.NumberFormat('pt-BR', { notation: 'compact' }).format(qty) : qty}
           </button>
         )}
         <Button size="icon" variant="outline" className="h-6 w-6" onClick={() => handleUpdate(qty + 1)} disabled={updating}>
