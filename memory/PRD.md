@@ -66,7 +66,27 @@ Senha do gestor: `ganoh2024`. Inclui parte da Cozinha e do Gestor.
 - `/app/backend/server.py:1879` — filtro `synthetic` no endpoint duplicado
 - DB: pedidos sintéticos regenerados com agregados do dashboard
 
+### Iteração 4 — Correções Gestor/Prazo/Menu (sessão anterior)
+- Gráficos do Gestor ignoram Prazo não pago e incluem pagamentos de Prazo
+- Busca de Prazo case/accent-insensitive e cross-store; fix regex com `(personal)`
+- Lançamento Manual no Caixa do Gestor; auto-abate de dívida ao adicionar crédito
+- Fix edição de menu: `update_many` entre lojas + endpoint público `/api/menu/{store}` lê do DB
+- Criado `GET /api/cash/{store}/drawer-debug` para investigar divergência de caixa em produção
+
+### Iteração 5 — UI/UX (Jun 2026) ✅ TESTADO
+- Feedback visual hover/click em botões e cards (index.css ~400-440)
+- Modal fullscreen "Novo pedido!" na Cozinha com alarme sonoro em loop
+  (data-testid: new-order-alert / -view / -close) + toggles de som e sino
+- ThemeToggle claro/escuro nos headers do Gestor e Cozinha, com persistência
+- BUG FIX: modal não disparava na transição 0→1 pedido (seed-guard);
+  corrigido com `hasSeededOrderCountRef` em KitchenPage.js (~484, ~574)
+- Testes: iteration_10.json (5/6, achou o bug) + iteration_11.json (100%)
+
 ## Next Action Items
-- Save to GitHub + redeploy
+- (P1) Divergência de caixa em PRODUÇÃO: aguardando usuário enviar JSON de
+  `https://charts-3.emergent.host/api/cash/runner/drawer-debug`
+  (procurar `auto_apply_without_payment_method` e saques duplicados)
+- Save to GitHub + redeploy para levar as correções à produção
 - Consolidar os 2 endpoints `/api/cash/{store}/drawer` em um só
+- (P2) Tema claro completo em todos componentes, se o toggle não bastar
 - (Opcional) descobrir como gerar low_stock_alerts = 17+15
