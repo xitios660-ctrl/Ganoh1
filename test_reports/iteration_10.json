@@ -1,0 +1,46 @@
+{
+  "summary": "Frontend UI/UX verification for Kitchen (theme toggle, sound/bell toggles, new-order-alert modal, hover CSS) and Gestor dashboard (theme toggle + KPIs). Confirmed most features work, but found one BUG: the new-order-alert modal never fires for the FIRST incoming order when kitchen was empty (seed-guard uses `prevOrderCount.current > 0` which suppresses transitions from 0->N).",
+  "backend_issues": {
+    "critical": [],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "KitchenPage.js — polling / new-order-alert",
+        "issue": "Fullscreen new-order-alert modal does NOT appear when the kitchen has 0 pending orders and a first order arrives. Guard `if (prevOrderCount.current > 0 && newPendingCount > prevOrderCount.current)` at line ~573 requires previous count > 0, so the transition 0 -> 1 never triggers the alert. Verified reproducibly: 1st order created via API -> modal NOT shown; 2nd order created immediately after -> modal appears correctly with 'Novo pedido!', Ver Pedidos and Silenciar buttons (data-testid=new-order-alert, new-order-alert-view, new-order-alert-close). Close button dismisses the modal correctly.",
+        "selector": "[data-testid=\"new-order-alert\"]",
+        "priority": "HIGH"
+      }
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [],
+  "action_items": [
+    "Fix KitchenPage.js line ~573: replace the `prevOrderCount.current > 0` seed-guard with a boolean seeded ref (e.g. `hasSeededOrderCountRef.current`). Set it to true AFTER the first successful fetch, and use it in the alert condition. That way a 0 -> 1 transition still triggers the alert while the initial seed load itself remains silent."
+  ],
+  "critical_code_review_comments": [
+    "KitchenPage.js is >2950 lines — should be split into smaller focused modules (order polling, sound/bell logic, adicionais, stock, prazo, etc.) for maintainability.",
+    "The new-order-alert 'brand' array logic only inspects newly received orders on the current poll; if a poll misses (>6s gap) multiple new orders could arrive between polls but only the count-delta is used — brand slicing (line 578) is fine, but the seed-guard bug above makes the very first new order be missed silently."
+  ],
+  "updated_files": [],
+  "success_rate": {
+    "backend": "not tested (per request)",
+    "frontend": "~85% (5/6 checks pass; new-order-alert first-fire fails)"
+  },
+  "test_credentials": "gestor / ganoh2024 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "Created 3 test orders (customer names TEST_ALERT_MODAL_V2, TEST_A1, TEST_A2) via POST /api/orders. All 3 were cleaned up via DELETE /api/orders/runner/{id} — verified 200 responses. No lingering test data.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "To retest the new-order-alert fix: open /runner/cozinha (ensure kitchen is initially empty or note current count), wait ~8s for the first data seed, then create ONE order via POST /api/orders with payment_method='cash' and store='runner'. Modal with data-testid='new-order-alert' should appear within ~10s. Cleanup with DELETE /api/orders/runner/{order_id}. Theme-toggle and hover CSS verified working; Gestor login/theme verified working (KPI testids: kpi-receita-hoje/mes, kpi-pedidos-hoje/mes).",
+  "verified_features": [
+    "Kitchen header contains: bg-music-toggle, kitchen-home-btn, kitchen-switch-store-btn, sound toggle (title 'Som ativado'), theme-toggle (data-testid), kitchen-bell-toggle (data-testid)",
+    "Theme toggle in Kitchen persists across reload (localStorage — html.className='dark' after reload)",
+    "Hover CSS: '.kitchen-cinematic > header button:hover { transform: translateY(-1px) }' present in /app/frontend/src/index.css",
+    "Gestor login -> /gestor/dashboard; renders KPIs (kpi-receita-hoje, kpi-receita-mes, kpi-pedidos-hoje, kpi-pedidos-mes), Runner/GYM Londres switcher, 23 SVG chart nodes, and Mais/Menos Vendidos panels",
+    "Gestor theme-toggle switches html class '' <-> 'dark' cleanly without layout break",
+    "new-order-alert modal, when it fires (2nd+ order), shows 'Novo pedido!', order details, 'Ver Pedidos' and 'Silenciar' buttons; Silenciar closes it"
+  ],
+  "rca of the issue": "In /app/frontend/src/pages/KitchenPage.js around line 573: `if (prevOrderCount.current > 0 && newPendingCount > prevOrderCount.current) { ... setNewOrderAlert(...); startAlarmLoop(); }`. `prevOrderCount` is a useRef initialized to 0 (line 484). The `> 0` clause was intended to skip the initial page-load seeding, but it also skips the legitimate 0 -> N transition (empty kitchen receiving its first order). Fix: introduce a separate `hasSeededOrderCountRef = useRef(false)`; use `if (hasSeededOrderCountRef.current && newPendingCount > prevOrderCount.current)`; set `hasSeededOrderCountRef.current = true;` right after `prevOrderCount.current = newPendingCount;` on the first pass."
+}

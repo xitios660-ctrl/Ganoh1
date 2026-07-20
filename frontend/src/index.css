@@ -392,3 +392,68 @@ code {
     animation: logo3d-glow 5s ease-in-out infinite;
 }
 
+
+/* ============================================================
+   FEEDBACK VISUAL DE INTERAÇÃO
+   ============================================================ */
+
+/* Botões/cards/links: hover levanta levemente, press afunda */
+button:not(:disabled),
+[role="button"]:not(:disabled),
+a.gx-interactive,
+.gx-card-interactive {
+    transition: transform 120ms ease, box-shadow 160ms ease, background-color 160ms ease, filter 160ms ease;
+}
+button:not(:disabled):hover,
+[role="button"]:not(:disabled):hover,
+a.gx-interactive:hover,
+.gx-card-interactive:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.05);
+}
+button:not(:disabled):active,
+[role="button"]:not(:disabled):active,
+a.gx-interactive:active,
+.gx-card-interactive:active {
+    transform: translateY(0) scale(0.985);
+    filter: brightness(0.96);
+    transition-duration: 60ms;
+}
+
+/* Ripple effect on click for primary/secondary buttons */
+button:not(:disabled)::after,
+[role="button"]:not(:disabled)::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: radial-gradient(circle at var(--x, 50%) var(--y, 50%),
+        rgba(255,255,255,0.35) 0%, transparent 55%);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 340ms ease;
+}
+button:not(:disabled):active::after,
+[role="button"]:not(:disabled):active::after {
+    opacity: 1;
+    transition-duration: 0ms;
+}
+button, [role="button"] { position: relative; overflow: hidden; }
+
+/* Cursor pointer on ALL interactive by default */
+button:not(:disabled),
+[role="button"]:not(:disabled),
+a:not(:disabled),
+[data-testid]:not(input):not(textarea):not(select) { cursor: pointer; }
+button:disabled, [role="button"][aria-disabled="true"] { cursor: not-allowed; }
+
+/* Focus visível — acessibilidade */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+    outline: 2px solid rgba(16,185,129,0.7);
+    outline-offset: 2px;
+}
+

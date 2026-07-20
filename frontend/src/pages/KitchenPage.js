@@ -16,6 +16,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Toaster, toast } from 'sonner';
 import { useKitchenBell } from '../hooks/useKitchenBell';
+import { ThemeToggle } from '../components/ThemeToggle';
 import { Bell, BellOff } from 'lucide-react';
 import { KitchenStage3D } from '../components/KitchenStage3D';
 import '../styles/kitchen-cinematic.css';
@@ -482,43 +483,55 @@ export const KitchenPage = () => {
   
   const prevOrderCount = useRef(0);
   const audioRef = useRef(null);
+  const alarmIntervalRef = useRef(null);
+  const [newOrderAlert, setNewOrderAlert] = useState(null); // { orders: [...], open: bool }
 
-  // Initialize audio for new order notification
+  // Initialize audio: LOUD, repeating alert until dismissed
   useEffect(() => {
-    // Create a better notification sound using Web Audio API
-    const createNotificationSound = () => {
+    const playAlarmBurst = () => {
       try {
-        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-        
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        
-        oscillator.frequency.value = 880; // A5 note
-        oscillator.type = 'sine';
-        
-        gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-        
-        oscillator.start(audioContext.currentTime);
-        oscillator.stop(audioContext.currentTime + 0.5);
-      } catch (e) {
-        console.log('Audio not supported');
-      }
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        // Play a 3-note ascending alert twice — impossible to miss
+        [880, 1175, 1568, 880, 1175, 1568].forEach((freq, i) => {
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain); gain.connect(ctx.destination);
+          osc.frequency.value = freq;
+          osc.type = 'square';
+          const start = ctx.currentTime + i * 0.18;
+          gain.gain.setValueAtTime(0.4, start);
+          gain.gain.exponentialRampToValueAtTime(0.01, start + 0.16);
+          osc.start(start);
+          osc.stop(start + 0.16);
+        });
+      } catch (e) { /* audio unsupported */ }
     };
-    
-    audioRef.current = { play: createNotificationSound };
+    audioRef.current = { play: playAlarmBurst };
   }, []);
 
-  // Play sound when new order arrives
+  // Start looping alarm until user dismisses
+  const startAlarmLoop = useCallback(() => {
+    if (!soundEnabled || alarmIntervalRef.current) return;
+    audioRef.current?.play();
+    alarmIntervalRef.current = setInterval(() => {
+      audioRef.current?.play();
+    }, 2500);
+  }, [soundEnabled]);
+
+  const stopAlarmLoop = useCallback(() => {
+    if (alarmIntervalRef.current) {
+      clearInterval(alarmIntervalRef.current);
+      alarmIntervalRef.current = null;
+    }
+  }, []);
+
+  // Cleanup interval on unmount
+  useEffect(() => () => stopAlarmLoop(), [stopAlarmLoop]);
+
+  // Legacy short beep (kept for status-change use)
   const playNewOrderSound = useCallback(() => {
     if (soundEnabled && audioRef.current) {
-      try {
-        audioRef.current.play();
-      } catch (e) {
-        console.log('Could not play sound');
-      }
+      try { audioRef.current.play(); } catch (e) { /* ignore */ }
     }
   }, [soundEnabled]);
 
@@ -556,11 +569,16 @@ export const KitchenPage = () => {
       
       if (ordersRes && pixRes) {
         const newOrders = ordersRes.data.orders.filter(o => !['delivered', 'pending_payment', 'payment_rejected'].includes(o.status));
-        // Check if there are new orders
         const newPendingCount = newOrders.filter(o => o.status === 'received').length + pixRes.data.orders.length;
         if (prevOrderCount.current > 0 && newPendingCount > prevOrderCount.current) {
-          playNewOrderSound();
-          toast.info('Novo pedido!', { duration: 3000 });
+          // Detected a NEW incoming order → capture the freshest received ones
+          const receivedNow = newOrders
+            .filter(o => o.status === 'received')
+            .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+          const brand = receivedNow.slice(0, newPendingCount - prevOrderCount.current);
+          setNewOrderAlert({ orders: brand.length ? brand : receivedNow.slice(0, 1), open: true });
+          startAlarmLoop();
+          toast.info('Novo pedido chegou!', { duration: 5000 });
         }
         prevOrderCount.current = newPendingCount;
         setOrders(newOrders);
@@ -1278,6 +1296,7 @@ export const KitchenPage = () => {
             >
               {soundEnabled ? <Volume2 className="h-4 w-4" /> : <VolumeX className="h-4 w-4" />}
             </Button>
+            <ThemeToggle className="!h-8 !w-8" />
             <Button 
               variant={bellEnabled ? "default" : "outline"} 
               size="icon" 
@@ -2853,6 +2872,81 @@ export const KitchenPage = () => {
           })()}
         </DialogContent>
       </Dialog>
+
+      {/* BIG new-order alert — modal fullscreen bloqueante com alarme sonoro em loop */}
+      {newOrderAlert?.open && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 animate-in fade-in duration-300"
+          data-testid="new-order-alert"
+          role="alertdialog"
+          aria-live="assertive"
+        >
+          <div
+            className="max-w-2xl w-full rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-300"
+            style={{
+              background: 'linear-gradient(135deg,#059669 0%,#10b981 60%,#34d399 100%)',
+              animation: 'ganoh-pulse 1s ease-in-out infinite',
+            }}
+          >
+            <style>{`
+              @keyframes ganoh-pulse {
+                0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.7); }
+                50%      { box-shadow: 0 0 0 22px rgba(16,185,129,0); }
+              }
+            `}</style>
+            <div className="px-8 pt-8 pb-4 text-white">
+              <div className="flex items-center gap-4 mb-4">
+                <div className="text-6xl">🔔</div>
+                <div>
+                  <h2 className="text-3xl font-black tracking-tight">Novo pedido!</h2>
+                  <p className="text-white/85 text-sm">{store === 'runner' ? 'Runner' : 'GYM Londres'} · agora mesmo</p>
+                </div>
+              </div>
+              <div className="bg-white/15 backdrop-blur rounded-2xl p-4 space-y-2 max-h-[45vh] overflow-y-auto">
+                {(newOrderAlert.orders || []).map((o, idx) => (
+                  <div key={o.id || idx} className="bg-white/95 text-gray-900 rounded-xl px-4 py-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="font-bold text-lg truncate">#{o.order_number || (idx + 1)} — {o.customer_name || 'Sem nome'}</p>
+                      <span className="text-xs font-semibold text-emerald-700 bg-emerald-100 rounded px-2 py-0.5">
+                        {o.pickup_time === 'manha' ? 'MANHÃ' : o.pickup_time === 'tarde' ? 'TARDE' : (o.pickup_time || 'AGORA').toUpperCase()}
+                      </span>
+                    </div>
+                    <p className="text-sm text-gray-700 truncate">
+                      {(o.items || []).slice(0, 3).map((i) => `${i.quantity || 1}× ${i.name}`).join(' · ')}
+                      {(o.items || []).length > 3 ? ` +${o.items.length - 3}` : ''}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      R$ {Number(o.total || 0).toFixed(2)} · {String(o.payment_method || '').toUpperCase()}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className="px-8 pb-8 pt-2 flex flex-col sm:flex-row gap-3">
+              <Button
+                className="flex-1 h-14 text-lg font-bold bg-white text-emerald-700 hover:bg-emerald-50 active:scale-95 transition-transform"
+                onClick={() => {
+                  stopAlarmLoop();
+                  setNewOrderAlert(null);
+                  // Scroll to top so operator sees the fresh orders list
+                  try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch (_e) { /* ignore */ }
+                }}
+                data-testid="new-order-alert-view"
+              >
+                👀 Ver Pedidos
+              </Button>
+              <Button
+                variant="ghost"
+                className="h-14 text-white hover:bg-white/10 border border-white/30 active:scale-95 transition-transform"
+                onClick={() => { stopAlarmLoop(); setNewOrderAlert(null); }}
+                data-testid="new-order-alert-close"
+              >
+                Silenciar
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

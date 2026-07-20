@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import { AdicionaisTab, WhatsAppTab, PrazoTab } from '../components/gestor';
+import { ThemeToggle } from '../components/ThemeToggle';
 import '../styles/gestor-cinematic.css';
 
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
@@ -1323,6 +1324,7 @@ export const GestorPage = () => {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <button className="gx-icon-btn" onClick={() => { setIsRefreshing(true); fetchDashboard(true); }} disabled={isRefreshing} title="Atualizar" data-testid="gestor-refresh-btn">
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
             </button>
