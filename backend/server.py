@@ -28,6 +28,11 @@ mongo_url = os.environ['MONGO_URL']
 client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ['DB_NAME']]
 
+# WhatsApp provider: preserve Green API compatibility; Render uses Baileys.
+WHATSAPP_PROVIDER = os.environ.get("WHATSAPP_PROVIDER", "greenapi").lower()
+BAILEYS_URL = "http://127.0.0.1:8002"
+BAILEYS_TOKEN = os.environ.get("WHATSAPP_INTERNAL_TOKEN", "")
+
 # Green API Configuration (Cloud WhatsApp)
 GREEN_API_URL = os.environ.get("GREEN_API_URL", "https://7107.api.greenapi.com")
 GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE", "7107550497")
@@ -50,8 +55,21 @@ security = HTTPBasic()
 
 # ==================== GREEN API HELPER FUNCTIONS ====================
 def get_green_api_url(method: str) -> str:
-    """Build the Green API URL for a specific method"""
+    """Build the selected provider URL (Baileys listens only on loopback)."""
+    if WHATSAPP_PROVIDER == "baileys":
+        return f"{BAILEYS_URL}/{method}"
     return f"{GREEN_API_URL}/waInstance{GREEN_API_INSTANCE}/{method}/{GREEN_API_TOKEN}"
+
+def get_whatsapp_headers() -> dict:
+    return {"x-whatsapp-token": BAILEYS_TOKEN} if WHATSAPP_PROVIDER == "baileys" else {}
+
+async def verify_whatsapp_manager(credentials: HTTPBasicCredentials = Depends(security)):
+    user = (credentials.username or "").strip().lower()
+    password = (credentials.password or "").strip()
+    tenant = await get_tenant_by_credentials(user, password)
+    if tenant:
+        return tenant["id"]
+    return verify_gestor(credentials)
 
 async def send_whatsapp_message(message: str, group_id: str = None) -> dict:
     """Send a text message via Green API"""
@@ -60,11 +78,13 @@ async def send_whatsapp_message(message: str, group_id: str = None) -> dict:
         async with httpx.AsyncClient(timeout=15.0) as client_http:
             response = await client_http.post(
                 get_green_api_url("sendMessage"),
+                headers=get_whatsapp_headers(),
                 json={
                     "chatId": target,
                     "message": message
                 }
             )
+            response.raise_for_status()
             data = response.json()
             return {"success": True, "data": data}
     except Exception as e:
@@ -145,6 +165,7 @@ async def send_whatsapp_notification(
             async with httpx.AsyncClient(timeout=30.0) as client_http:
                 response = await client_http.post(
                     get_green_api_url("sendFileByUpload"),
+                headers=get_whatsapp_headers(),
                     data={
                         "chatId": target,
                         "caption": message
@@ -222,7 +243,8 @@ async def ensure_default_tenant():
             "is_default": True
         })
         logging.info("Default tenant 'gestor' created")
-    else:
+    elif os.environ.get("SYNC_GESTOR_PASSWORD", "false").lower() == "true":
+        # Explicit opt-in: preserve imported credentials during migration.
         # Always sync the default tenant's password to the configured default,
         # so previously seeded weak passwords are auto-rotated on startup.
         new_hash = hashlib.sha256(default_password.encode()).hexdigest()
@@ -5389,7 +5411,7 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
     }
 
 # ==================== ADMIN CLEAR DATA ROUTE ====================
-CLEAR_DATA_PASSWORD = "152637"
+CLEAR_DATA_PASSWORD = os.environ.get("CLEAR_DATA_PASSWORD", "152637")
 
 @api_router.post("/admin/clear-data")
 async def clear_all_data(password: str):
@@ -5435,45 +5457,63 @@ async def clear_store_data(store: StoreLocation, password: str):
     
     return {"success": True, "message": f"Todos os dados da loja {store.value} apagados: pedidos, gastos, histórico e gráficos", "deleted_count": result.deleted_count}
 
-# ==================== WHATSAPP GREEN API PROXY ====================
+# ==================== WHATSAPP PROVIDER PROXY ====================
 
-@api_router.get("/whatsapp/status")
+@api_router.post("/whatsapp/connect", dependencies=[Depends(verify_whatsapp_manager)])
+async def connect_whatsapp():
+    if WHATSAPP_PROVIDER != "baileys":
+        return {"success": True, "provider": "greenapi"}
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client_http:
+            response = await client_http.post(f"{BAILEYS_URL}/connect", headers=get_whatsapp_headers())
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPError:
+        raise HTTPException(status_code=503, detail="Serviço do WhatsApp indisponível")
+
+
+@api_router.get("/whatsapp/status", dependencies=[Depends(verify_whatsapp_manager)])
 async def get_whatsapp_status():
     """Get WhatsApp status via Green API"""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client_http:
-            response = await client_http.get(get_green_api_url("getStateInstance"))
+            response = await client_http.get(get_green_api_url("getStateInstance"), headers=get_whatsapp_headers())
+            response.raise_for_status()
             data = response.json()
             state = data.get("stateInstance", "unknown")
             return {
                 "status": "connected" if state == "authorized" else state,
                 "connected": state == "authorized",
                 "qrCode": None,
-                "greenApi": True
+                "greenApi": WHATSAPP_PROVIDER == "greenapi",
+                "provider": WHATSAPP_PROVIDER,
+                "sendingEnabled": data.get("sendingEnabled", True)
             }
     except Exception as e:
         return {"status": "offline", "connected": False, "qrCode": None, "error": str(e)}
 
-@api_router.get("/whatsapp/qr")
+@api_router.get("/whatsapp/qr", dependencies=[Depends(verify_whatsapp_manager)])
 async def get_whatsapp_qr():
     """Get WhatsApp QR code via Green API (if needed for reconnection)"""
     try:
         async with httpx.AsyncClient(timeout=10.0) as client_http:
-            response = await client_http.get(get_green_api_url("qr"))
+            response = await client_http.get(get_green_api_url("qr"), headers=get_whatsapp_headers())
+            response.raise_for_status()
             data = response.json()
             return {"qrCode": data.get("message"), "connected": False}
     except Exception as e:
         return {"qrCode": None, "connected": False, "error": str(e)}
 
-@api_router.get("/whatsapp/groups")
+@api_router.get("/whatsapp/groups", dependencies=[Depends(verify_whatsapp_manager)])
 async def get_whatsapp_groups():
     """Get WhatsApp groups via Green API"""
     try:
         async with httpx.AsyncClient(timeout=15.0) as client_http:
-            response = await client_http.get(get_green_api_url("getChats"))
+            response = await client_http.get(get_green_api_url("getChats"), headers=get_whatsapp_headers())
+            response.raise_for_status()
             data = response.json()
             groups = [
-                {"id": chat.get("id"), "name": chat.get("name", "Grupo")}
+                {"id": chat.get("id"), "name": chat.get("name", "Grupo"), "participants": chat.get("participants", 0)}
                 for chat in data if "@g.us" in chat.get("id", "")
             ]
             return {"success": True, "groups": groups, "currentTarget": WHATSAPP_GROUP_ID}
@@ -5483,11 +5523,14 @@ async def get_whatsapp_groups():
 class WhatsAppTargetUpdate(BaseModel):
     target: str
 
-@api_router.post("/whatsapp/set-target")
+@api_router.post("/whatsapp/set-target", dependencies=[Depends(verify_whatsapp_manager)])
 async def set_whatsapp_target(data: WhatsAppTargetUpdate):
     """Set WhatsApp notification target group"""
     global WHATSAPP_GROUP_ID
+    if not re.fullmatch(r"\d[\d-]*@(g\.us|s\.whatsapp\.net|c\.us)", data.target):
+        raise HTTPException(status_code=400, detail="Destino WhatsApp inválido")
     WHATSAPP_GROUP_ID = data.target
+    STORE_WHATSAPP_GROUPS["gym-londres"] = data.target
     # Save to database for persistence
     await db.settings.update_one(
         {"key": "whatsapp_group_id"},
@@ -5499,7 +5542,7 @@ async def set_whatsapp_target(data: WhatsAppTargetUpdate):
 class WhatsAppJoinGroup(BaseModel):
     inviteLink: str
 
-@api_router.post("/whatsapp/join-group")
+@api_router.post("/whatsapp/join-group", dependencies=[Depends(verify_whatsapp_manager)])
 async def join_whatsapp_group(data: WhatsAppJoinGroup):
     """Join a WhatsApp group via invite link using Green API"""
     try:
@@ -5514,6 +5557,7 @@ async def join_whatsapp_group(data: WhatsAppJoinGroup):
             # Get group info
             response = await client_http.post(
                 get_green_api_url("getGroupDataByInviteLink"),
+                headers=get_whatsapp_headers(),
                 json={"inviteLink": f"https://chat.whatsapp.com/{invite_code}"}
             )
             group_data = response.json()
@@ -6280,7 +6324,13 @@ async def _register_manual_morning_sales_runner_v1():
 async def startup_db_client():
     """Initialize database, scheduler and default tenant"""
     await ensure_default_tenant()
-    await _register_manual_morning_sales_runner_v1()
+    # Historical sales must only come from the verified migration, never from startup.
+    # The old helper is kept for historical reference and is deliberately not executed.
+    global WHATSAPP_GROUP_ID
+    target_setting = await db.settings.find_one({"key": "whatsapp_group_id"})
+    if target_setting and target_setting.get("value"):
+        WHATSAPP_GROUP_ID = target_setting["value"]
+        STORE_WHATSAPP_GROUPS["gym-londres"] = WHATSAPP_GROUP_ID
     
     # Performance: create indexes on hot query paths
     try:
@@ -6315,13 +6365,15 @@ async def startup_db_client():
         id='daily_sales_report'
     )
     
-    scheduler.start()
+    if os.environ.get("SCHEDULER_ENABLED", "true").lower() == "true":
+        scheduler.start()
     logger.info("Database initialized, default tenant ensured")
     logger.info("Scheduler started - Auto-ready every 1 min, Morning report at 14:00, Daily report at 22:00")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
-    scheduler.shutdown()
+    if scheduler.running:
+        scheduler.shutdown()
     client.close()
 
 # Import and configure new routers

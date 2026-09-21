@@ -1,0 +1,14 @@
+.git
+**/node_modules
+**/build
+**/.env
+**/.env.*
+**/__pycache__
+**/.pytest_cache
+**/tests
+.screenshots
+test_reports
+memory
+.emergent
+**/backups
+**/*.bson

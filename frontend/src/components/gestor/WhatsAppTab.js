@@ -14,6 +14,9 @@ export function WhatsAppTab({
   whatsappTargetInput,
   setWhatsappTargetInput,
   onJoinGroup,
+  onConnect,
+  onSaveTarget,
+  sendingEnabled,
   onRefreshStatus
 }) {
   return (
@@ -40,6 +43,9 @@ export function WhatsAppTab({
           <span className="font-medium">
             {whatsappStatus === 'connected' ? '✅ Conectado' :
              whatsappStatus === 'waiting_qr' ? '📱 Aguardando QR Code...' :
+             whatsappStatus === 'connecting' ? '🔄 Conectando...' :
+             whatsappStatus === 'logged_out' ? '📱 Conecte novamente pelo QR Code' :
+             whatsappStatus === 'connection_conflict' ? '⚠️ Conexão usada em outro serviço' :
              whatsappStatus === 'reconnecting' ? '🔄 Reconectando...' :
              whatsappStatus === 'offline' ? '⚠️ Bot offline (inicie o serviço)' :
              '❌ Desconectado'}
@@ -73,7 +79,7 @@ export function WhatsAppTab({
               Clique no botão abaixo para gerar o QR Code e reconectar.
             </p>
             <Button 
-              onClick={onRefreshStatus}
+              onClick={onConnect || onRefreshStatus}
               className="bg-green-600 hover:bg-green-700"
             >
               <RefreshCw className="h-4 w-4 mr-2" /> Gerar QR Code
@@ -86,7 +92,7 @@ export function WhatsAppTab({
             <div className="bg-green-50 p-4 rounded-lg border border-green-200">
               <p className="text-green-700 font-medium">🎉 WhatsApp conectado com sucesso!</p>
               <p className="text-sm text-green-600 mt-2">
-                Quando um PIX for aprovado, você receberá uma notificação automática com a foto do comprovante.
+                {sendingEnabled ? 'Notificações automáticas habilitadas.' : 'Conexão pronta. O envio de mensagens aguarda a conclusão da migração.'}
               </p>
             </div>
             
@@ -105,8 +111,8 @@ export function WhatsAppTab({
                   placeholder="https://chat.whatsapp.com/xxx"
                   className="flex-1"
                 />
-                <Button onClick={onJoinGroup} className="bg-green-600 hover:bg-green-700">
-                  Entrar no Grupo
+                <Button onClick={whatsappTargetInput.includes('chat.whatsapp.com') ? onJoinGroup : onSaveTarget} className="bg-green-600 hover:bg-green-700">
+                  {whatsappTargetInput.includes('chat.whatsapp.com') ? 'Entrar no Grupo' : 'Salvar destino'}
                 </Button>
               </div>
               {whatsappTarget && (

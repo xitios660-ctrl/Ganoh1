@@ -1,0 +1,43 @@
+services:
+  - type: web
+    name: ganoh1
+    runtime: docker
+    plan: free
+    branch: main
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeploy: false
+    envVars:
+      - key: MONGO_URL
+        sync: false
+      - key: DB_NAME
+        value: ganoh_production
+      - key: GESTOR_PASSWORD
+        sync: false
+      - key: PRAZO_PASSWORD
+        sync: false
+      - key: CLEAR_DATA_PASSWORD
+        sync: false
+      - key: WHATSAPP_PROVIDER
+        value: baileys
+      - key: WHATSAPP_INTERNAL_TOKEN
+        generateValue: true
+      - key: WHATSAPP_SESSION_KEY
+        generateValue: true
+      - key: MIGRATION_PENDING
+        value: "true"
+      - key: SCHEDULER_ENABLED
+        value: "false"
+      - key: WHATSAPP_SEND_ENABLED
+        value: "false"
+      - key: SYNC_GESTOR_PASSWORD
+        value: "false"
+      - key: EMERGENT_LLM_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: WHATSAPP_GROUP_ID
+        sync: false
+      - key: WHATSAPP_GROUP_RUNNER
+        sync: false

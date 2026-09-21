@@ -144,6 +144,7 @@ export const GestorPage = () => {
   // WhatsApp Bot states
   const [whatsappStatus, setWhatsappStatus] = useState('disconnected');
   const [whatsappQR, setWhatsappQR] = useState(null);
+  const [whatsappSendingEnabled, setWhatsappSendingEnabled] = useState(false);
   const [whatsappGroups, setWhatsappGroups] = useState([]);
   const [whatsappTarget, setWhatsappTarget] = useState('');
   const [whatsappTargetInput, setWhatsappTargetInput] = useState('');
@@ -481,15 +482,30 @@ export const GestorPage = () => {
     }
   };
 
+  const whatsappAuthConfig = () => {
+    const value = localStorage.getItem('gestor_auth');
+    return { headers: value ? { Authorization: `Basic ${value}` } : {}, timeout: 15000 };
+  };
+
+  const connectWhatsApp = async () => {
+    try {
+      await axios.post(`${API}/whatsapp/connect`, {}, whatsappAuthConfig());
+      await fetchWhatsAppStatus();
+    } catch (error) {
+      toast.error('Não foi possível iniciar a conexão. Confira o serviço do WhatsApp.');
+    }
+  };
+
   const fetchWhatsAppStatus = async () => {
     try {
-      const response = await axios.get(`${API}/whatsapp/status`, { timeout: 5000 });
+      const response = await axios.get(`${API}/whatsapp/status`, whatsappAuthConfig());
       setWhatsappStatus(response.data.status);
+      setWhatsappSendingEnabled(response.data.sendingEnabled === true);
       
       // If not connected, fetch QR code
       if (response.data.status !== 'connected' && response.data.status !== 'offline') {
         try {
-          const qrResponse = await axios.get(`${API}/whatsapp/qr`, { timeout: 10000 });
+          const qrResponse = await axios.get(`${API}/whatsapp/qr`, whatsappAuthConfig());
           setWhatsappQR(qrResponse.data.qrCode);
         } catch (e) {
           console.log('Could not fetch QR code');
@@ -501,7 +517,7 @@ export const GestorPage = () => {
       // Fetch groups if connected
       if (response.data.status === 'connected') {
         try {
-          const groupsResponse = await axios.get(`${API}/whatsapp/groups`, { timeout: 5000 });
+          const groupsResponse = await axios.get(`${API}/whatsapp/groups`, whatsappAuthConfig());
           setWhatsappGroups(groupsResponse.data.groups || []);
           setWhatsappTarget(groupsResponse.data.currentTarget || '');
         } catch (e) {
@@ -510,12 +526,13 @@ export const GestorPage = () => {
       }
     } catch (error) {
       setWhatsappStatus('offline');
+      setWhatsappQR(null);
     }
   };
 
   const saveWhatsAppTarget = async () => {
     try {
-      await axios.post(`${API}/whatsapp/set-target`, { target: whatsappTargetInput });
+      await axios.post(`${API}/whatsapp/set-target`, { target: whatsappTargetInput }, whatsappAuthConfig());
       setWhatsappTarget(whatsappTargetInput);
       toast.success('Destino das notificações atualizado!');
     } catch (error) {
@@ -530,7 +547,7 @@ export const GestorPage = () => {
     }
     try {
       toast.loading('Entrando no grupo...', { id: 'join-group' });
-      const response = await axios.post(`${API}/whatsapp/join-group`, { inviteLink: whatsappTargetInput });
+      const response = await axios.post(`${API}/whatsapp/join-group`, { inviteLink: whatsappTargetInput }, whatsappAuthConfig());
       if (response.data.success) {
         toast.success('Entrou no grupo com sucesso!', { id: 'join-group' });
         setWhatsappTarget(response.data.groupId);
@@ -2250,6 +2267,9 @@ export const GestorPage = () => {
               whatsappTargetInput={whatsappTargetInput}
               setWhatsappTargetInput={setWhatsappTargetInput}
               onJoinGroup={joinWhatsAppGroup}
+              onConnect={connectWhatsApp}
+              onSaveTarget={saveWhatsAppTarget}
+              sendingEnabled={whatsappSendingEnabled}
               onRefreshStatus={fetchWhatsAppStatus}
             />
           </TabsContent>
