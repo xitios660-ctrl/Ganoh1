@@ -103,16 +103,16 @@ async def get_today_cash(store: str):
                 if 6 <= brazil_hour < 14:
                     shift_morning["total"] += amount
                     shift_morning["count"] += 1
-                    shift_morning["by_payment"][payment] += amount
+                    shift_morning["by_payment"][payment] = shift_morning["by_payment"].get(payment, 0) + amount
                 else:
                     shift_afternoon["total"] += amount
                     shift_afternoon["count"] += 1
-                    shift_afternoon["by_payment"][payment] += amount
+                    shift_afternoon["by_payment"][payment] = shift_afternoon["by_payment"].get(payment, 0) + amount
         except Exception:
             if payment != "prazo":
                 shift_afternoon["total"] += amount
                 shift_afternoon["count"] += 1
-                shift_afternoon["by_payment"][payment] += amount
+                shift_afternoon["by_payment"][payment] = shift_afternoon["by_payment"].get(payment, 0) + amount
     
     # Add manual PIX adjustments
     by_payment_value["pix"] += pix_manual_total
