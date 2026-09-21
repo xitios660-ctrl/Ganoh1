@@ -7,7 +7,7 @@ import os
 import logging
 from pathlib import Path
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional
+from typing import List, Literal, Optional
 import uuid
 import re
 from datetime import datetime, timezone, timedelta
@@ -399,8 +399,8 @@ class SalesReport(BaseModel):
     low_products: List[dict]
 
 class CashWithdrawal(BaseModel):
-    amount: float
-    category: str  # "vt" (vale transporte) or "outros"
+    amount: float = Field(gt=0, allow_inf_nan=False)
+    category: Literal["vt", "outros"]
     description: Optional[str] = None
 
 class CashWithdrawalResponse(BaseModel):
@@ -1919,7 +1919,7 @@ async def get_today_cash(store: StoreLocation):
 # ==================== CASH DRAWER / CAIXA ROUTES ====================
 
 class CashBalanceAdjust(BaseModel):
-    balance: float
+    balance: float = Field(ge=0, allow_inf_nan=False)
     notes: Optional[str] = None
 
 def _parse_iso_utc(value):
@@ -2219,9 +2219,9 @@ async def withdraw_cash(store: StoreLocation, withdrawal: CashWithdrawal):
 # ==================== PIX MANUAL ADJUSTMENTS ====================
 
 class PixAdjustment(BaseModel):
-    amount: float
+    amount: float = Field(gt=0, allow_inf_nan=False)
     description: str = ""
-    store: str
+    store: Literal["runner", "gym-londres"]
 
 @api_router.get("/pix-adjustments/{store}")
 async def get_pix_adjustments(store: str):

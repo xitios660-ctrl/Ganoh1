@@ -1,7 +1,7 @@
 """Cash Drawer (Caixa) Routes"""
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, Field
+from typing import Literal, Optional
 from datetime import datetime
 import uuid
 import logging
@@ -23,18 +23,18 @@ def set_dependencies(database, brazil_tz=None):
 # ==================== MODELS ====================
 
 class CashBalanceAdjust(BaseModel):
-    balance: float
+    balance: float = Field(ge=0, allow_inf_nan=False)
     notes: Optional[str] = None
 
 class CashWithdrawal(BaseModel):
-    amount: float
-    category: str  # "vt" (vale transporte) or "outros"
+    amount: float = Field(gt=0, allow_inf_nan=False)
+    category: Literal["vt", "outros"]
     description: Optional[str] = None
 
 class PixAdjustment(BaseModel):
-    amount: float
+    amount: float = Field(gt=0, allow_inf_nan=False)
     description: str = ""
-    store: str
+    store: Literal["runner", "gym-londres"]
 
 # ==================== CASH TODAY ROUTES ====================
 
