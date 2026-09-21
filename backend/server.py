@@ -1812,11 +1812,13 @@ async def get_today_cash(store: StoreLocation):
     # Convert to UTC for database query
     today_utc = today_brazil.astimezone(pytz.UTC)
     
+    # Timestamps históricos usam offsets diferentes. Filtrar strings no Mongo
+    # pode excluir vendas entre 00:00 e 03:00; normalize em Python.
     orders = await db.orders.find({
         "store": store.value,
         "status": {"$in": ["ready", "delivered"]},  # Conta pedidos prontos E entregues
-        "created_at": {"$gte": today_utc.isoformat()}
-    }, {"_id": 0}).to_list(1000)
+    }, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    orders = _filter_since(orders, today_utc)
     
     # Get manual PIX adjustments for today (Python filter — DB has mixed timezone offsets)
     pix_adjustments = await db.pix_adjustments.find({

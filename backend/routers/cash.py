@@ -14,6 +14,26 @@ logger = logging.getLogger(__name__)
 db = None
 BRAZIL_TZ = pytz.timezone("America/Sao_Paulo")
 
+
+def _parse_iso_utc(value):
+    """Parse timestamps with any stored offset into an aware UTC datetime."""
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else pytz.UTC.localize(value)
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return parsed if parsed.tzinfo else pytz.UTC.localize(parsed)
+    except (TypeError, ValueError):
+        return None
+
+
+def _filter_since(items, since_dt, field="created_at"):
+    return [
+        item for item in items
+        if (parsed := _parse_iso_utc(item.get(field))) is not None and parsed >= since_dt
+    ]
+
 def set_dependencies(database, brazil_tz=None):
     global db, BRAZIL_TZ
     db = database
@@ -45,18 +65,20 @@ async def get_today_cash(store: str):
     today_brazil = now_brazil.replace(hour=0, minute=0, second=0, microsecond=0)
     today_utc = today_brazil.astimezone(pytz.UTC)
     
+    # Avoid lexicographic date comparisons: historical records contain both
+    # UTC and America/Sao_Paulo offsets.
     orders = await db.orders.find({
         "store": store,
         "status": {"$in": ["ready", "delivered"]},
-        "created_at": {"$gte": today_utc.isoformat()}
-    }, {"_id": 0}).to_list(1000)
+    }, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    orders = _filter_since(orders, today_utc)
     
     # Get manual PIX adjustments for today
     pix_adjustments = await db.pix_adjustments.find({
         "store": store,
         "removed": {"$ne": True},
-        "created_at": {"$gte": today_utc.isoformat()}
-    }, {"_id": 0}).to_list(1000)
+    }, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    pix_adjustments = _filter_since(pix_adjustments, today_utc)
     pix_manual_total = sum(a.get("amount", 0) for a in pix_adjustments)
     
     # Separate PIX adjustments by shift
