@@ -6163,16 +6163,19 @@ async def fix_payment_method(
     return {"success": False, "message": "Pagamento não encontrado"}
 
 @api_router.get("/admin/stock-debug/{store}")
-async def debug_stock(store: str):
+async def debug_stock(
+    store: StoreLocation,
+    username: str = Depends(verify_gestor),
+):
     """Debug stock issues - find items with zero or negative stock"""
     # Get ALL stock records including zeros
-    all_stock = await db.stock.find({"store": store}, {"_id": 0}).to_list(10000)
+    all_stock = await db.stock.find({"store": store.value}, {"_id": 0}).to_list(10000)
     
     zero_stock = [s for s in all_stock if s.get("quantity", 999) <= 0]
     low_stock = [s for s in all_stock if 0 < s.get("quantity", 999) <= 2]
     
     return {
-        "store": store,
+        "store": store.value,
         "total_stock_records": len(all_stock),
         "zero_or_negative": zero_stock,
         "zero_count": len(zero_stock),
@@ -6226,13 +6229,16 @@ async def clear_withdrawals(
     }
 
 @api_router.get("/admin/check-stock-issues/{store}")
-async def check_stock_issues(store: str):
+async def check_stock_issues(
+    store: StoreLocation,
+    username: str = Depends(verify_gestor),
+):
     """Check for stock issues that could block orders"""
     # Get all stock records
-    all_stock = await db.stock.find({"store": store}, {"_id": 0}).to_list(10000)
+    all_stock = await db.stock.find({"store": store.value}, {"_id": 0}).to_list(10000)
     
     # Get menu items
-    menu_items = await db.menu.find({"store": store}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
+    menu_items = await db.menu.find({"store": store.value}, {"_id": 0, "id": 1, "name": 1}).to_list(1000)
     menu_dict = {str(m.get("id")): m.get("name") for m in menu_items}
     
     issues = []
@@ -6257,7 +6263,7 @@ async def check_stock_issues(store: str):
             })
     
     return {
-        "store": store,
+        "store": store.value,
         "total_stock_records": len(all_stock),
         "issues_count": len(issues),
         "issues": issues

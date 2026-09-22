@@ -34,7 +34,13 @@ def test_financial_maintenance_routes_require_gestor_login():
     for route in routes:
         assert client.post(route).status_code == 401
 
-    assert client.get("/api/admin/low-stock-list").status_code == 401
+    routes = (
+        "/api/admin/low-stock-list",
+        "/api/admin/stock-debug/runner",
+        "/api/admin/check-stock-issues/runner",
+    )
+    for route in routes:
+        assert client.get(route).status_code == 401
 
 
 def test_store_maintenance_rejects_unknown_store_before_database_access():
@@ -47,5 +53,12 @@ def test_store_maintenance_rejects_unknown_store_before_database_access():
         )
         for route in routes:
             assert client.post(route).status_code == 422
+
+        routes = (
+            "/api/admin/stock-debug/unknown-store",
+            "/api/admin/check-stock-issues/unknown-store",
+        )
+        for route in routes:
+            assert client.get(route).status_code == 422
     finally:
         server.app.dependency_overrides.clear()
