@@ -1,5 +1,6 @@
 """Stock Management Routes"""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
@@ -11,10 +12,19 @@ logger = logging.getLogger(__name__)
 
 # Will be set by main app
 db = None
+verify_gestor = None
+security = HTTPBasic()
 
-def set_dependencies(database):
-    global db
+def set_dependencies(database, gestor_verifier=None):
+    global db, verify_gestor
     db = database
+    verify_gestor = gestor_verifier
+
+def require_gestor(credentials: HTTPBasicCredentials = Depends(security)):
+    """Delegate authentication to the main app without creating a circular import."""
+    if verify_gestor is None:
+        raise HTTPException(status_code=503, detail="Autenticação indisponível")
+    return verify_gestor(credentials)
 
 # ==================== MODELS ====================
 
@@ -115,7 +125,7 @@ async def initialize_stock(store: str, default_quantity: int = 50):
     return {"success": True, "message": f"Estoque inicializado. {added} itens adicionados."}
 
 @router.get("/{store}/debug")
-async def debug_stock(store: str):
+async def debug_stock(store: str, username: str = Depends(require_gestor)):
     """Debug stock - find problematic items"""
     all_stock = await db.stock.find({"store": store}, {"_id": 0}).to_list(500)
     
@@ -137,7 +147,7 @@ async def debug_stock(store: str):
     }
 
 @router.post("/{store}/fix-zero")
-async def fix_zero_stock(store: str):
+async def fix_zero_stock(store: str, username: str = Depends(require_gestor)):
     """Fix zero stock records by removing them"""
     result = await db.stock.delete_many({
         "store": store,
@@ -151,7 +161,7 @@ async def fix_zero_stock(store: str):
     }
 
 @router.get("/{store}/check-issues")
-async def check_stock_issues(store: str):
+async def check_stock_issues(store: str, username: str = Depends(require_gestor)):
     """Check for stock issues that might block orders"""
     issues = []
     

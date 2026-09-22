@@ -6413,7 +6413,7 @@ from routers import prazo, menu, stock, cash, live
 # Initialize dependencies for new routers
 prazo.set_dependencies(db, PRAZO_PASSWORD, send_whatsapp_message)
 menu.set_dependencies(db, verify_gestor)
-stock.set_dependencies(db)
+stock.set_dependencies(db, verify_gestor)
 cash.set_dependencies(db, BRAZIL_TZ)
 live.set_dependencies(db, BRAZIL_TZ)
 

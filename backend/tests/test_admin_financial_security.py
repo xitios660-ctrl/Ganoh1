@@ -29,6 +29,7 @@ def test_financial_maintenance_routes_require_gestor_login():
         "/api/admin/check-low-stock",
         "/api/admin/clear-data",
         "/api/admin/clear-store/runner",
+        "/api/stock/runner/fix-zero",
         "/api/admin/fix-zero-stock/runner",
         "/api/admin/clear-withdrawals/runner",
     )
@@ -38,6 +39,8 @@ def test_financial_maintenance_routes_require_gestor_login():
 
     routes = (
         "/api/cash/runner/drawer-debug",
+        "/api/stock/runner/debug",
+        "/api/stock/runner/check-issues",
         "/api/admin/low-stock-list",
         "/api/admin/stock-debug/runner",
         "/api/admin/check-stock-issues/runner",
