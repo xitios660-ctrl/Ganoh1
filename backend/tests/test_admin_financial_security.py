@@ -68,3 +68,14 @@ def test_store_maintenance_rejects_unknown_store_before_database_access():
             assert client.get(route).status_code == 422
     finally:
         server.app.dependency_overrides.clear()
+
+
+def test_legacy_stock_maintenance_rejects_unknown_store_before_database_access():
+    client = TestClient(server.app)
+    server.app.dependency_overrides[server.stock.require_gestor] = lambda: "test-manager"
+    try:
+        assert client.post("/api/stock/unknown-store/fix-zero").status_code == 422
+        assert client.get("/api/stock/unknown-store/debug").status_code == 422
+        assert client.get("/api/stock/unknown-store/check-issues").status_code == 422
+    finally:
+        server.app.dependency_overrides.clear()

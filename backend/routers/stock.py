@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime, timezone
 import uuid
 import logging
@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 db = None
 verify_gestor = None
 security = HTTPBasic()
+StoreLocation = Literal["runner", "gym-londres"]
 
 def set_dependencies(database, gestor_verifier=None):
     global db, verify_gestor
@@ -125,7 +126,7 @@ async def initialize_stock(store: str, default_quantity: int = 50):
     return {"success": True, "message": f"Estoque inicializado. {added} itens adicionados."}
 
 @router.get("/{store}/debug")
-async def debug_stock(store: str, username: str = Depends(require_gestor)):
+async def debug_stock(store: StoreLocation, username: str = Depends(require_gestor)):
     """Debug stock - find problematic items"""
     all_stock = await db.stock.find({"store": store}, {"_id": 0}).to_list(500)
     
@@ -147,7 +148,7 @@ async def debug_stock(store: str, username: str = Depends(require_gestor)):
     }
 
 @router.post("/{store}/fix-zero")
-async def fix_zero_stock(store: str, username: str = Depends(require_gestor)):
+async def fix_zero_stock(store: StoreLocation, username: str = Depends(require_gestor)):
     """Fix zero stock records by removing them"""
     result = await db.stock.delete_many({
         "store": store,
@@ -161,7 +162,7 @@ async def fix_zero_stock(store: str, username: str = Depends(require_gestor)):
     }
 
 @router.get("/{store}/check-issues")
-async def check_stock_issues(store: str, username: str = Depends(require_gestor)):
+async def check_stock_issues(store: StoreLocation, username: str = Depends(require_gestor)):
     """Check for stock issues that might block orders"""
     issues = []
     
