@@ -3,6 +3,9 @@ import os
 from pathlib import Path
 import sys
 
+import pytest
+from pydantic import ValidationError
+
 
 BACKEND = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND))
@@ -13,6 +16,14 @@ os.environ.update(
 )
 
 import server
+
+
+def test_debt_reduction_requires_store_to_avoid_homonym_mixups():
+    with pytest.raises(ValidationError):
+        server.PrazoAbaterRequest(amount=10, password="test")
+
+    request = server.PrazoAbaterRequest(amount=10, password="test", store="gym-londres")
+    assert request.store == server.StoreLocation.GYM_LONDRES
 
 
 def test_order_credit_customer_lookup_is_scoped_to_order_store():

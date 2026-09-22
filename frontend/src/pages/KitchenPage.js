@@ -1042,7 +1042,8 @@ export const KitchenPage = () => {
       const response = await axios.post(`${API}/prazo/abater/${encodeURIComponent(abaterCustomer.name)}`, {
         amount: parseFloat(abaterAmount),
         password: abaterPassword,
-        payment_method: abaterPaymentMethod
+        payment_method: abaterPaymentMethod,
+        store
       });
       const methodLabel = abaterPaymentMethod === 'cash' ? 'Dinheiro' : abaterPaymentMethod === 'pix' ? 'PIX' : abaterPaymentMethod === 'debit' ? 'Débito' : abaterPaymentMethod === 'saldo' ? 'Saldo a Favor' : 'Crédito';
       toast.success(`${response.data.message} (${methodLabel})`);

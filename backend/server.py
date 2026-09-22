@@ -3349,6 +3349,7 @@ class PrazoAbaterRequest(BaseModel):
     amount: float  # Valor a abater da dívida
     password: str  # Senha de confirmação
     payment_method: str = "cash"  # cash, debit, credit, pix
+    store: StoreLocation  # Impede misturar clientes homônimos de lojas diferentes
 
 # ==================== KITCHEN MANAGEMENT ENDPOINTS (No auth required) ====================
 # These endpoints allow the kitchen to manage adicionais, menu items, and prazo
@@ -3879,11 +3880,10 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
         raise HTTPException(status_code=403, detail="Senha incorreta")
     
     # Get unpaid prazo orders for this customer
-    prazo_orders = await db.orders.find({
-        "customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
-        "payment_method": "prazo",
-        "prazo_paid": {"$ne": True}
-    }, {"_id": 0}).sort("created_at", 1).to_list(1000)  # Oldest first
+    prazo_orders = await db.orders.find(
+        _unpaid_prazo_orders_query({"name": customer_name, "store": abater_data.store.value}),
+        {"_id": 0},
+    ).sort("created_at", 1).to_list(1000)  # Oldest first
     
     if not prazo_orders:
         raise HTTPException(status_code=404, detail="Cliente não tem dívidas no prazo")
@@ -3898,9 +3898,9 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
         raise HTTPException(status_code=400, detail=f"Valor maior que a dívida total (R$ {total_debt:.2f})")
     
     # Check if customer has credit (only consume when payment_method == 'saldo')
-    customer = await db.prazo_customers.find_one({
-        "name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"}
-    })
+    customer = await db.prazo_customers.find_one(
+        _prazo_customer_lookup_query(customer_name, abater_data.store)
+    )
     
     previous_credit = 0
     new_credit = 0
