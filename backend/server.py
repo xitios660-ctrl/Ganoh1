@@ -3676,6 +3676,18 @@ async def delete_single_prazo_debt(order_id: str, password: str = None):
     
     return {"success": True, "message": "Dívida apagada"}
 
+def _unpaid_prazo_orders_query(customer: dict) -> dict:
+    """Scope debt lookup to the customer's store when the migrated record has one."""
+    query = {
+        "customer_name": {"$regex": f"^{re.escape(customer['name'])}$", "$options": "i"},
+        "payment_method": "prazo",
+        "prazo_paid": {"$ne": True},
+    }
+    customer_store = customer.get("store")
+    if customer_store in STORES:
+        query["store"] = customer_store
+    return query
+
 @api_router.post("/prazo/customers/{customer_id}/add-credit")
 async def add_prazo_credit(customer_id: str, credit_data: PrazoCreditAdd):
     """Add credit to a prazo customer's account.
@@ -3699,11 +3711,7 @@ async def add_prazo_credit(customer_id: str, credit_data: PrazoCreditAdd):
     previous_credit = float(customer.get("credit", 0) or 0)
 
     unpaid_orders = await db.orders.find(
-        {
-            "customer_name": {"$regex": f"^{re.escape(name)}$", "$options": "i"},
-            "payment_method": "prazo",
-            "prazo_paid": {"$ne": True},
-        },
+        _unpaid_prazo_orders_query(customer),
         {"_id": 0, "id": 1, "total": 1, "partial_paid": 1, "created_at": 1, "store": 1},
     ).sort("created_at", 1).to_list(1000)
 
