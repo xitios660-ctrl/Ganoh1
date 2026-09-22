@@ -2025,7 +2025,10 @@ async def get_cash_drawer(store: StoreLocation):
     }
 
 @api_router.get("/cash/{store}/drawer-debug")
-async def get_cash_drawer_debug(store: StoreLocation):
+async def get_cash_drawer_debug(
+    store: StoreLocation,
+    username: str = Depends(verify_gestor),
+):
     """Debug endpoint - shows all cash orders being counted in the drawer"""
     brazil_tz = pytz.timezone('America/Sao_Paulo')
     now_brazil = datetime.now(brazil_tz)

@@ -37,6 +37,7 @@ def test_financial_maintenance_routes_require_gestor_login():
         assert client.post(route).status_code == 401
 
     routes = (
+        "/api/cash/runner/drawer-debug",
         "/api/admin/low-stock-list",
         "/api/admin/stock-debug/runner",
         "/api/admin/check-stock-issues/runner",
