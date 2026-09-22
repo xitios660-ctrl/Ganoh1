@@ -23,6 +23,8 @@ def test_financial_maintenance_routes_require_gestor_login():
         "/api/cash/runner/fix-cleared",
         "/api/admin/fix-payment-method/payment-id",
         "/api/admin/clear-low-stock-alerts",
+        "/api/admin/send-sales-report",
+        "/api/admin/send-morning-report",
         "/api/admin/fix-zero-stock/runner",
         "/api/admin/clear-withdrawals/runner",
     )

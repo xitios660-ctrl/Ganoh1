@@ -5943,13 +5943,13 @@ async def trigger_send_report():
     return {"success": False, "message": "Relatório de estoque baixo desativado. Use /admin/send-sales-report"}
 
 @api_router.post("/admin/send-sales-report")
-async def trigger_send_sales_report():
+async def trigger_send_sales_report(username: str = Depends(verify_gestor)):
     """Manually trigger sending the daily sales report"""
     await send_daily_sales_report()
     return {"success": True, "message": "Relatório de vendas enviado para os grupos!"}
 
 @api_router.post("/admin/send-morning-report")
-async def trigger_send_morning_report():
+async def trigger_send_morning_report(username: str = Depends(verify_gestor)):
     """Manually trigger sending the morning shift report"""
     await send_morning_shift_report()
     return {"success": True, "message": "Relatório da manhã enviado para os grupos!"}
