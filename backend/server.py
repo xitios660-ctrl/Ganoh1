@@ -6149,7 +6149,7 @@ async def fix_payment_method(
         {"id": payment_id},
         {"$set": {"payment_method": new_method}}
     )
-    if result.modified_count > 0:
+    if result.matched_count > 0:
         return {"success": True, "message": f"Método alterado para {new_method} em prazo_payments"}
     
     # Try in prazo_partial_payments
@@ -6157,7 +6157,7 @@ async def fix_payment_method(
         {"id": payment_id},
         {"$set": {"payment_method": new_method}}
     )
-    if result.modified_count > 0:
+    if result.matched_count > 0:
         return {"success": True, "message": f"Método alterado para {new_method} em prazo_partial_payments"}
     
     return {"success": False, "message": "Pagamento não encontrado"}
