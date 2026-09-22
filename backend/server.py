@@ -5419,8 +5419,11 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
 CLEAR_DATA_PASSWORD = os.environ.get("CLEAR_DATA_PASSWORD", "152637")
 
 @api_router.post("/admin/clear-data")
-async def clear_all_data(password: str):
-    """Clear all orders, expenses, history, and related data. Protected with password."""
+async def clear_all_data(
+    password: str,
+    username: str = Depends(verify_gestor),
+):
+    """Clear all orders, expenses, history, and related data. Protected with manager login and password."""
     if password != CLEAR_DATA_PASSWORD:
         raise HTTPException(status_code=403, detail="Senha incorreta")
     
@@ -5442,8 +5445,12 @@ async def clear_all_data(password: str):
     return {"success": True, "message": "Todos os dados foram apagados: pedidos, gastos, histórico e gráficos"}
 
 @api_router.post("/admin/clear-store/{store}")
-async def clear_store_data(store: StoreLocation, password: str):
-    """Clear all data for a specific store. Protected with password."""
+async def clear_store_data(
+    store: StoreLocation,
+    password: str,
+    username: str = Depends(verify_gestor),
+):
+    """Clear all data for a specific store. Protected with manager login and password."""
     if password != CLEAR_DATA_PASSWORD:
         raise HTTPException(status_code=403, detail="Senha incorreta")
     
