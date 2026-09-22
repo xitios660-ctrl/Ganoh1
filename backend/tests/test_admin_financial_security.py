@@ -22,6 +22,7 @@ def test_financial_maintenance_routes_require_gestor_login():
     routes = (
         "/api/cash/runner/fix-cleared",
         "/api/admin/fix-payment-method/payment-id",
+        "/api/admin/clear-low-stock-alerts",
         "/api/admin/fix-zero-stock/runner",
         "/api/admin/clear-withdrawals/runner",
     )

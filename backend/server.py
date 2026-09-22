@@ -6132,7 +6132,7 @@ async def get_prazo_audit_log(
 
 
 @api_router.post("/admin/clear-low-stock-alerts")
-async def clear_low_stock_alerts():
+async def clear_low_stock_alerts(username: str = Depends(verify_gestor)):
     """Clear the low stock alerts list"""
     result = await db.low_stock_list.delete_many({})
     return {"success": True, "deleted_count": result.deleted_count, "message": "Lista de estoque baixo limpa"}
