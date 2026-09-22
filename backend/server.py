@@ -834,6 +834,14 @@ async def get_menu(store: StoreLocation):
 
 # ==================== ORDER ROUTES ====================
 
+def _prazo_customer_lookup_query(customer_name: str, store: StoreLocation) -> dict:
+    """Identify prazo customers by both normalized name and store."""
+    store_value = store.value if isinstance(store, StoreLocation) else store
+    return {
+        "name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
+        "store": store_value,
+    }
+
 @api_router.post("/orders")
 async def create_order(order_input: OrderCreate):
     # Check stock availability
@@ -859,9 +867,9 @@ async def create_order(order_input: OrderCreate):
     
     if order_input.payment_method == PaymentMethod.PRAZO and order_input.customer_name:
         # Look for customer with credit
-        customer = await db.prazo_customers.find_one({
-            "name": {"$regex": f"^{re.escape(order_input.customer_name)}$", "$options": "i"}
-        })
+        customer = await db.prazo_customers.find_one(
+            _prazo_customer_lookup_query(order_input.customer_name, order_input.store)
+        )
         
         if customer and customer.get("credit", 0) > 0:
             previous_credit = customer.get("credit", 0)

@@ -15,6 +15,13 @@ os.environ.update(
 import server
 
 
+def test_order_credit_customer_lookup_is_scoped_to_order_store():
+    query = server._prazo_customer_lookup_query("Cliente Teste", server.StoreLocation.RUNNER)
+
+    assert query["store"] == "runner"
+    assert query["name"]["$regex"] == "^Cliente\\ Teste$"
+
+
 def test_credit_debt_query_is_scoped_to_customer_store():
     query = server._unpaid_prazo_orders_query({"name": "Cliente Teste", "store": "runner"})
 
