@@ -1,9 +1,10 @@
 # GANOH — Continuidade do trabalho
 
 ## Etapa atual
+Etapa 1 em andamento — incremento 1A (PIX manual) implementado e validado localmente.
 Etapa 0 — auditoria de código e navegação pública concluída em 22/09/2026.
 Validação autenticada, reconciliação do banco real e confirmação dos segredos de implantação continuam pendentes; não declarar produção validada.
-Próxima etapa: 1, correção financeira por incrementos pequenos, começando pelo PIX manual.
+Próximo incremento: 1B, corrigir a quitação total que gera recebimento mesmo sem dívida. Não avançar à etapa 2 enquanto os gates financeiros estiverem pendentes.
 
 ## Retomada obrigatória
 1. Ler este arquivo e os commits da branch ganoh/staged-audit e da main.
@@ -15,7 +16,7 @@ Próxima etapa: 1, correção financeira por incrementos pequenos, começando pe
 
 ## Base, rollback e último commit
 - Base de código auditada: def13cf952811907329e0da79544699b2783ee37.
-- Último commit anterior a esta atualização: fcfbe64de6e50755d5740ee67f1aac98bc93f356 (registro inicial).
+- Último commit anterior a esta atualização: 5b6c7a5940f06bade684b9280a99b2c4a299d510 (auditoria concluída).
 - O commit que contém este diagnóstico é obtido por git log -1 -- GANOH_PROGRESS.md. Um arquivo não pode conter o próprio SHA final.
 - Rollback de código: conservar a base e reverter somente commits novos, sem apagar dados ou forçar referências.
 - Rollback de banco ainda NÃO existe como backup verificado. Não executar migração ou reparação de dados.
@@ -173,5 +174,52 @@ Não há prova de migração concluída, de backup recuperável ou de equivalên
 12: somente após os gates; confirmar banco/backup/migração, destino da API, SPA, ambiente e rollback, publicar e validar sem movimentar dados reais.
 
 ## Próxima ação recomendada
-Iniciar incremento 1A do PIX manual em ganoh/staged-audit após o commit deste diagnóstico.
+Retomar a etapa 1 pelo incremento 1B de quitação total em ganoh/staged-audit; ler primeiro o registro 1A abaixo.
 Antes de qualquer deploy, resolver a dependência da API Emergent e obter reconciliação/backup autenticados.
+
+## Incremento 1A — PIX manual (22/09/2026)
+### Concluído
+- operation_id UUID opcional no contrato da API para preservar clientes legados.
+- Novos clientes KitchenPage sempre enviam o UUID; chave determinística em _id com loja usa unicidade nativa do Mongo.
+- Duplicidade atômica retorna o registro original. Mesma chave com valor/descrição diferentes retorna 409.
+- Replay de PIX removido não recria entrada. ID/timestamp originais preservados.
+- source=manual_pix e payment_method=pix adicionados aos novos registros identificados.
+- Frontend salva operação em sessionStorage ANTES de enviar; sobrevive a reload da aba, conserva chave em erro e recupera formulário.
+- Bloqueio síncrono de clique duplo + botão de envio ocupado.
+- Resposta de servidor antigo sem operation_id bloqueia novas tentativas daquela operação para exigir conferência.
+- Falha de armazenamento impede envio; tentativa pendente com payload diferente também bloqueada.
+
+### Arquivos alterados no incremento
+- backend/server.py
+- backend/tests/test_pix_operation_idempotency.py (novo)
+- frontend/src/pages/KitchenPage.js
+- frontend/src/services/pixOperation.js (novo)
+- frontend/src/services/pixOperation.test.js (novo)
+- GANOH_PROGRESS.md
+
+### Testes e resultados
+- 83 testes Python passaram (78 anteriores + 5 novos), 6 avisos de depreciação.
+- R$100 + quatro leituras + replay + processo Python novo = um registro de R$100.
+- Dez chamadas concorrentes = uma inserção e nove replays.
+- Payload conflitante: 409; novo UUID legítimo: segunda operação aceita.
+- PIX removido permaneceu removido depois do replay.
+- 5 testes frontend passaram: recarga do módulo com mesma storage, confirmação, separação por loja, resposta incompatível e storage indisponível.
+- Primeira tentativa Jest falhou pela ausência de crypto no jsdom; mock corrigido e suite aprovada.
+- Build frontend de produção compilou com avisos de dependências de hooks em componentes existentes.
+- Build executado em cópia isolada, restaurando nela index.css remoto exato; não sobrescrever a divergência local do projeto.
+- Nenhum lançamento real, envio de mensagem, migration, alteração de índice em produção ou deploy.
+
+### Limites obrigatórios / não declarar etapa 1 concluída
+- Persistência/restart testados com adapter SQLite durável que reproduz a restrição única; não havia mongod local. Ainda exige integração em Mongo descartável e teste UI completo no ambiente isolado.
+- sessionStorage cobre reload da aba, não fechamento definitivo, outro dispositivo ou duas operações distintas abertas em abas diferentes.
+- Clientes legados sem operation_id continuam aceitos e NÃO ficam idempotentes. Antes do deploy, definir rollout/corte do contrato e atualizar todos os chamadores.
+- Novo frontend deve usar backend com este contrato; NÃO publicar somente o estático que ainda chama Emergent.
+- Identificador ausente na resposta de servidor antigo exige conciliação pelo gestor; não criar UI de “limpar tentativa” que possa duplicar lançamento sem evidência.
+- Quitação total, abatimento, crédito, pedidos e offline continuam pendentes.
+- Ainda falta trilha uniforme de funcionário/antes/depois e fonte financeira única; não inventar funcionário em endpoint sem identidade autenticada.
+- Recuperação de erros definitivos, retenção de operação após fechar aba e compatibilidade de browsers precisam de gate antes de produção.
+- Rollback deste incremento é somente código da branch; não executar reversão de dados.
+
+### Próxima ação concreta
+Reproduzir e corrigir pay_all_prazo_customer com valor derivado da dívida remanescente, loja/cliente corretos e operação persistente atômica; avaliar transação Mongo antes de modificar múltiplos documentos.
+Preservar o teste de replay e ampliar contra Mongo descartável antes de declarar idempotência geral.

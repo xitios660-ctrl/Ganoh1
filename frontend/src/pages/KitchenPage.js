@@ -18,6 +18,7 @@ import { Toaster, toast } from 'sonner';
 import { useKitchenBell } from '../hooks/useKitchenBell';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useTheme } from '../context/ThemeContext';
+import { getPendingPix, preparePix, confirmPix, blockUnconfirmedPix } from '../services/pixOperation';
 import { Bell, BellOff } from 'lucide-react';
 import { KitchenStage3D } from '../components/KitchenStage3D';
 import '../styles/kitchen-cinematic.css';
@@ -460,6 +461,8 @@ export const KitchenPage = () => {
   const [showPixAdjustDialog, setShowPixAdjustDialog] = useState(false);
   const [pixAdjustAmount, setPixAdjustAmount] = useState('');
   const [pixAdjustDescription, setPixAdjustDescription] = useState('');
+  const pixSendingRef = useRef(false);
+  const [pixSending, setPixSending] = useState(false);
   // Add credit dialog state
   const [showAddCreditDialog, setShowAddCreditDialog] = useState(false);
   const [creditCustomer, setCreditCustomer] = useState(null);
@@ -1143,25 +1146,51 @@ export const KitchenPage = () => {
   };
 
   // PIX Manual Adjustment functions
+  const openPixAdjustment = () => {
+    try {
+      const pending = getPendingPix(store);
+      if (pending) {
+        setPixAdjustAmount(String(pending.amount));
+        setPixAdjustDescription(pending.description);
+        toast.info('Confirme a tentativa anterior. Um PIX já registrado não será somado novamente.');
+      }
+      setShowPixAdjustDialog(true);
+    } catch {
+      toast.error('Não foi possível recuperar a tentativa de PIX. Não envie outro lançamento antes de conferir o histórico.');
+    }
+  };
+
   const handleAddPixAdjustment = async () => {
-    if (!pixAdjustAmount || isNaN(parseFloat(pixAdjustAmount)) || parseFloat(pixAdjustAmount) === 0) {
+    if (pixSendingRef.current) return;
+    const amount = Number(pixAdjustAmount);
+    if (!pixAdjustAmount || !Number.isFinite(amount) || amount <= 0) {
       toast.error('Digite um valor válido');
       return;
     }
     
+    pixSendingRef.current = true;
+    setPixSending(true);
     try {
-      await axios.post(`${API}/pix-adjustments/add`, {
-        store: store,
-        amount: parseFloat(pixAdjustAmount),
-        description: pixAdjustDescription || 'Ajuste manual PIX'
-      });
-      toast.success(`Ajuste de PIX de R$ ${parseFloat(pixAdjustAmount).toFixed(2)} adicionado!`);
+      const operation = preparePix(store, amount, pixAdjustDescription || 'Ajuste manual PIX');
+      const response = await axios.post(`${API}/pix-adjustments/add`, operation);
+      if (response.data.adjustment?.operation_id !== operation.operation_id) {
+        blockUnconfirmedPix(store);
+        toast.error('O servidor não confirmou o identificador do PIX. Confira o histórico antes de tentar novamente.');
+        return;
+      }
+      confirmPix(store, operation.operation_id);
+      toast.success(response.data.adjustment.removed ? 'Este PIX já foi removido; nenhum valor foi adicionado.' :
+        response.data.replayed ? 'PIX já registrado anteriormente. Nenhum valor duplicado.' :
+        `Ajuste de PIX de R$ ${amount.toFixed(2)} adicionado!`);
       setShowPixAdjustDialog(false);
       setPixAdjustAmount('');
       setPixAdjustDescription('');
       fetchData();
     } catch (error) {
-      toast.error('Erro ao adicionar ajuste de PIX');
+      toast.error(error.response?.data?.detail || error.message || 'Não foi possível confirmar o PIX. A tentativa foi preservada.');
+    } finally {
+      pixSendingRef.current = false;
+      setPixSending(false);
     }
   };
 
@@ -1620,7 +1649,7 @@ export const KitchenPage = () => {
                   <Button
                     size="sm"
                     className="kc-stat-btn"
-                    onClick={() => setShowPixAdjustDialog(true)}
+                    onClick={openPixAdjustment}
                     data-testid="pix-adjust-add-btn"
                   >
                     <Plus className="h-3.5 w-3.5 mr-1" /> Adicionar
@@ -2647,9 +2676,9 @@ export const KitchenPage = () => {
                 size="sm" 
                 className="flex-1 bg-blue-600 hover:bg-blue-700" 
                 onClick={handleAddPixAdjustment}
-                disabled={!pixAdjustAmount || parseFloat(pixAdjustAmount) === 0}
+                disabled={pixSending || !pixAdjustAmount || !Number.isFinite(Number(pixAdjustAmount)) || Number(pixAdjustAmount) <= 0}
               >
-                Adicionar
+                {pixSending ? 'Confirmando...' : 'Adicionar'}
               </Button>
             </div>
           </div>

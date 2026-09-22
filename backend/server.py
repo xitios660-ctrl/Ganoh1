@@ -3,6 +3,7 @@ from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo.errors import DuplicateKeyError
 import os
 import logging
 from pathlib import Path
@@ -2238,6 +2239,7 @@ class PixAdjustment(BaseModel):
     amount: float = Field(gt=0, allow_inf_nan=False)
     description: str = ""
     store: Literal["runner", "gym-londres"]
+    operation_id: Optional[uuid.UUID] = None  # Stable client key; optional for legacy clients.
 
 @api_router.get("/pix-adjustments/{store}")
 async def get_pix_adjustments(store: StoreLocation):
@@ -2276,7 +2278,28 @@ async def add_pix_adjustment(adjustment: PixAdjustment):
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
-    await db.pix_adjustments.insert_one({**new_adjustment})
+    document = {**new_adjustment}
+    if adjustment.operation_id is not None:
+        operation_id = str(adjustment.operation_id)
+        # Mongo's built-in unique _id makes concurrent retries atomic without
+        # adding an index to historical data or relying on process memory.
+        document["_id"] = f"pix-manual:{adjustment.store}:{operation_id}"
+        document["operation_id"] = operation_id
+        document["source"] = "manual_pix"
+        document["payment_method"] = "pix"
+        new_adjustment.update({k: document[k] for k in ("operation_id", "source", "payment_method")})
+    try:
+        await db.pix_adjustments.insert_one(document)
+    except DuplicateKeyError:
+        if adjustment.operation_id is None:
+            raise
+        existing = await db.pix_adjustments.find_one({"_id": document["_id"]}, {"_id": 0})
+        if existing is None:
+            raise HTTPException(status_code=503, detail="Não foi possível confirmar o PIX; repita com o mesmo identificador")
+        if any(existing.get(key) != document[key] for key in ("store", "amount", "description")):
+            raise HTTPException(status_code=409, detail="Identificador de PIX já utilizado com dados diferentes")
+        # A removed operation must never be recreated by an old retry.
+        return {"success": True, "adjustment": existing, "replayed": True}
     
     return {"success": True, "adjustment": new_adjustment}
 
