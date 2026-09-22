@@ -2159,7 +2159,10 @@ async def reset_cash_drawer(store: StoreLocation):
     return await get_cash_drawer(store)
 
 @api_router.post("/cash/{store}/fix-cleared")
-async def fix_cash_cleared_orders(store: StoreLocation):
+async def fix_cash_cleared_orders(
+    store: StoreLocation,
+    username: str = Depends(verify_gestor),
+):
     """Remove the cash_cleared flag from all orders (one-time fix)"""
     result = await db.orders.update_many(
         {"store": store.value, "cash_cleared": True},
@@ -6135,7 +6138,11 @@ async def clear_low_stock_alerts():
     return {"success": True, "deleted_count": result.deleted_count, "message": "Lista de estoque baixo limpa"}
 
 @api_router.post("/admin/fix-payment-method/{payment_id}")
-async def fix_payment_method(payment_id: str, new_method: str = "pix"):
+async def fix_payment_method(
+    payment_id: str,
+    new_method: Literal["cash", "pix", "credit", "debit"] = "pix",
+    username: str = Depends(verify_gestor),
+):
     """Fix payment method for a prazo payment record"""
     # Try in prazo_payments
     result = await db.prazo_payments.update_one(
@@ -6196,14 +6203,17 @@ async def fix_zero_stock(store: str):
     }
 
 @api_router.post("/admin/clear-withdrawals/{store}")
-async def clear_withdrawals(store: str):
+async def clear_withdrawals(
+    store: StoreLocation,
+    username: str = Depends(verify_gestor),
+):
     """Clear all cash withdrawals for a store"""
     # Get withdrawals before deleting
-    withdrawals = await db.cash_withdrawals.find({"store": store}, {"_id": 0}).to_list(1000)
+    withdrawals = await db.cash_withdrawals.find({"store": store.value}, {"_id": 0}).to_list(1000)
     total_amount = sum(w.get("amount", 0) for w in withdrawals)
     
     # Delete all withdrawals
-    result = await db.cash_withdrawals.delete_many({"store": store})
+    result = await db.cash_withdrawals.delete_many({"store": store.value})
     
     return {
         "success": True,
