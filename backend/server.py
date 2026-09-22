@@ -3341,7 +3341,7 @@ class PrazoPayment(BaseModel):
     payment_method: str = "cash"  # cash, debit, credit, pix
 
 class PrazoCreditAdd(BaseModel):
-    amount: float  # Valor a adicionar ao crédito
+    amount: float = Field(gt=0, allow_inf_nan=False)
     notes: Optional[str] = ""
     payment_method: Optional[str] = None  # "cash" | "pix" | "credit" | "debit" — afeta o caixa quando abate dívida
 

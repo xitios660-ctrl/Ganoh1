@@ -1,6 +1,6 @@
 """Prazo (Credit/Tab) Routes - Customer debts, payments, and credit management"""
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from datetime import datetime, timezone
 import uuid
@@ -36,7 +36,7 @@ class PrazoPayment(BaseModel):
     payment_method: str = "cash"
 
 class PrazoCreditAdd(BaseModel):
-    amount: float
+    amount: float = Field(gt=0, allow_inf_nan=False)
     notes: str = ""
 
 class PrazoAbaterRequest(BaseModel):
