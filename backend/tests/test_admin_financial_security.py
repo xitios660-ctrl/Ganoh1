@@ -22,6 +22,7 @@ def test_financial_maintenance_routes_require_gestor_login():
     routes = (
         "/api/cash/runner/fix-cleared",
         "/api/admin/fix-payment-method/payment-id",
+        "/api/admin/fix-zero-stock/runner",
         "/api/admin/clear-withdrawals/runner",
     )
 
@@ -29,10 +30,15 @@ def test_financial_maintenance_routes_require_gestor_login():
         assert client.post(route).status_code == 401
 
 
-def test_clear_withdrawals_rejects_unknown_store_before_database_access():
+def test_store_maintenance_rejects_unknown_store_before_database_access():
     client = TestClient(server.app)
     server.app.dependency_overrides[server.verify_gestor] = lambda: "test-manager"
     try:
-        assert client.post("/api/admin/clear-withdrawals/unknown-store").status_code == 422
+        routes = (
+            "/api/admin/fix-zero-stock/unknown-store",
+            "/api/admin/clear-withdrawals/unknown-store",
+        )
+        for route in routes:
+            assert client.post(route).status_code == 422
     finally:
         server.app.dependency_overrides.clear()

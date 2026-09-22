@@ -6181,17 +6181,20 @@ async def debug_stock(store: str):
     }
 
 @api_router.post("/admin/fix-zero-stock/{store}")
-async def fix_zero_stock(store: str):
+async def fix_zero_stock(
+    store: StoreLocation,
+    username: str = Depends(verify_gestor),
+):
     """Remove all stock records with zero or negative quantity (allows orders again)"""
     # Find items with zero stock first
     zero_items = await db.stock.find({
-        "store": store,
+        "store": store.value,
         "quantity": {"$lte": 0}
     }, {"_id": 0, "name": 1, "menu_item_id": 1, "quantity": 1}).to_list(1000)
     
     # Delete all zero/negative stock records
     result = await db.stock.delete_many({
-        "store": store,
+        "store": store.value,
         "quantity": {"$lte": 0}
     })
     
