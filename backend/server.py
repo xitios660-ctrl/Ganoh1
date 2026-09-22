@@ -2232,7 +2232,7 @@ class PixAdjustment(BaseModel):
     store: Literal["runner", "gym-londres"]
 
 @api_router.get("/pix-adjustments/{store}")
-async def get_pix_adjustments(store: str):
+async def get_pix_adjustments(store: StoreLocation):
     """Get all manual PIX adjustments for a store"""
     brazil_tz = pytz.timezone('America/Sao_Paulo')
     now_brazil = datetime.now(brazil_tz)
@@ -2240,7 +2240,7 @@ async def get_pix_adjustments(store: str):
     
     # Get all adjustments for this store (today) that are not removed (timezone-safe filter)
     adjustments = await db.pix_adjustments.find({
-        "store": store,
+        "store": store.value,
         "removed": {"$ne": True},
     }, {"_id": 0}).to_list(2000)
     adjustments = _filter_since(adjustments, today_brazil.astimezone(pytz.UTC))
@@ -2248,7 +2248,7 @@ async def get_pix_adjustments(store: str):
     total_added = sum(a.get("amount", 0) for a in adjustments)
     
     return {
-        "store": store,
+        "store": store.value,
         "adjustments": adjustments,
         "total_added": round(total_added, 2)
     }

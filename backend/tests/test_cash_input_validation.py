@@ -75,3 +75,8 @@ def test_api_rejects_invalid_cash_inputs_before_database_write():
         "/api/pix-adjustments/add",
         json={"amount": 10, "store": "loja-inexistente"},
     ).status_code == 422
+
+
+def test_pix_adjustment_query_rejects_unknown_store_before_database_access():
+    client = TestClient(server.app)
+    assert client.get("/api/pix-adjustments/loja-inexistente").status_code == 422
