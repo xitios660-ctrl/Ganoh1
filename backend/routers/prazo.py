@@ -510,6 +510,14 @@ async def pay_all_prazo_customer(customer_name: str, payment: PrazoPayment):
         }}
     )
     
+    # Only a write that actually settles debt may create a receipt.
+    # The earlier find_one is not safe as a guard against stale/repeated calls.
+    if result.modified_count == 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Nenhum débito pendente foi quitado. Confira o histórico antes de tentar novamente.",
+        )
+
     payment_record = {
         "id": str(uuid.uuid4()),
         "customer_name": customer_name,

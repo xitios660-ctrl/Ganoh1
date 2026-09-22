@@ -1,10 +1,10 @@
 # GANOH — Continuidade do trabalho
 
 ## Etapa atual
-Etapa 1 em andamento — incremento 1A (PIX manual) implementado e validado localmente.
+Etapa 1 em andamento — incremento 1A (PIX manual) e 1B.1 (bloqueio de recebimento sem quitação) implementados e validados localmente.
 Etapa 0 — auditoria de código e navegação pública concluída em 22/09/2026.
 Validação autenticada, reconciliação do banco real e confirmação dos segredos de implantação continuam pendentes; não declarar produção validada.
-Próximo incremento: 1B, corrigir a quitação total que gera recebimento mesmo sem dívida. Não avançar à etapa 2 enquanto os gates financeiros estiverem pendentes.
+Próximo incremento: 1B.2, quitação com escopo de loja, valor do banco e atomicidade durável. Não avançar à etapa 2 enquanto os gates financeiros estiverem pendentes.
 
 ## Retomada obrigatória
 1. Ler este arquivo e os commits da branch ganoh/staged-audit e da main.
@@ -16,7 +16,7 @@ Próximo incremento: 1B, corrigir a quitação total que gera recebimento mesmo 
 
 ## Base, rollback e último commit
 - Base de código auditada: def13cf952811907329e0da79544699b2783ee37.
-- Último commit anterior a esta atualização: 5b6c7a5940f06bade684b9280a99b2c4a299d510 (auditoria concluída).
+- Último commit anterior a esta atualização / ponto de rollback: 72d149549693193d600a92d10223c40eacbf2664 (PIX manual identificado).
 - O commit que contém este diagnóstico é obtido por git log -1 -- GANOH_PROGRESS.md. Um arquivo não pode conter o próprio SHA final.
 - Rollback de código: conservar a base e reverter somente commits novos, sem apagar dados ou forçar referências.
 - Rollback de banco ainda NÃO existe como backup verificado. Não executar migração ou reparação de dados.
@@ -25,8 +25,8 @@ Próximo incremento: 1B, corrigir a quitação total que gera recebimento mesmo 
 - Checkout local é parcial, majoritariamente não rastreado: não usar git add . nem enviar o diretório inteiro.
 - Comparação de blobs locais com árvore remota: diferenças de newline em vários arquivos; diferença substantiva em frontend/src/index.css. CSS remoto foi consultado separadamente. Reobter fontes exatas antes do build final.
 
-## Arquivos alterados nesta etapa
-Somente GANOH_PROGRESS.md. Nenhum código de aplicação, configuração de produção, dado ou saldo alterado.
+## Arquivos alterados na auditoria (etapa 0)
+Somente GANOH_PROGRESS.md nessa etapa. Os incrementos posteriores de código estão discriminados abaixo. Nenhuma configuração de produção, dado ou saldo alterado.
 Reprodutor temporário fora do repositório: audit_reproduce.py; usa coleções fictícias e mocks.
 
 ## Arquitetura inventariada
@@ -174,7 +174,7 @@ Não há prova de migração concluída, de backup recuperável ou de equivalên
 12: somente após os gates; confirmar banco/backup/migração, destino da API, SPA, ambiente e rollback, publicar e validar sem movimentar dados reais.
 
 ## Próxima ação recomendada
-Retomar a etapa 1 pelo incremento 1B de quitação total em ganoh/staged-audit; ler primeiro o registro 1A abaixo.
+Retomar a etapa 1 pelo incremento 1B.2 de quitação total em ganoh/staged-audit; ler os registros 1A e 1B.1 abaixo.
 Antes de qualquer deploy, resolver a dependência da API Emergent e obter reconciliação/backup autenticados.
 
 ## Incremento 1A — PIX manual (22/09/2026)
@@ -223,3 +223,43 @@ Antes de qualquer deploy, resolver a dependência da API Emergent e obter reconc
 ### Próxima ação concreta
 Reproduzir e corrigir pay_all_prazo_customer com valor derivado da dívida remanescente, loja/cliente corretos e operação persistente atômica; avaliar transação Mongo antes de modificar múltiplos documentos.
 Preservar o teste de replay e ampliar contra Mongo descartável antes de declarar idempotência geral.
+
+## Incremento 1B.1 — não registrar recebimento sem quitação (22/09/2026)
+### Causa confirmada e correção localizada
+- As duas versões de pay_all_prazo_customer inseriam prazo_payments mesmo com update_many.modified_count=0. Isso gerava dinheiro fictício em chamadas repetidas ou sem dívida.
+- Agora retornam HTTP 409 quando a gravação não quitou nenhum pedido, antes de criar recebimento ou histórico de pagamento.
+- A mensagem orienta conferir o histórico; não retorna sucesso enganoso nem presume que uma chamada anterior concluiu todas as gravações.
+- A condição usa o resultado efetivo da escrita, não find_one: a leitura pode estar desatualizada por outra quitação.
+- Pagamento válido continua com mesmo contrato de sucesso. O frontend existente já exibe detail nas respostas de erro; não foi necessário alterá-lo.
+- Corrigidos monólito (rota ativa) e router modular (rota duplicada). Não removidas rotas nesta alteração.
+
+### Arquivos alterados
+- backend/server.py
+- backend/routers/prazo.py
+- backend/tests/test_prazo_empty_settlement.py (novo)
+- GANOH_PROGRESS.md
+
+### Verificação e testes aprovados
+- Antes da alteração, os três arquivos existentes foram comparados integralmente com o commit 72d1495; iguais, sem trabalho paralelo nesses arquivos.
+- Main confirmada em def13cf; branch ganoh/staged-audit confirmada em 72d1495.
+- 91 testes Python aprovados (83 anteriores + 8 casos novos), 6 avisos de depreciação existentes.
+- Nas duas implementações: quitação de R$100 e quatro repetições = somente um recebimento de R$100; repetições retornam 409.
+- Cliente sem dívida: 409, nenhum recebimento ou histórico financeiro criado.
+- Leitura inicial desatualizada seguida de zero pedidos alterados: 409, sem recebimento/histórico adicional.
+- Senha inválida: 403 antes de qualquer acesso ao banco.
+- Testes usam coleções em memória e mocks; não executam startup/jobs, banco real ou envio de mensagens.
+- Não repetido build de frontend: nenhum arquivo frontend ou dependência mudou neste incremento; build anterior permanece registrado em 1A.
+
+### Limites / bugs restantes
+- NÃO é idempotência completa da quitação: update_many e insert_one ainda são operações separadas. Falha entre elas pode deixar dívida quitada sem recibo; deve ser reconciliada, não recriada automaticamente.
+- Duas requisições podem dividir alterações de vários pedidos; o teste de leitura desatualizada NÃO comprova atomicidade multi-documento do Mongo.
+- Retry após criação de nova dívida também exige ID persistente; o bloqueio desta etapa só cobre escrita que não alterou pedidos.
+- Valor informado pelo cliente e filtro por nome sem loja permanecem problemas conhecidos. Não corrigir dados históricos ou afirmar valor real reconciliado.
+- A proteção não deve ir a produção isoladamente; gates financeiros da etapa 1 continuam abertos.
+- Nenhum deploy, migração, ajuste real de valores, índice em produção ou WhatsApp realizado.
+
+### Próxima ação recomendada
+1. Definir e validar em Mongo descartável transação/recuperação durável para quitação: pedidos + recibo + ID de operação precisam de resultado consistente.
+2. Exigir loja no contrato de quitação e atualizar chamador; calcular centavos restantes no backend e impedir quitação de homônimos de outra loja.
+3. Cobrir concorrência, falha entre escritas, restart, replay após nova dívida e conflito de payload antes de declarar incremento 1B completo.
+4. Manter branch isolada e não avançar para tema/WhatsApp enquanto os gates financeiros estiverem pendentes.

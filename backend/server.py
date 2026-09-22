@@ -3629,6 +3629,15 @@ async def pay_all_prazo_customer(customer_name: str, payment: PrazoPayment):
         }}
     )
     
+    # A retry (or an empty debt list) must not create money in the drawer.
+    # Check the write result, not the earlier snapshot: another request may
+    # have settled the orders between find_one and update_many.
+    if result.modified_count == 0:
+        raise HTTPException(
+            status_code=409,
+            detail="Nenhum débito pendente foi quitado. Confira o histórico antes de tentar novamente.",
+        )
+
     # Log the payment
     payment_record = {
         "id": str(uuid.uuid4()),
