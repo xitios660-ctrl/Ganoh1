@@ -25,6 +25,7 @@ def test_financial_maintenance_routes_require_gestor_login():
         "/api/admin/clear-low-stock-alerts",
         "/api/admin/send-sales-report",
         "/api/admin/send-morning-report",
+        "/api/admin/fix-categories",
         "/api/admin/fix-zero-stock/runner",
         "/api/admin/clear-withdrawals/runner",
     )

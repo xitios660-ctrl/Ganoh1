@@ -5955,7 +5955,7 @@ async def trigger_send_morning_report(username: str = Depends(verify_gestor)):
     return {"success": True, "message": "Relatório da manhã enviado para os grupos!"}
 
 @api_router.post("/admin/fix-categories")
-async def fix_duplicate_categories():
+async def fix_duplicate_categories(username: str = Depends(verify_gestor)):
     """Fix duplicate categories (lowercase to proper case)"""
     category_mapping = {
         "bebidas": "Bebidas Geladas",
