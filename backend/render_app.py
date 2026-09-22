@@ -19,7 +19,8 @@ if os.environ.get('MIGRATION_PENDING', 'true').lower() == 'true':
                             '<meta name="viewport" content="width=device-width,initial-scale=1">'
                             '<title>Ganoh</title><h1>Ganoh</h1>'
                             '<p>Estamos preparando o sistema. Volte em breve.</p></html>',
-                            status_code=503, headers={'Retry-After': '300'})
+                            status_code=503, headers={'Retry-After': '300',
+                                                     'Cache-Control': 'no-store'})
 else:
     required = ('MONGO_URL', 'DB_NAME', 'GESTOR_PASSWORD', 'PRAZO_PASSWORD', 'CLEAR_DATA_PASSWORD')
     missing = [name for name in required if not os.environ.get(name)]

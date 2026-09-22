@@ -63,8 +63,11 @@ def test_maintenance_blocks_business_writes(monkeypatch):
     app = importlib.import_module('render_app').app
     client = TestClient(app)
     assert client.get('/healthz').json()['migration_pending'] is True
-    assert client.get('/').status_code == 503
-    assert client.post('/api/orders/runner', json={}).status_code == 503
+    for response in (client.get('/'), client.get('/gestor'),
+                     client.post('/api/orders/runner', json={})):
+        assert response.status_code == 503
+        assert response.headers['Cache-Control'] == 'no-store'
+        assert response.headers['Retry-After'] == '300'
 
 
 def test_spa_reload_works_and_unknown_api_does_not_return_html(monkeypatch):
