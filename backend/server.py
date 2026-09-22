@@ -5925,13 +5925,13 @@ async def send_daily_sales_report():
 
 # Endpoint to manually check low stock (for testing)
 @api_router.get("/admin/low-stock-list")
-async def get_low_stock_list():
+async def get_low_stock_list(username: str = Depends(verify_gestor)):
     """Get current low stock list"""
     items = await db.low_stock_list.find({}, {"_id": 0}).to_list(100)
     return {"items": items, "count": len(items)}
 
 @api_router.post("/admin/check-low-stock")
-async def trigger_low_stock_check():
+async def trigger_low_stock_check(username: str = Depends(verify_gestor)):
     """Manually trigger low stock check"""
     await check_and_save_low_stock_items()
     items = await db.low_stock_list.find({}, {"_id": 0}).to_list(100)

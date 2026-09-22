@@ -26,12 +26,15 @@ def test_financial_maintenance_routes_require_gestor_login():
         "/api/admin/send-sales-report",
         "/api/admin/send-morning-report",
         "/api/admin/fix-categories",
+        "/api/admin/check-low-stock",
         "/api/admin/fix-zero-stock/runner",
         "/api/admin/clear-withdrawals/runner",
     )
 
     for route in routes:
         assert client.post(route).status_code == 401
+
+    assert client.get("/api/admin/low-stock-list").status_code == 401
 
 
 def test_store_maintenance_rejects_unknown_store_before_database_access():
