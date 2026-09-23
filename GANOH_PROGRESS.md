@@ -79,3 +79,10 @@ Do not merge either branch into production until its own tests pass.
 
 ## Current blocker
 The only blocker to a safe applied sync is destination MongoDB connectivity/credentials. Do not bypass this by publishing secrets or by making the private repository public.
+
+
+## Hourly assistant automation
+- The existing hourly ChatGPT automation was re-enabled and corrected on 2026-09-23.
+- It now checks the GANOH continuity state every hour.
+- It is explicitly forbidden from claiming success or writing data until destination MongoDB connectivity is verified.
+- It must use idempotent upserts and never delete source/destination records during continuity sync.
