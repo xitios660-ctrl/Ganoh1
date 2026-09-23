@@ -333,3 +333,58 @@ def test_completion_write_failure_is_not_reported_as_success(api):
     assert "Pagamento registrado" in response.json()["detail"]
     assert "Não tente novamente" in response.json()["detail"]
     api[1].prazo_payments.insert_one.assert_awaited_once()
+
+@pytest.mark.parametrize("amount", [0, -1, "NaN", "Infinity", "-Infinity"])
+def test_partial_payment_rejects_invalid_amount_before_database(api, amount):
+    response = api[0].post("/api/prazo/abater/Cliente%20Teste", json={
+        "amount": amount,
+        "password": "isolated-test-password",
+        "payment_method": "cash",
+        "store": "runner",
+    })
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("payment_method", ["", "unknown", "bitcoin"])
+def test_partial_payment_rejects_unknown_method_before_database(api, payment_method):
+    response = api[0].post("/api/prazo/abater/Cliente%20Teste", json={
+        "amount": 10,
+        "password": "isolated-test-password",
+        "payment_method": payment_method,
+        "store": "runner",
+    })
+    assert response.status_code == 422
+
+
+def test_modular_partial_payment_scopes_query_to_requested_store(monkeypatch):
+    class CapturingOrders:
+        query = None
+
+        def find(self, query, projection):
+            self.query = query
+
+            class Cursor:
+                def sort(self, *args):
+                    return self
+
+                async def to_list(self, limit):
+                    return []
+
+            return Cursor()
+
+    orders = CapturingOrders()
+    monkeypatch.setattr(prazo, "db", SimpleNamespace(orders=orders))
+    monkeypatch.setattr(prazo, "PRAZO_PASSWORD", "isolated-test-password")
+    app = FastAPI()
+    app.include_router(prazo.router, prefix="/api")
+
+    response = TestClient(app).post("/api/prazo/abater/Cliente%20Teste", json={
+        "amount": 10,
+        "password": "isolated-test-password",
+        "payment_method": "cash",
+        "store": "gym-londres",
+    })
+
+    assert response.status_code == 404
+    assert orders.query["store"] == "gym-londres"
+

@@ -3376,9 +3376,9 @@ class PrazoCreditAdd(BaseModel):
     payment_method: Optional[str] = None  # "cash" | "pix" | "credit" | "debit" — afeta o caixa quando abate dívida
 
 class PrazoAbaterRequest(BaseModel):
-    amount: float  # Valor a abater da dívida
+    amount: float = Field(gt=0, allow_inf_nan=False)  # Valor a abater da dívida
     password: str  # Senha de confirmação
-    payment_method: str = "cash"  # cash, debit, credit, pix
+    payment_method: Literal["cash", "pix", "debit", "credit", "saldo"] = "cash"
     store: StoreLocation  # Impede misturar clientes homônimos de lojas diferentes
 
 # ==================== KITCHEN MANAGEMENT ENDPOINTS (No auth required) ====================

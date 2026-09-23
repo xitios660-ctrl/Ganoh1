@@ -50,8 +50,9 @@ class PrazoCreditAdd(BaseModel):
 
 class PrazoAbaterRequest(BaseModel):
     password: str
-    amount: float
-    payment_method: str = "cash"
+    amount: float = Field(gt=0, allow_inf_nan=False)
+    payment_method: Literal["cash", "pix", "debit", "credit", "saldo"] = "cash"
+    store: Literal["runner", "gym-londres"]
 
 class PrazoDebtAdjust(BaseModel):
     password: str
@@ -653,6 +654,7 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     
     prazo_orders = await db.orders.find({
         "customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
+        "store": abater_data.store,
         "payment_method": "prazo",
         "prazo_paid": {"$ne": True}
     }, {"_id": 0}).sort("created_at", 1).to_list(1000)
@@ -668,14 +670,15 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     remaining_to_apply = abater_data.amount
     orders_updated = 0
     orders_fully_paid = 0
-    customer_store = prazo_orders[0].get("store", "runner") if prazo_orders else "runner"
+    customer_store = abater_data.store
     
     # FIX: Credit balance is the customer's pre-paid money. It should ONLY be reduced
     # when payment_method == 'saldo' (explicit choice to pay using the customer's credit).
     # For any other payment method (cash/pix/debit/credit-card), the credit balance must NOT
     # be touched - the customer is paying with real money.
     customer = await db.prazo_customers.find_one({
-        "name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"}
+        "name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
+        "store": abater_data.store,
     })
     
     previous_credit = 0
