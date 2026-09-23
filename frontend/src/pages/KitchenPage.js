@@ -755,7 +755,8 @@ export const KitchenPage = () => {
       await axios.post(`${API}/prazo/pay-all/${encodeURIComponent(selectedPrazoCustomer.name)}`, {
         amount: selectedPrazoCustomer.total,
         password: prazoPassword,
-        payment_method: prazoPaymentMethod
+        payment_method: prazoPaymentMethod,
+        store
       });
       toast.success(`Pagamento de ${selectedPrazoCustomer.name} registrado! (${prazoPaymentMethod === 'cash' ? 'Dinheiro' : prazoPaymentMethod === 'pix' ? 'PIX' : prazoPaymentMethod === 'debit' ? 'Débito' : 'Crédito'})`);
       setShowPrazoPayDialog(false);

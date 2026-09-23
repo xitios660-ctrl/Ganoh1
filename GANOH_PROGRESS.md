@@ -1,10 +1,10 @@
 # GANOH — Continuidade do trabalho
 
 ## Etapa atual
-Etapa 1 em andamento — incremento 1A (PIX manual) e 1B.1 (bloqueio de recebimento sem quitação) implementados e validados localmente.
+Etapa 1 em andamento — incrementos 1A, 1B.1 e 1B.2 (quitação por loja e valor do banco) implementados e validados localmente.
 Etapa 0 — auditoria de código e navegação pública concluída em 22/09/2026.
 Validação autenticada, reconciliação do banco real e confirmação dos segredos de implantação continuam pendentes; não declarar produção validada.
-Próximo incremento: 1B.2, quitação com escopo de loja, valor do banco e atomicidade durável. Não avançar à etapa 2 enquanto os gates financeiros estiverem pendentes.
+Próximo incremento: 1B.3, operação durável para quitação e teste concorrente em Mongo descartável. Não avançar à etapa 2 enquanto os gates financeiros estiverem pendentes.
 
 ## Retomada obrigatória
 1. Ler este arquivo e os commits da branch ganoh/staged-audit e da main.
@@ -16,7 +16,7 @@ Próximo incremento: 1B.2, quitação com escopo de loja, valor do banco e atomi
 
 ## Base, rollback e último commit
 - Base de código auditada: def13cf952811907329e0da79544699b2783ee37.
-- Último commit anterior a esta atualização / ponto de rollback: 72d149549693193d600a92d10223c40eacbf2664 (PIX manual identificado).
+- Último commit anterior a esta atualização / ponto de rollback: dc70787d22b5371c40aefce2ae8a2abe4be7beb3 (bloqueio de recebimento sem quitação).
 - O commit que contém este diagnóstico é obtido por git log -1 -- GANOH_PROGRESS.md. Um arquivo não pode conter o próprio SHA final.
 - Rollback de código: conservar a base e reverter somente commits novos, sem apagar dados ou forçar referências.
 - Rollback de banco ainda NÃO existe como backup verificado. Não executar migração ou reparação de dados.
@@ -174,7 +174,7 @@ Não há prova de migração concluída, de backup recuperável ou de equivalên
 12: somente após os gates; confirmar banco/backup/migração, destino da API, SPA, ambiente e rollback, publicar e validar sem movimentar dados reais.
 
 ## Próxima ação recomendada
-Retomar a etapa 1 pelo incremento 1B.2 de quitação total em ganoh/staged-audit; ler os registros 1A e 1B.1 abaixo.
+Retomar a etapa 1 pelo incremento 1B.3 de quitação total em ganoh/staged-audit; ler os registros 1A, 1B.1 e 1B.2 abaixo.
 Antes de qualquer deploy, resolver a dependência da API Emergent e obter reconciliação/backup autenticados.
 
 ## Incremento 1A — PIX manual (22/09/2026)
@@ -263,3 +263,41 @@ Preservar o teste de replay e ampliar contra Mongo descartável antes de declara
 2. Exigir loja no contrato de quitação e atualizar chamador; calcular centavos restantes no backend e impedir quitação de homônimos de outra loja.
 3. Cobrir concorrência, falha entre escritas, restart, replay após nova dívida e conflito de payload antes de declarar incremento 1B completo.
 4. Manter branch isolada e não avançar para tema/WhatsApp enquanto os gates financeiros estiverem pendentes.
+
+## Incremento 1B.2 — loja e valor autoritativos na quitação (22/09/2026)
+### Concluído
+- Criado contrato específico para quitação total; a loja agora é obrigatória e limitada a runner ou gym-londres nas duas implementações.
+- KitchenPage envia a loja atual junto com a confirmação. O contrato de pagamento individual não foi alterado.
+- A busca usa nome escapado, sem correspondência parcial, e a loja informada. Cliente homônimo em outra unidade fica fora da quitação.
+- A lista de IDs dos pedidos é congelada antes da escrita. Pedido novo criado depois da conferência não entra silenciosamente na quitação em andamento.
+- O backend recalcula o saldo restante de cada pedido em centavos a partir de total e partial_paid; o recibo não usa mais o valor da tela como fonte financeira.
+- Se o valor exibido ficou desatualizado, a API retorna 409 e exige atualizar a tela antes de confirmar.
+- Valores são arredondados por pedido com Decimal e ROUND_HALF_UP. NaN, infinito e valor não positivo do pedido são bloqueados sem escrita.
+- IDs ausentes/duplicados e mais de 1000 pedidos são bloqueados para não executar quitação parcial insegura.
+- Se a quantidade alterada divergir da quantidade conferida, nenhum recibo/histórico é criado e a resposta orienta não repetir até conferência do gestor.
+- Resposta de sucesso inclui amount e store efetivamente usados pelo backend.
+
+### Arquivos alterados
+- backend/server.py
+- backend/routers/prazo.py
+- backend/tests/test_prazo_empty_settlement.py
+- frontend/src/pages/KitchenPage.js
+- GANOH_PROGRESS.md
+
+### Testes e resultados
+- 101 testes Python aprovados, 6 avisos de depreciação existentes.
+- 18 casos diretos de quitação aprovados nas duas implementações: primeira quitação/replay, ausência de dívida, leitura desatualizada, senha, homônimos entre lojas, centavos, saldo da tela desatualizado e loja ausente/inválida.
+- Caso de centavos: valores históricos fracionários são arredondados por pedido e o recibo usa o total calculado pelo servidor.
+- Homônimo: quitação Runner de R$100 não alterou dívida Gym Londres de R$300.
+- 5 testes Jest do mecanismo PIX continuaram aprovados.
+- Build frontend de produção aprovado. Permanecem somente avisos de dependências de hooks já existentes; nenhum CSS foi alterado neste incremento.
+- Testes não iniciaram jobs, não acessaram banco real e não enviaram WhatsApp.
+
+### Limites / próxima ação
+- Ainda não há atomicidade entre update_many dos pedidos e insert_one do recibo. O bloqueio de divergência evita um recibo inflado, mas uma falha pode deixar pedidos quitados sem recibo.
+- Ainda não existe operation_id durável da quitação; retry após nova dívida não pode ser distinguido com segurança sem esse identificador.
+- Os testes usam coleção em memória. Validar sessão/transação, concorrência, falha entre escritas e restart contra Mongo descartável antes de fechar 1B.
+- Não executar reparo de históricos automaticamente. Divergências existentes exigem backup e reconciliação autenticada.
+- Não publicar frontend separado: o backend Emergent atual não aceita o novo campo/contrato de forma coordenada.
+- Próxima ação: 1B.3 deve criar registro de operação único e usar transação Mongo quando suportada, com comportamento seguro e documentado quando transações não estiverem disponíveis.
+- Nenhum dado real, saldo, banco, serviço Render ou WhatsApp foi alterado; nenhum deploy realizado.

@@ -20,18 +20,37 @@ from routers import prazo
 
 
 class Orders:
-    def __init__(self, unpaid=1, stale_snapshot=False):
-        self.unpaid = unpaid
+    def __init__(self, documents=None, stale_snapshot=False):
+        self.documents = documents if documents is not None else [
+            {"id": "runner-order", "customer_name": "Cliente Teste", "store": "runner",
+             "payment_method": "prazo", "prazo_paid": False, "total": 100, "partial_paid": 0}
+        ]
         self.stale_snapshot = stale_snapshot
 
-    async def find_one(self, query, projection):
-        return {"store": "runner"} if self.unpaid or self.stale_snapshot else None
+    def find(self, query, projection):
+        documents = [dict(document) for document in self.documents
+                     if document.get("store") == query["store"]
+                     and document.get("payment_method") == "prazo"
+                     and not document.get("prazo_paid")]
+
+        class Cursor:
+            async def to_list(self, limit):
+                return documents[:limit]
+
+        return Cursor()
 
     async def update_many(self, query, update):
         assert query["prazo_paid"] == {"$ne": True}
         assert update["$set"]["prazo_paid"] is True
-        changed = self.unpaid
-        self.unpaid = 0
+        if self.stale_snapshot:
+            return SimpleNamespace(modified_count=0)
+        accepted_ids = set(query["id"]["$in"])
+        changed = 0
+        for document in self.documents:
+            if (document.get("id") in accepted_ids and document.get("store") == query["store"]
+                    and not document.get("prazo_paid")):
+                document.update(update["$set"])
+                changed += 1
         return SimpleNamespace(modified_count=changed)
 
 
@@ -56,7 +75,7 @@ def api(request, monkeypatch):
 def post(api, **overrides):
     return api[0].post("/api/prazo/pay-all/Cliente%20Teste", json={
         "amount": 100, "password": "isolated-test-password",
-        "payment_method": "cash", **overrides,
+        "payment_method": "cash", "store": "runner", **overrides,
     })
 
 
@@ -78,10 +97,10 @@ def test_first_settlement_then_repeated_calls_record_only_100(api):
 
 def test_customer_without_debt_cannot_create_receipt_or_history(api):
     _, database, history, _ = api
-    database.orders.unpaid = 0
+    database.orders.documents = []
     response = post(api)
     assert response.status_code == 409
-    assert "Confira o histórico" in response.json()["detail"]
+    assert "não possui débito" in response.json()["detail"]
     database.prazo_payments.insert_one.assert_not_awaited()
     history.assert_not_awaited()
 
@@ -89,8 +108,62 @@ def test_customer_without_debt_cannot_create_receipt_or_history(api):
 def test_stale_read_cannot_create_receipt_after_zero_modified_orders(api):
     _, database, history, _ = api
     # Simulate another request paying between the initial read and write.
-    database.orders = Orders(unpaid=0, stale_snapshot=True)
+    database.orders = Orders(stale_snapshot=True)
     assert post(api).status_code == 409
+    database.prazo_payments.insert_one.assert_not_awaited()
+    history.assert_not_awaited()
+
+
+def test_same_name_in_another_store_is_not_settled(api):
+    _, database, _, _ = api
+    other_store = {"id": "gym-order", "customer_name": "Cliente Teste", "store": "gym-londres",
+                   "payment_method": "prazo", "prazo_paid": False, "total": 300, "partial_paid": 0}
+    database.orders.documents.append(other_store)
+    response = post(api)
+    assert response.status_code == 200
+    assert response.json()["amount"] == 100
+    assert response.json()["store"] == "runner"
+    assert other_store["prazo_paid"] is False
+
+
+def test_receipt_uses_remaining_database_value_in_cents(api):
+    _, database, _, _ = api
+    database.orders.documents = [
+        {"id": "one", "customer_name": "Cliente Teste", "store": "runner",
+         "payment_method": "prazo", "prazo_paid": False, "total": 50.005, "partial_paid": 10},
+        {"id": "two", "customer_name": "Cliente Teste", "store": "runner",
+         "payment_method": "prazo", "prazo_paid": False, "total": 60.004, "partial_paid": 0},
+    ]
+    response = post(api, amount=100.01)
+    assert response.status_code == 200
+    assert response.json()["amount"] == 100.01
+    receipt = database.prazo_payments.insert_one.await_args.args[0]
+    assert receipt["amount"] == 100.01
+
+
+def test_stale_screen_amount_is_rejected_before_writing(api):
+    _, database, history, _ = api
+    response = post(api, amount=99.99)
+    assert response.status_code == 409
+    assert "saldo mudou" in response.json()["detail"]
+    assert database.orders.documents[0]["prazo_paid"] is False
+    database.prazo_payments.insert_one.assert_not_awaited()
+    history.assert_not_awaited()
+
+
+@pytest.mark.parametrize("payload", [
+    {"amount": 100, "password": "isolated-test-password", "payment_method": "cash"},
+    {"amount": 100, "password": "isolated-test-password", "payment_method": "cash", "store": "unknown"},
+])
+def test_missing_or_unknown_store_is_rejected_before_database(api, payload):
+    class ForbiddenDatabase:
+        def __getattr__(self, name):
+            raise AssertionError("Invalid store reached the database")
+
+    client, database, history, _ = api
+    database.orders = ForbiddenDatabase()
+    response = client.post("/api/prazo/pay-all/Cliente%20Teste", json=payload)
+    assert response.status_code == 422
     database.prazo_payments.insert_one.assert_not_awaited()
     history.assert_not_awaited()
 

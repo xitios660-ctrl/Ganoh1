@@ -2,7 +2,9 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional
+from typing import Literal
 from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import uuid
 import re
 import logging
@@ -34,6 +36,11 @@ class PrazoPayment(BaseModel):
     password: str
     amount: float = 0
     payment_method: str = "cash"
+
+class PrazoFullPayment(PrazoPayment):
+    amount: float = Field(gt=0, allow_inf_nan=False)
+    payment_method: Literal["cash", "pix", "debit", "credit"] = "cash"
+    store: Literal["runner", "gym-londres"]
 
 class PrazoCreditAdd(BaseModel):
     amount: float = Field(gt=0, allow_inf_nan=False)
@@ -490,19 +497,50 @@ async def pay_prazo_order(order_id: str, payment: PrazoPayment):
     return {"success": True, "message": "Pagamento registrado"}
 
 @router.post("/pay-all/{customer_name}")
-async def pay_all_prazo_customer(customer_name: str, payment: PrazoPayment):
+async def pay_all_prazo_customer(customer_name: str, payment: PrazoFullPayment):
     """Mark all prazo orders for a customer as paid (requires password)"""
     if payment.password != PRAZO_PASSWORD:
         raise HTTPException(status_code=403, detail="Senha incorreta")
     
-    first_order = await db.orders.find_one(
-        {"customer_name": customer_name, "payment_method": "prazo", "prazo_paid": {"$ne": True}},
-        {"store": 1}
-    )
-    customer_store = first_order.get("store", "runner") if first_order else "runner"
-    
+    customer_store = payment.store
+    debt_query = {
+        "customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
+        "store": customer_store,
+        "payment_method": "prazo",
+        "prazo_paid": {"$ne": True},
+    }
+    unpaid_orders = await db.orders.find(debt_query, {"_id": 0}).to_list(1001)
+    if not unpaid_orders:
+        raise HTTPException(status_code=409, detail="Cliente não possui débito pendente nesta loja")
+    if len(unpaid_orders) > 1000:
+        raise HTTPException(status_code=409, detail="Quitação excede o limite seguro de pedidos; contate o gestor")
+
+    order_ids = [order.get("id") for order in unpaid_orders]
+    if any(not order_id for order_id in order_ids) or len(set(order_ids)) != len(order_ids):
+        raise HTTPException(status_code=409, detail="Pedidos sem identificação única; contate o gestor")
+
+    try:
+        total_cents = sum(max(
+            int((Decimal(str(order.get("total", 0))) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+            - int((Decimal(str(order.get("partial_paid", 0))) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
+            0,
+        ) for order in unpaid_orders)
+        requested_cents = int((Decimal(str(payment.amount)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    except (InvalidOperation, OverflowError, TypeError, ValueError):
+        raise HTTPException(status_code=409, detail="Há valor inválido nos pedidos; contate o gestor")
+    if total_cents <= 0:
+        raise HTTPException(status_code=409, detail="Cliente não possui saldo pendente nesta loja")
+    if requested_cents != total_cents:
+        raise HTTPException(status_code=409, detail="O saldo mudou. Atualize a tela antes de confirmar o pagamento")
+
+    settlement_query = {
+        "id": {"$in": order_ids},
+        "store": customer_store,
+        "payment_method": "prazo",
+        "prazo_paid": {"$ne": True},
+    }
     result = await db.orders.update_many(
-        {"customer_name": customer_name, "payment_method": "prazo", "prazo_paid": {"$ne": True}},
+        settlement_query,
         {"$set": {
             "prazo_paid": True, 
             "prazo_paid_at": datetime.now(timezone.utc).isoformat(),
@@ -517,11 +555,16 @@ async def pay_all_prazo_customer(customer_name: str, payment: PrazoPayment):
             status_code=409,
             detail="Nenhum débito pendente foi quitado. Confira o histórico antes de tentar novamente.",
         )
+    if result.modified_count != len(order_ids):
+        raise HTTPException(
+            status_code=409,
+            detail="Quitação parcial detectada. Não tente novamente; solicite conferência do gestor.",
+        )
 
     payment_record = {
         "id": str(uuid.uuid4()),
         "customer_name": customer_name,
-        "amount": payment.amount,
+        "amount": total_cents / 100,
         "payment_method": payment.payment_method,
         "type": "full_payment",
         "store": customer_store,
@@ -533,11 +576,11 @@ async def pay_all_prazo_customer(customer_name: str, payment: PrazoPayment):
         customer_name=customer_name,
         store=customer_store,
         event_type="payment_full",
-        amount=payment.amount,
+        amount=total_cents / 100,
         payment_method=payment.payment_method,
     )
 
-    return {"success": True, "message": f"Todos os débitos de {customer_name} foram quitados ({payment.payment_method})", "orders_paid": result.modified_count}
+    return {"success": True, "message": f"Todos os débitos de {customer_name} foram quitados ({payment.payment_method})", "orders_paid": result.modified_count, "amount": total_cents / 100, "store": customer_store}
 
 @router.post("/abater/{customer_name}")
 async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest):
