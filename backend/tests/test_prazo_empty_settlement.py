@@ -85,6 +85,13 @@ class SettlementOperations:
         return SimpleNamespace(modified_count=0)
 
 
+class CompletionFailOperations(SettlementOperations):
+    async def update_one(self, query, update):
+        if update["$set"].get("status") == "completed":
+            return SimpleNamespace(modified_count=0)
+        return await super().update_one(query, update)
+
+
 class DurableSettlementOperations:
     """SQLite adapter used only to prove restart durability of Mongo's unique _id contract."""
     def __init__(self, path):
@@ -315,4 +322,14 @@ def test_completed_operation_survives_process_restart(api, tmp_path):
         process.join()
         pytest.fail("Restart replay test timed out")
     assert process.exitcode == 0
+    api[1].prazo_payments.insert_one.assert_awaited_once()
+
+
+def test_completion_write_failure_is_not_reported_as_success(api):
+    api[1].prazo_settlement_operations = CompletionFailOperations()
+    response = post(api, operation_id=str(uuid4()))
+
+    assert response.status_code == 503
+    assert "Pagamento registrado" in response.json()["detail"]
+    assert "Não tente novamente" in response.json()["detail"]
     api[1].prazo_payments.insert_one.assert_awaited_once()

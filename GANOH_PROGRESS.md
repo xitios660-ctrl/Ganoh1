@@ -1,7 +1,7 @@
 # GANOH — Continuidade do trabalho
 
 ## Etapa atual
-Etapa 1 em andamento — incrementos 1A, 1B.1, 1B.2 e 1B.3a (identificador durável da quitação) implementados e validados localmente.
+Etapa 1 em andamento — incrementos 1A, 1B.1, 1B.2, 1B.3a e 1B.3a.1 (confirmação final verificada) implementados e validados.
 Etapa 0 — auditoria de código e navegação pública concluída em 22/09/2026.
 Validação autenticada, reconciliação do banco real e confirmação dos segredos de implantação continuam pendentes; não declarar produção validada.
 Próximo incremento: 1B.3b, transação da quitação e teste concorrente em Mongo descartável. Não avançar à etapa 2 enquanto os gates financeiros estiverem pendentes.
@@ -16,7 +16,7 @@ Próximo incremento: 1B.3b, transação da quitação e teste concorrente em Mon
 
 ## Base, rollback e último commit
 - Base de código auditada: def13cf952811907329e0da79544699b2783ee37.
-- Último commit anterior a esta atualização / ponto de rollback: 56f542265bd1513c7182d51a09e614b346d16d6e (quitação por loja e valor do banco).
+- Último commit anterior a esta atualização / ponto de rollback: bedfa6de330102c3be93796a61896571add528a6 (identificador durável da quitação).
 - O commit que contém este diagnóstico é obtido por git log -1 -- GANOH_PROGRESS.md. Um arquivo não pode conter o próprio SHA final.
 - Rollback de código: conservar a base e reverter somente commits novos, sem apagar dados ou forçar referências.
 - Rollback de banco ainda NÃO existe como backup verificado. Não executar migração ou reparação de dados.
@@ -345,3 +345,26 @@ Preservar o teste de replay e ampliar contra Mongo descartável antes de declara
 - Ainda faltam teste concorrente e transação contra Mongo descartável/replica set. Não declarar a quitação totalmente atômica nem a etapa 1 concluída.
 - Próxima ação: executar 1B.3b com Mongo descartável compatível com transações, incluindo falha injetada entre cada escrita e múltiplas chamadas concorrentes.
 - Nenhum deploy realizado; manter a branch isolada até os gates financeiros e de ambiente serem concluídos.
+
+
+## Incremento 1B.3a.1 — confirmação final não pode falhar silenciosamente (23/09/2026)
+### Correção
+- As duas implementações ignoravam o resultado ao mudar prazo_settlement_operations de pending para completed.
+- Se a atualização retornasse modified_count=0, a API ainda respondia sucesso; um retry posterior encontraria pending e ficaria bloqueado, contradizendo a resposta anterior.
+- Agora o resultado precisa confirmar exatamente uma alteração. Caso contrário, a API retorna 503 informando que o pagamento já foi registrado, orienta não repetir e pede conferência do gestor.
+- O frontend já conserva o operation_id em respostas 503; nenhuma alteração de interface foi necessária.
+- Nenhum recebimento ou pedido é repetido para tentar mascarar a falha.
+
+### Arquivos alterados
+- backend/server.py
+- backend/routers/prazo.py
+- backend/tests/test_prazo_empty_settlement.py
+- GANOH_PROGRESS.md
+
+### Validação e limites
+- Sintaxe dos dois módulos e do teste validada com ast.parse.
+- Teste novo injeta modified_count=0 na conclusão e exige HTTP 503 nas duas implementações, mantendo um único insert de recebimento.
+- A lógica de decisão foi exercitada isoladamente: modified_count=1 retorna sucesso; 0 produz o bloqueio esperado.
+- A suíte completa anterior permanece em 107 testes Python, 11 Jest e build aprovado. Este ambiente renovado não possui dependências Python nem MongoDB; portanto o novo teste não foi executado com FastAPI nesta revisão.
+- Não confundir esta verificação com transação Mongo. A lacuna pedidos + recibo + operação continua pendente para 1B.3b em replica set descartável.
+- Nenhum dado real, deploy, Render, banco de produção ou WhatsApp foi alterado.

@@ -630,10 +630,15 @@ async def pay_all_prazo_customer(customer_name: str, payment: PrazoFullPayment):
         payment_method=payment.payment_method,
     )
     response = {"success": True, "message": f"Todos os débitos de {customer_name} foram quitados ({payment.payment_method})", "orders_paid": result.modified_count, "amount": total_cents / 100, "store": customer_store, "operation_id": operation_id, "replayed": False}
-    await db.prazo_settlement_operations.update_one(
+    completion_result = await db.prazo_settlement_operations.update_one(
         {"_id": operation_key, "status": "pending"},
         {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat(), "response": response}},
     )
+    if completion_result.modified_count != 1:
+        raise HTTPException(
+            status_code=503,
+            detail="Pagamento registrado, mas a confirmação final falhou. Não tente novamente; solicite conferência do gestor",
+        )
     return response
 
 @router.post("/abater/{customer_name}")
