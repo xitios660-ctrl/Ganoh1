@@ -315,7 +315,7 @@ def main() -> int:
     source_password = os.getenv("SOURCE_GESTOR_PASSWORD")
     mongo_url = os.getenv("MONGO_URL")
     db_name = os.getenv("DB_NAME", "ganohdb")
-    dry_run = not args.apply or env_bool("SYNC_DRY_RUN", default=False)
+    apply_requested = args.apply or env_bool("SYNC_APPLY", default=False)\n    dry_run = (not apply_requested) or env_bool("SYNC_DRY_RUN", default=False)
 
     client = SourceClient(source_base, source_user, source_password)
     payloads, errors = collect_source(client)
