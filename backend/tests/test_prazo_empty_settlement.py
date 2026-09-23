@@ -39,6 +39,9 @@ class Orders:
                      and not document.get("prazo_paid")]
 
         class Cursor:
+            def sort(self, *args):
+                return self
+
             async def to_list(self, limit):
                 return documents[:limit]
 
@@ -387,4 +390,36 @@ def test_modular_partial_payment_scopes_query_to_requested_store(monkeypatch):
 
     assert response.status_code == 404
     assert orders.query["store"] == "gym-londres"
+
+class StaleCreditCustomers:
+    def __init__(self):
+        self.update_query = None
+
+    async def find_one(self, query):
+        return {"id": "customer-id", "name": "Cliente Teste", "store": "runner", "credit": 100}
+
+    async def update_one(self, query, update):
+        self.update_query = query
+        return SimpleNamespace(modified_count=0)
+
+
+def test_partial_payment_stops_when_credit_changed_concurrently(api):
+    customers = StaleCreditCustomers()
+    api[1].prazo_customers = customers
+    api[1].prazo_partial_payments = AsyncMock()
+
+    response = api[0].post("/api/prazo/abater/Cliente%20Teste", json={
+        "amount": 10,
+        "password": "isolated-test-password",
+        "payment_method": "saldo",
+        "store": "runner",
+    })
+
+    assert response.status_code == 409
+    assert "saldo a favor mudou" in response.json()["detail"].lower()
+    assert customers.update_query == {"id": "customer-id", "credit": 100}
+    assert api[1].orders.documents[0]["partial_paid"] == 0
+    assert api[1].orders.documents[0]["prazo_paid"] is False
+    api[1].prazo_partial_payments.insert_one.assert_not_awaited()
+    api[2].assert_not_awaited()
 

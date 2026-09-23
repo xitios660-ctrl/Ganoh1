@@ -4052,10 +4052,15 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
                 detail=f"Saldo a favor insuficiente. Disponível: R$ {previous_credit:.2f}, solicitado: R$ {abater_data.amount:.2f}"
             )
         
-        await db.prazo_customers.update_one(
-            {"id": customer["id"]},
+        credit_result = await db.prazo_customers.update_one(
+            {"id": customer["id"], "credit": previous_credit},
             {"$set": {"credit": new_credit}}
         )
+        if credit_result.modified_count != 1:
+            raise HTTPException(
+                status_code=409,
+                detail="O saldo a favor mudou durante a operação. Atualize a tela e confira antes de tentar novamente",
+            )
     
     # Apply payment to orders, oldest first
     remaining_payment = abater_data.amount
