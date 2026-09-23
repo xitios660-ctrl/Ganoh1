@@ -19,6 +19,7 @@ import { useKitchenBell } from '../hooks/useKitchenBell';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { useTheme } from '../context/ThemeContext';
 import { getPendingPix, preparePix, confirmPix, blockUnconfirmedPix } from '../services/pixOperation';
+import { prepareSettlement, confirmSettlement, discardUnstartedSettlement, blockUnconfirmedSettlement } from '../services/prazoSettlement';
 import { Bell, BellOff } from 'lucide-react';
 import { KitchenStage3D } from '../components/KitchenStage3D';
 import '../styles/kitchen-cinematic.css';
@@ -749,23 +750,38 @@ export const KitchenPage = () => {
 
   const handlePayPrazo = async () => {
     if (!selectedPrazoCustomer || !prazoPassword) return;
-    
+    const customerName = selectedPrazoCustomer.name;
+    let operation;
     setIsPaying(true);
     try {
-      await axios.post(`${API}/prazo/pay-all/${encodeURIComponent(selectedPrazoCustomer.name)}`, {
-        amount: selectedPrazoCustomer.total,
+      operation = prepareSettlement(store, customerName, selectedPrazoCustomer.total, prazoPaymentMethod);
+      const response = await axios.post(`${API}/prazo/pay-all/${encodeURIComponent(customerName)}`, {
+        amount: operation.amount,
         password: prazoPassword,
-        payment_method: prazoPaymentMethod,
-        store
+        payment_method: operation.payment_method,
+        store,
+        operation_id: operation.operation_id
       });
-      toast.success(`Pagamento de ${selectedPrazoCustomer.name} registrado! (${prazoPaymentMethod === 'cash' ? 'Dinheiro' : prazoPaymentMethod === 'pix' ? 'PIX' : prazoPaymentMethod === 'debit' ? 'Débito' : 'Crédito'})`);
+      if (response.data.operation_id !== operation.operation_id) {
+        blockUnconfirmedSettlement(store, customerName);
+        throw new Error('O servidor não confirmou o identificador da quitação. Confira com o gestor.');
+      }
+      confirmSettlement(store, customerName, operation.operation_id);
+      toast.success(`${response.data.replayed ? 'Pagamento já registrado' : 'Pagamento registrado'} para ${customerName}! (${prazoPaymentMethod === 'cash' ? 'Dinheiro' : prazoPaymentMethod === 'pix' ? 'PIX' : prazoPaymentMethod === 'debit' ? 'Débito' : 'Crédito'})`);
       setShowPrazoPayDialog(false);
       setSelectedPrazoCustomer(null);
       setPrazoPassword('');
       setPrazoPaymentMethod('cash');
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || 'Erro ao registrar pagamento');
+      const detail = error.response?.data?.detail;
+      const safeBeforeWrite = error.response?.status === 403 || error.response?.status === 422
+        || (error.response?.status === 409 && typeof detail === 'string'
+          && /não possui débito|não possui saldo|limite seguro|sem identificação única|valor inválido|saldo mudou/i.test(detail));
+      if (operation && safeBeforeWrite) {
+        discardUnstartedSettlement(store, customerName, operation.operation_id);
+      }
+      toast.error((typeof detail === 'string' && detail) || error.message || 'Erro ao registrar pagamento');
     } finally {
       setIsPaying(false);
     }

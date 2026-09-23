@@ -1,10 +1,10 @@
 # GANOH — Continuidade do trabalho
 
 ## Etapa atual
-Etapa 1 em andamento — incrementos 1A, 1B.1 e 1B.2 (quitação por loja e valor do banco) implementados e validados localmente.
+Etapa 1 em andamento — incrementos 1A, 1B.1, 1B.2 e 1B.3a (identificador durável da quitação) implementados e validados localmente.
 Etapa 0 — auditoria de código e navegação pública concluída em 22/09/2026.
 Validação autenticada, reconciliação do banco real e confirmação dos segredos de implantação continuam pendentes; não declarar produção validada.
-Próximo incremento: 1B.3, operação durável para quitação e teste concorrente em Mongo descartável. Não avançar à etapa 2 enquanto os gates financeiros estiverem pendentes.
+Próximo incremento: 1B.3b, transação da quitação e teste concorrente em Mongo descartável. Não avançar à etapa 2 enquanto os gates financeiros estiverem pendentes.
 
 ## Retomada obrigatória
 1. Ler este arquivo e os commits da branch ganoh/staged-audit e da main.
@@ -16,7 +16,7 @@ Próximo incremento: 1B.3, operação durável para quitação e teste concorren
 
 ## Base, rollback e último commit
 - Base de código auditada: def13cf952811907329e0da79544699b2783ee37.
-- Último commit anterior a esta atualização / ponto de rollback: dc70787d22b5371c40aefce2ae8a2abe4be7beb3 (bloqueio de recebimento sem quitação).
+- Último commit anterior a esta atualização / ponto de rollback: 56f542265bd1513c7182d51a09e614b346d16d6e (quitação por loja e valor do banco).
 - O commit que contém este diagnóstico é obtido por git log -1 -- GANOH_PROGRESS.md. Um arquivo não pode conter o próprio SHA final.
 - Rollback de código: conservar a base e reverter somente commits novos, sem apagar dados ou forçar referências.
 - Rollback de banco ainda NÃO existe como backup verificado. Não executar migração ou reparação de dados.
@@ -174,7 +174,7 @@ Não há prova de migração concluída, de backup recuperável ou de equivalên
 12: somente após os gates; confirmar banco/backup/migração, destino da API, SPA, ambiente e rollback, publicar e validar sem movimentar dados reais.
 
 ## Próxima ação recomendada
-Retomar a etapa 1 pelo incremento 1B.3 de quitação total em ganoh/staged-audit; ler os registros 1A, 1B.1 e 1B.2 abaixo.
+Retomar a etapa 1 pelo incremento 1B.3b de quitação total em ganoh/staged-audit; ler os registros 1A, 1B.1, 1B.2 e 1B.3a abaixo.
 Antes de qualquer deploy, resolver a dependência da API Emergent e obter reconciliação/backup autenticados.
 
 ## Incremento 1A — PIX manual (22/09/2026)
@@ -301,3 +301,47 @@ Preservar o teste de replay e ampliar contra Mongo descartável antes de declara
 - Não publicar frontend separado: o backend Emergent atual não aceita o novo campo/contrato de forma coordenada.
 - Próxima ação: 1B.3 deve criar registro de operação único e usar transação Mongo quando suportada, com comportamento seguro e documentado quando transações não estiverem disponíveis.
 - Nenhum dado real, saldo, banco, serviço Render ou WhatsApp foi alterado; nenhum deploy realizado.
+
+## Incremento 1B.3a — identificador durável da quitação (22/09/2026)
+### Concluído
+- operation_id UUID passou a ser obrigatório apenas na quitação total; pagamento individual permanece inalterado.
+- A UI grava a operação em sessionStorage antes do POST e reutiliza a mesma chave após perda de resposta ou recarga da aba.
+- Operações ficam em prazo_settlement_operations com _id determinístico por loja/operação; a unicidade nativa do Mongo funciona como trava de concorrência sem criar índice adicional.
+- O registro pending é criado antes de alterar pedidos. Uma operação já concluída retorna a resposta original com replayed=true sem reler ou alterar dívidas.
+- Mesma chave com cliente, valor ou forma de pagamento diferente retorna 409.
+- Operação pending ou requires_review nunca é repetida automaticamente; exige conferência do gestor.
+- Recibo passou a usar id e _id determinísticos derivados da operação e inclui operation_id.
+- Falha com zero pedidos ou atualização parcial marca a operação como requires_review antes de responder 409.
+- UI só descarta a chave em rejeições comprovadamente anteriores à escrita (senha/validação/saldo desatualizado). Erros ambíguos preservam e bloqueiam a tentativa.
+- Resposta de servidor sem operation_id também bloqueia novas tentativas, evitando duplicidade durante implantação incompatível.
+
+### Arquivos alterados
+- backend/server.py
+- backend/routers/prazo.py
+- backend/tests/test_prazo_empty_settlement.py
+- frontend/src/pages/KitchenPage.js
+- frontend/src/services/prazoSettlement.js (novo)
+- frontend/src/services/prazoSettlement.test.js (novo)
+- GANOH_PROGRESS.md
+
+### Testes e resultados
+- 107 testes Python aprovados, 6 avisos de depreciação existentes.
+- 24 casos diretos de quitação aprovados nas duas implementações.
+- Uma quitação de R$100 seguida de quatro replays retornou sucesso reaproveitado e manteve um único insert de recebimento.
+- Replay com payload diferente: 409, sem segundo recebimento.
+- Operação pendente: 409 e nenhum acesso/escrita em pedidos ou recebimentos.
+- Restart real de processo Python com adapter SQLite durável: operação concluída foi reconhecida sem acessar pedidos/recebimentos e sem nova inserção.
+- SQLite reproduz somente o contrato de unicidade/persistência do _id; não substitui teste de integração Mongo.
+- 11 testes Jest aprovados (6 da quitação e 5 do PIX).
+- Build frontend de produção aprovado; somente avisos de hooks preexistentes.
+- Nenhum job iniciado, banco real acessado, mensagem enviada ou dado financeiro alterado.
+
+### Limites / próxima ação
+- A trava durável impede replay duplicado, mas pedidos, recebimento, histórico e status da operação ainda não estão em uma transação Mongo única.
+- Queda após quitar pedidos e antes do recibo deixa pending e bloqueia retry; isso é deliberado para não inflar o caixa, porém requer ferramenta de reconciliação do gestor.
+- Queda depois do recibo e antes de completed também bloqueia retry; não implementar recuperação automática sem conferir recibo e pedidos.
+- No router modular, falha ao gravar o histórico após o recibo também deixa operação pendente; a rota ativa atual é o monólito, mas o caminho modular ainda precisa de transação.
+- sessionStorage cobre recarga da aba, não outro dispositivo nem fechamento definitivo; o backend continua sendo a proteção durável.
+- Ainda faltam teste concorrente e transação contra Mongo descartável/replica set. Não declarar a quitação totalmente atômica nem a etapa 1 concluída.
+- Próxima ação: executar 1B.3b com Mongo descartável compatível com transações, incluindo falha injetada entre cada escrita e múltiplas chamadas concorrentes.
+- Nenhum deploy realizado; manter a branch isolada até os gates financeiros e de ambiente serem concluídos.

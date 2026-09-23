@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import uuid
 import re
 import logging
+from pymongo.errors import DuplicateKeyError
 
 router = APIRouter(prefix="/prazo", tags=["Prazo"])
 logger = logging.getLogger(__name__)
@@ -41,6 +42,7 @@ class PrazoFullPayment(PrazoPayment):
     amount: float = Field(gt=0, allow_inf_nan=False)
     payment_method: Literal["cash", "pix", "debit", "credit"] = "cash"
     store: Literal["runner", "gym-londres"]
+    operation_id: uuid.UUID
 
 class PrazoCreditAdd(BaseModel):
     amount: float = Field(gt=0, allow_inf_nan=False)
@@ -503,6 +505,19 @@ async def pay_all_prazo_customer(customer_name: str, payment: PrazoFullPayment):
         raise HTTPException(status_code=403, detail="Senha incorreta")
     
     customer_store = payment.store
+    operation_id = str(payment.operation_id)
+    operation_key = f"prazo-full:{customer_store}:{operation_id}"
+    requested_cents = int((Decimal(str(payment.amount)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    existing_operation = await db.prazo_settlement_operations.find_one({"_id": operation_key}, {"_id": 0})
+    if existing_operation:
+        if (existing_operation.get("customer_key") != customer_name.casefold()
+                or existing_operation.get("requested_cents") != requested_cents
+                or existing_operation.get("payment_method") != payment.payment_method):
+            raise HTTPException(status_code=409, detail="Identificador de operação já usado com dados diferentes")
+        if existing_operation.get("status") == "completed":
+            return {**existing_operation["response"], "replayed": True}
+        raise HTTPException(status_code=409, detail="Operação anterior incompleta. Não repita; solicite conferência do gestor")
+
     debt_query = {
         "customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
         "store": customer_store,
@@ -525,13 +540,40 @@ async def pay_all_prazo_customer(customer_name: str, payment: PrazoFullPayment):
             - int((Decimal(str(order.get("partial_paid", 0))) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
             0,
         ) for order in unpaid_orders)
-        requested_cents = int((Decimal(str(payment.amount)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
     except (InvalidOperation, OverflowError, TypeError, ValueError):
         raise HTTPException(status_code=409, detail="Há valor inválido nos pedidos; contate o gestor")
     if total_cents <= 0:
         raise HTTPException(status_code=409, detail="Cliente não possui saldo pendente nesta loja")
     if requested_cents != total_cents:
         raise HTTPException(status_code=409, detail="O saldo mudou. Atualize a tela antes de confirmar o pagamento")
+
+    now = datetime.now(timezone.utc).isoformat()
+    operation_record = {
+        "_id": operation_key,
+        "operation_id": operation_id,
+        "customer_name": customer_name,
+        "customer_key": customer_name.casefold(),
+        "store": customer_store,
+        "requested_cents": requested_cents,
+        "amount": total_cents / 100,
+        "payment_method": payment.payment_method,
+        "order_ids": order_ids,
+        "status": "pending",
+        "created_at": now,
+    }
+    try:
+        await db.prazo_settlement_operations.insert_one(operation_record)
+    except DuplicateKeyError:
+        existing_operation = await db.prazo_settlement_operations.find_one({"_id": operation_key}, {"_id": 0})
+        if not existing_operation:
+            raise HTTPException(status_code=503, detail="Não foi possível confirmar a operação; não tente novamente agora")
+        if (existing_operation.get("customer_key") != customer_name.casefold()
+                or existing_operation.get("requested_cents") != requested_cents
+                or existing_operation.get("payment_method") != payment.payment_method):
+            raise HTTPException(status_code=409, detail="Identificador de operação já usado com dados diferentes")
+        if existing_operation.get("status") == "completed":
+            return {**existing_operation["response"], "replayed": True}
+        raise HTTPException(status_code=409, detail="Operação em processamento ou aguardando conferência do gestor")
 
     settlement_query = {
         "id": {"$in": order_ids},
@@ -551,18 +593,26 @@ async def pay_all_prazo_customer(customer_name: str, payment: PrazoFullPayment):
     # Only a write that actually settles debt may create a receipt.
     # The earlier find_one is not safe as a guard against stale/repeated calls.
     if result.modified_count == 0:
+        await db.prazo_settlement_operations.update_one(
+            {"_id": operation_key}, {"$set": {"status": "requires_review", "error": "no_orders_modified"}}
+        )
         raise HTTPException(
             status_code=409,
             detail="Nenhum débito pendente foi quitado. Confira o histórico antes de tentar novamente.",
         )
     if result.modified_count != len(order_ids):
+        await db.prazo_settlement_operations.update_one(
+            {"_id": operation_key}, {"$set": {"status": "requires_review", "error": "partial_update", "orders_paid": result.modified_count}}
+        )
         raise HTTPException(
             status_code=409,
             detail="Quitação parcial detectada. Não tente novamente; solicite conferência do gestor.",
         )
 
     payment_record = {
-        "id": str(uuid.uuid4()),
+        "_id": f"prazo-payment:{customer_store}:{operation_id}",
+        "id": operation_id,
+        "operation_id": operation_id,
         "customer_name": customer_name,
         "amount": total_cents / 100,
         "payment_method": payment.payment_method,
@@ -579,8 +629,12 @@ async def pay_all_prazo_customer(customer_name: str, payment: PrazoFullPayment):
         amount=total_cents / 100,
         payment_method=payment.payment_method,
     )
-
-    return {"success": True, "message": f"Todos os débitos de {customer_name} foram quitados ({payment.payment_method})", "orders_paid": result.modified_count, "amount": total_cents / 100, "store": customer_store}
+    response = {"success": True, "message": f"Todos os débitos de {customer_name} foram quitados ({payment.payment_method})", "orders_paid": result.modified_count, "amount": total_cents / 100, "store": customer_store, "operation_id": operation_id, "replayed": False}
+    await db.prazo_settlement_operations.update_one(
+        {"_id": operation_key, "status": "pending"},
+        {"$set": {"status": "completed", "completed_at": datetime.now(timezone.utc).isoformat(), "response": response}},
+    )
+    return response
 
 @router.post("/abater/{customer_name}")
 async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest):
