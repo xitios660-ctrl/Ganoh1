@@ -47,6 +47,17 @@ class Orders:
 
         return Cursor()
 
+    async def update_one(self, query, update):
+        changed = 0
+        for document in self.documents:
+            if (document.get("id") == query["id"]
+                    and document.get("payment_method") == query["payment_method"]
+                    and not document.get("prazo_paid")):
+                document.update(update["$set"])
+                changed = 1
+                break
+        return SimpleNamespace(matched_count=changed, modified_count=changed)
+
     async def update_many(self, query, update):
         assert query["prazo_paid"] == {"$ne": True}
         assert update["$set"]["prazo_paid"] is True
@@ -455,4 +466,33 @@ def test_partial_payment_with_saldo_requires_available_credit(api, customer):
     assert api[1].orders.documents[0]["prazo_paid"] is False
     api[1].prazo_partial_payments.insert_one.assert_not_awaited()
     api[2].assert_not_awaited()
+
+def test_single_order_payment_cannot_be_registered_twice(api):
+    payload = {
+        "amount": 100,
+        "password": "isolated-test-password",
+        "payment_method": "cash",
+    }
+
+    first = api[0].post("/api/prazo/pay/runner-order", json=payload)
+    repeated = api[0].post("/api/prazo/pay/runner-order", json=payload)
+
+    assert first.status_code == 200
+    assert repeated.status_code == 409
+    assert "já registrado" in repeated.json()["detail"]
+    assert api[1].orders.documents[0]["prazo_paid"] is True
+    assert api[1].orders.documents[0]["prazo_paid_amount"] == 100
+    assert api[1].orders.documents[0]["prazo_paid_method"] == "cash"
+
+
+@pytest.mark.parametrize("payload", [
+    {"amount": 0, "password": "isolated-test-password", "payment_method": "cash"},
+    {"amount": -1, "password": "isolated-test-password", "payment_method": "cash"},
+    {"amount": "NaN", "password": "isolated-test-password", "payment_method": "cash"},
+    {"amount": 10, "password": "isolated-test-password", "payment_method": "unknown"},
+])
+def test_single_order_payment_rejects_invalid_financial_input(api, payload):
+    response = api[0].post("/api/prazo/pay/runner-order", json=payload)
+    assert response.status_code == 422
+    assert api[1].orders.documents[0]["prazo_paid"] is False
 

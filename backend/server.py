@@ -3360,9 +3360,9 @@ class PrazoCustomerCreate(BaseModel):
     store: str = ""  # Loja onde o cliente foi cadastrado
 
 class PrazoPayment(BaseModel):
-    amount: float
+    amount: float = Field(gt=0, allow_inf_nan=False)
     password: str
-    payment_method: str = "cash"  # cash, debit, credit, pix
+    payment_method: Literal["cash", "pix", "debit", "credit"] = "cash"
 
 class PrazoFullPayment(PrazoPayment):
     amount: float = Field(gt=0, allow_inf_nan=False)
@@ -3605,12 +3605,17 @@ async def pay_prazo_order(order_id: str, payment: PrazoPayment):
         raise HTTPException(status_code=403, detail="Senha incorreta")
     
     result = await db.orders.update_one(
-        {"id": order_id, "payment_method": "prazo"},
-        {"$set": {"prazo_paid": True, "prazo_paid_at": datetime.now(timezone.utc).isoformat(), "prazo_paid_amount": payment.amount}}
+        {"id": order_id, "payment_method": "prazo", "prazo_paid": {"$ne": True}},
+        {"$set": {
+            "prazo_paid": True,
+            "prazo_paid_at": datetime.now(timezone.utc).isoformat(),
+            "prazo_paid_amount": payment.amount,
+            "prazo_paid_method": payment.payment_method,
+        }}
     )
     
-    if result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Pedido não encontrado")
+    if result.modified_count != 1:
+        raise HTTPException(status_code=409, detail="Pedido não encontrado ou pagamento já registrado")
     
     return {"success": True, "message": "Pagamento registrado"}
 
