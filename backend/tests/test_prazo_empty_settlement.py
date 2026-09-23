@@ -31,6 +31,15 @@ class Orders:
              "payment_method": "prazo", "prazo_paid": False, "total": 100, "partial_paid": 0}
         ]
         self.stale_snapshot = stale_snapshot
+        self.last_update_query = None
+
+    async def find_one(self, query, projection):
+        for document in self.documents:
+            if (document.get("id") == query["id"]
+                    and document.get("payment_method") == query["payment_method"]
+                    and not document.get("prazo_paid")):
+                return {key: value for key, value in document.items() if key != "_id"}
+        return None
 
     def find(self, query, projection):
         documents = [dict(document) for document in self.documents
@@ -48,11 +57,21 @@ class Orders:
         return Cursor()
 
     async def update_one(self, query, update):
+        self.last_update_query = dict(query)
         changed = 0
         for document in self.documents:
+            partial_matches = (
+                "partial_paid" not in query
+                or (isinstance(query["partial_paid"], dict)
+                    and query["partial_paid"].get("$exists") is False
+                    and "partial_paid" not in document)
+                or document.get("partial_paid") == query["partial_paid"]
+            )
             if (document.get("id") == query["id"]
                     and document.get("payment_method") == query["payment_method"]
-                    and not document.get("prazo_paid")):
+                    and not document.get("prazo_paid")
+                    and ("total" not in query or document.get("total") == query["total"])
+                    and partial_matches):
                 document.update(update["$set"])
                 changed = 1
                 break
@@ -478,11 +497,30 @@ def test_single_order_payment_cannot_be_registered_twice(api):
     repeated = api[0].post("/api/prazo/pay/runner-order", json=payload)
 
     assert first.status_code == 200
+    assert first.json()["amount"] == 100
+    assert first.json()["store"] == "runner"
     assert repeated.status_code == 409
     assert "já registrado" in repeated.json()["detail"]
     assert api[1].orders.documents[0]["prazo_paid"] is True
     assert api[1].orders.documents[0]["prazo_paid_amount"] == 100
     assert api[1].orders.documents[0]["prazo_paid_method"] == "cash"
+    assert api[1].orders.documents[0]["partial_paid"] == 100
+    assert api[1].orders.last_update_query["total"] == 100
+    assert api[1].orders.last_update_query["partial_paid"] == 0
+
+
+def test_single_order_payment_rejects_stale_screen_amount(api):
+    response = api[0].post("/api/prazo/pay/runner-order", json={
+        "amount": 99.99,
+        "password": "isolated-test-password",
+        "payment_method": "cash",
+    })
+
+    assert response.status_code == 409
+    assert "saldo do pedido mudou" in response.json()["detail"].lower()
+    assert api[1].orders.documents[0]["prazo_paid"] is False
+    assert api[1].orders.documents[0]["partial_paid"] == 0
+    assert api[1].orders.last_update_query is None
 
 
 @pytest.mark.parametrize("payload", [

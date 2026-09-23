@@ -3603,21 +3603,58 @@ async def pay_prazo_order(order_id: str, payment: PrazoPayment):
     """Mark a prazo order as paid (requires password)"""
     if payment.password != PRAZO_PASSWORD:
         raise HTTPException(status_code=403, detail="Senha incorreta")
-    
-    result = await db.orders.update_one(
+
+    order = await db.orders.find_one(
         {"id": order_id, "payment_method": "prazo", "prazo_paid": {"$ne": True}},
+        {"_id": 0},
+    )
+    if not order:
+        raise HTTPException(status_code=409, detail="Pedido não encontrado ou pagamento já registrado")
+
+    try:
+        total_cents = int((Decimal(str(order.get("total", 0))) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        partial_cents = int((Decimal(str(order.get("partial_paid", 0))) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+        requested_cents = int((Decimal(str(payment.amount)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    except (InvalidOperation, OverflowError, TypeError, ValueError):
+        raise HTTPException(status_code=409, detail="Pedido possui valor financeiro inválido; contate o gestor")
+
+    remaining_cents = total_cents - partial_cents
+    if remaining_cents <= 0:
+        raise HTTPException(status_code=409, detail="Pedido não possui saldo pendente")
+    if requested_cents != remaining_cents:
+        raise HTTPException(status_code=409, detail="O saldo do pedido mudou. Atualize a tela antes de confirmar")
+
+    expected_partial = order.get("partial_paid", 0)
+    partial_state = (
+        {"partial_paid": expected_partial}
+        if "partial_paid" in order
+        else {"partial_paid": {"$exists": False}}
+    )
+    result = await db.orders.update_one(
+        {
+            "id": order_id,
+            "payment_method": "prazo",
+            "prazo_paid": {"$ne": True},
+            "total": order.get("total", 0),
+            **partial_state,
+        },
         {"$set": {
             "prazo_paid": True,
             "prazo_paid_at": datetime.now(timezone.utc).isoformat(),
-            "prazo_paid_amount": payment.amount,
+            "prazo_paid_amount": remaining_cents / 100,
             "prazo_paid_method": payment.payment_method,
+            "partial_paid": total_cents / 100,
         }}
     )
-    
     if result.modified_count != 1:
-        raise HTTPException(status_code=409, detail="Pedido não encontrado ou pagamento já registrado")
-    
-    return {"success": True, "message": "Pagamento registrado"}
+        raise HTTPException(status_code=409, detail="O pedido mudou durante a operação. Atualize a tela antes de tentar novamente")
+
+    return {
+        "success": True,
+        "message": "Pagamento registrado",
+        "amount": remaining_cents / 100,
+        "store": order.get("store", ""),
+    }
 
 @api_router.post("/prazo/pay-all/{customer_name}")
 async def pay_all_prazo_customer(customer_name: str, payment: PrazoFullPayment):

@@ -1,7 +1,7 @@
 # GANOH — Continuidade do trabalho
 
 ## Etapa atual
-Etapa 1 em andamento — incrementos 1A, 1B.1, 1B.2, 1B.3a, 1B.3a.1–1B.3a.5 (pagamento individual não repetível) implementados e validados.
+Etapa 1 em andamento — incrementos 1A, 1B.1, 1B.2, 1B.3a, 1B.3a.1–1B.3a.6 (valor real do pedido individual) implementados e validados.
 Etapa 0 — auditoria de código e navegação pública concluída em 22/09/2026.
 Validação autenticada, reconciliação do banco real e confirmação dos segredos de implantação continuam pendentes; não declarar produção validada.
 Próximo incremento: 1B.3b, transação da quitação e teste concorrente em Mongo descartável. Não avançar à etapa 2 enquanto os gates financeiros estiverem pendentes.
@@ -16,7 +16,7 @@ Próximo incremento: 1B.3b, transação da quitação e teste concorrente em Mon
 
 ## Base, rollback e último commit
 - Base de código auditada: def13cf952811907329e0da79544699b2783ee37.
-- Último commit anterior a esta atualização / ponto de rollback: 1ed09bec1d307c55f813a7ec519f95ff2e4998c5 (saldo obrigatório).
+- Último commit anterior a esta atualização / ponto de rollback: 71d51df599a00cc22c2dd8400d320bbcb2033b6a (pagamento individual não repetível).
 - O commit que contém este diagnóstico é obtido por git log -1 -- GANOH_PROGRESS.md. Um arquivo não pode conter o próprio SHA final.
 - Rollback de código: conservar a base e reverter somente commits novos, sem apagar dados ou forçar referências.
 - Rollback de banco ainda NÃO existe como backup verificado. Não executar migração ou reparação de dados.
@@ -458,3 +458,28 @@ Preservar o teste de replay e ampliar contra Mongo descartável antes de declara
 - Esta rota ainda não cria auditoria financeira completa; isso permanece pendente para a transação/auditoria centralizada.
 - Nenhum dado real, banco de produção, WhatsApp ou Render foi alterado.
 
+
+
+## Incremento 1B.3a.6 — pagamento individual usa o saldo real do pedido (23/09/2026)
+### Correção
+- A rota individual ainda aceitava como definitivo o valor enviado pela tela.
+- Agora o backend lê o pedido pendente e calcula o saldo real em centavos a partir de total menos partial_paid.
+- Valor desatualizado enviado pelo frontend retorna 409 antes de qualquer gravação.
+- A atualização compara atomicamente o total e o parcial previamente lidos; mudança concorrente também retorna 409.
+- O pedido registra como pago somente o saldo calculado pelo banco, preservando loja e forma de pagamento.
+- A correção foi aplicada nas implementações ativa e modular.
+
+### Arquivos alterados
+- backend/server.py
+- backend/routers/prazo.py
+- backend/tests/test_prazo_empty_settlement.py
+- GANOH_PROGRESS.md
+
+### Validação e limites
+- Sintaxe dos dois módulos e do teste validada com ast.parse.
+- Regressão adicionada para valor desatualizado da tela; exige 409 e nenhuma escrita.
+- Regressão da repetição confirma valor e loja retornados, saldo parcial final e filtro otimista.
+- A conversão monetária e as decisões de saldo foram exercitadas isoladamente em centavos.
+- A suíte completa anterior permanece em 107 testes Python, 11 Jest e build aprovado. Este executor não possui FastAPI e as demais dependências, portanto as novas regressões devem rodar no ambiente completo antes de merge/deploy.
+- Esta rota ainda não cria auditoria financeira completa; isso permanece pendente para a transação/auditoria centralizada.
+- Nenhum dado real, banco de produção, WhatsApp ou Render foi alterado.
