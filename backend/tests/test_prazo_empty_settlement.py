@@ -423,3 +423,36 @@ def test_partial_payment_stops_when_credit_changed_concurrently(api):
     api[1].prazo_partial_payments.insert_one.assert_not_awaited()
     api[2].assert_not_awaited()
 
+class MissingOrEmptyCreditCustomers:
+    def __init__(self, document):
+        self.document = document
+
+    async def find_one(self, query):
+        return self.document
+
+    async def update_one(self, query, update):
+        raise AssertionError("Crédito insuficiente não pode chegar à atualização")
+
+
+@pytest.mark.parametrize("customer", [
+    None,
+    {"id": "customer-id", "name": "Cliente Teste", "store": "runner", "credit": 0},
+])
+def test_partial_payment_with_saldo_requires_available_credit(api, customer):
+    api[1].prazo_customers = MissingOrEmptyCreditCustomers(customer)
+    api[1].prazo_partial_payments = AsyncMock()
+
+    response = api[0].post("/api/prazo/abater/Cliente%20Teste", json={
+        "amount": 10,
+        "password": "isolated-test-password",
+        "payment_method": "saldo",
+        "store": "runner",
+    })
+
+    assert response.status_code == 400
+    assert "saldo a favor insuficiente" in response.json()["detail"].lower()
+    assert api[1].orders.documents[0]["partial_paid"] == 0
+    assert api[1].orders.documents[0]["prazo_paid"] is False
+    api[1].prazo_partial_payments.insert_one.assert_not_awaited()
+    api[2].assert_not_awaited()
+

@@ -1,7 +1,7 @@
 # GANOH — Continuidade do trabalho
 
 ## Etapa atual
-Etapa 1 em andamento — incrementos 1A, 1B.1, 1B.2, 1B.3a, 1B.3a.1, 1B.3a.2 e 1B.3a.3 (concorrência do saldo a favor) implementados e validados.
+Etapa 1 em andamento — incrementos 1A, 1B.1, 1B.2, 1B.3a, 1B.3a.1, 1B.3a.2, 1B.3a.3 e 1B.3a.4 (saldo obrigatório) implementados e validados.
 Etapa 0 — auditoria de código e navegação pública concluída em 22/09/2026.
 Validação autenticada, reconciliação do banco real e confirmação dos segredos de implantação continuam pendentes; não declarar produção validada.
 Próximo incremento: 1B.3b, transação da quitação e teste concorrente em Mongo descartável. Não avançar à etapa 2 enquanto os gates financeiros estiverem pendentes.
@@ -16,7 +16,7 @@ Próximo incremento: 1B.3b, transação da quitação e teste concorrente em Mon
 
 ## Base, rollback e último commit
 - Base de código auditada: def13cf952811907329e0da79544699b2783ee37.
-- Último commit anterior a esta atualização / ponto de rollback: 6780d6feee0ff89aa8aab56d86710358b533d9ed (validação do pagamento parcial).
+- Último commit anterior a esta atualização / ponto de rollback: db4546fb600f8c9377d8804d4a066231434f479f (concorrência do saldo a favor).
 - O commit que contém este diagnóstico é obtido por git log -1 -- GANOH_PROGRESS.md. Um arquivo não pode conter o próprio SHA final.
 - Rollback de código: conservar a base e reverter somente commits novos, sem apagar dados ou forçar referências.
 - Rollback de banco ainda NÃO existe como backup verificado. Não executar migração ou reparação de dados.
@@ -410,5 +410,27 @@ Preservar o teste de replay e ampliar contra Mongo descartável antes de declara
 - A decisão de concorrência também foi exercitada isoladamente para sucesso único e rejeição de estado desatualizado.
 - A suíte completa anterior permanece em 107 testes Python, 11 Jest e build aprovado. Este executor não possui FastAPI e as demais dependências, portanto a nova regressão deve rodar no ambiente completo antes de merge/deploy.
 - A trava protege especificamente o saldo a favor. O pagamento parcial completo ainda precisa de operation_id, idempotência e transação Mongo para cobrir pedidos e recebimento.
+- Nenhum dado real, banco de produção, WhatsApp ou Render foi alterado.
+
+## Incremento 1B.3a.4 — saldo a favor precisa existir e ser suficiente (23/09/2026)
+### Correção
+- Ao escolher payment_method=saldo, as duas implementações só validavam o crédito se o cliente existisse e o saldo fosse positivo.
+- Cliente ausente ou com saldo zero pulava a dedução e ainda seguia para baixar a dívida e criar recebimento.
+- Agora o saldo é obrigatório e precisa cobrir integralmente o valor antes de qualquer alteração financeira.
+- Crédito inexistente, zerado ou insuficiente retorna 400 sem alterar pedido, recebimento ou histórico.
+- A trava concorrente do incremento anterior permanece aplicada após essa validação.
+
+### Arquivos alterados
+- backend/server.py
+- backend/routers/prazo.py
+- backend/tests/test_prazo_empty_settlement.py
+- GANOH_PROGRESS.md
+
+### Validação e limites
+- Sintaxe dos dois módulos e do teste validada com ast.parse.
+- Regressões adicionadas para cliente sem cadastro e cliente com saldo zero nas duas implementações.
+- A regra foi exercitada isoladamente para saldo ausente, insuficiente e suficiente.
+- A suíte completa anterior permanece em 107 testes Python, 11 Jest e build aprovado. Este executor não possui FastAPI e as demais dependências, portanto as novas regressões devem rodar no ambiente completo antes de merge/deploy.
+- Pagamentos parciais ainda precisam de operation_id, idempotência e transação Mongo para pedidos e recebimento.
 - Nenhum dado real, banco de produção, WhatsApp ou Render foi alterado.
 

@@ -4041,17 +4041,16 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     # when payment_method == 'saldo' (explicit choice to pay using customer credit).
     # For cash/pix/debit/credit-card, the credit balance must NOT be touched -
     # the customer is paying with REAL money.
-    if abater_data.payment_method == "saldo" and customer and customer.get("credit", 0) > 0:
-        previous_credit = customer.get("credit", 0)
-        credit_used = min(abater_data.amount, previous_credit)
-        new_credit = previous_credit - credit_used
-        
-        if credit_used < abater_data.amount:
+    if abater_data.payment_method == "saldo":
+        previous_credit = float((customer or {}).get("credit", 0) or 0)
+        if previous_credit < abater_data.amount:
             raise HTTPException(
                 status_code=400,
                 detail=f"Saldo a favor insuficiente. Disponível: R$ {previous_credit:.2f}, solicitado: R$ {abater_data.amount:.2f}"
             )
-        
+
+        credit_used = abater_data.amount
+        new_credit = previous_credit - credit_used
         credit_result = await db.prazo_customers.update_one(
             {"id": customer["id"], "credit": previous_credit},
             {"$set": {"credit": new_credit}}
