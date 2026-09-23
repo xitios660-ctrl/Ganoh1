@@ -704,12 +704,33 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     if not prazo_orders:
         raise HTTPException(status_code=404, detail="Cliente não tem dívidas no prazo")
     
-    total_debt = sum(o.get("total", 0) - o.get("partial_paid", 0) for o in prazo_orders)
-    
-    if abater_data.amount > total_debt:
-        raise HTTPException(status_code=400, detail=f"Valor maior que a dívida total (R$ {total_debt:.2f})")
-    
-    remaining_to_apply = abater_data.amount
+    try:
+        order_amounts = [
+            (
+                order,
+                int((Decimal(str(order.get("total", 0))) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
+                int((Decimal(str(order.get("partial_paid", 0))) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)),
+            )
+            for order in prazo_orders
+        ]
+        requested_cents = int(
+            (Decimal(str(abater_data.amount)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
+    except (InvalidOperation, OverflowError, TypeError, ValueError):
+        raise HTTPException(status_code=409, detail="Há valor financeiro inválido nos pedidos; contate o gestor")
+
+    total_debt_cents = sum(max(total_cents - partial_cents, 0) for _, total_cents, partial_cents in order_amounts)
+    if requested_cents <= 0:
+        raise HTTPException(status_code=400, detail="Valor deve ser de pelo menos R$ 0,01")
+    if requested_cents > total_debt_cents:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Valor maior que a dívida total (R$ {total_debt_cents / 100:.2f})",
+        )
+
+    requested_amount = requested_cents / 100
+    total_debt = total_debt_cents / 100
+    remaining_to_apply_cents = requested_cents
     orders_updated = 0
     orders_fully_paid = 0
     customer_store = abater_data.store
@@ -729,14 +750,17 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     
     if abater_data.payment_method == "saldo":
         previous_credit = float((customer or {}).get("credit", 0) or 0)
-        if previous_credit < abater_data.amount:
+        previous_credit_cents = int(
+            (Decimal(str(previous_credit)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+        )
+        if previous_credit_cents < requested_cents:
             raise HTTPException(
                 status_code=400,
-                detail=f"Saldo a favor insuficiente. Disponível: R$ {previous_credit:.2f}, solicitado: R$ {abater_data.amount:.2f}"
+                detail=f"Saldo a favor insuficiente. Disponível: R$ {previous_credit_cents / 100:.2f}, solicitado: R$ {requested_amount:.2f}"
             )
 
-        credit_used = abater_data.amount
-        new_credit = previous_credit - credit_used
+        credit_used = requested_amount
+        new_credit = (previous_credit_cents - requested_cents) / 100
         credit_result = await db.prazo_customers.update_one(
             {"id": customer["id"], "credit": previous_credit},
             {"$set": {"credit": new_credit}}
@@ -747,44 +771,41 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
                 detail="O saldo a favor mudou durante a operação. Atualize a tela e confira antes de tentar novamente",
             )
     
-    for order in prazo_orders:
-        if remaining_to_apply <= 0:
+    for order, order_total_cents, current_partial_cents in order_amounts:
+        if remaining_to_apply_cents <= 0:
             break
-        
-        order_total = order.get("total", 0)
-        current_partial = order.get("partial_paid", 0)
-        order_remaining = order_total - current_partial
-        
-        if order_remaining <= 0:
+
+        order_remaining_cents = order_total_cents - current_partial_cents
+        if order_remaining_cents <= 0:
             continue
-        
-        amount_to_apply = min(remaining_to_apply, order_remaining)
-        new_partial = current_partial + amount_to_apply
-        
-        if new_partial >= order_total:
+
+        amount_to_apply_cents = min(remaining_to_apply_cents, order_remaining_cents)
+        new_partial_cents = current_partial_cents + amount_to_apply_cents
+
+        if new_partial_cents >= order_total_cents:
             await db.orders.update_one(
                 {"id": order["id"]},
                 {"$set": {
-                    "partial_paid": new_partial,
+                    "partial_paid": new_partial_cents / 100,
                     "prazo_paid": True,
                     "prazo_paid_at": datetime.now(timezone.utc).isoformat(),
-                    "prazo_paid_method": abater_data.payment_method
+                    "prazo_paid_method": abater_data.payment_method,
                 }}
             )
             orders_fully_paid += 1
         else:
             await db.orders.update_one(
                 {"id": order["id"]},
-                {"$set": {"partial_paid": new_partial}}
+                {"$set": {"partial_paid": new_partial_cents / 100}}
             )
-        
+
         orders_updated += 1
-        remaining_to_apply -= amount_to_apply
+        remaining_to_apply_cents -= amount_to_apply_cents
     
     payment_record = {
         "id": str(uuid.uuid4()),
         "customer_name": customer_name,
-        "amount": abater_data.amount,
+        "amount": requested_amount,
         "payment_method": abater_data.payment_method,
         "type": "partial_payment",
         "store": customer_store,
@@ -792,13 +813,13 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     }
     await db.prazo_partial_payments.insert_one(payment_record)
     
-    new_total_debt = total_debt - abater_data.amount
+    new_total_debt = (total_debt_cents - requested_cents) / 100
     
     await _log_prazo_event(
         customer_name=customer_name,
         store=customer_store,
         event_type="payment_partial",
-        amount=abater_data.amount,
+        amount=requested_amount,
         payment_method=abater_data.payment_method,
         previous_debt=total_debt,
         new_debt=new_total_debt,
@@ -808,9 +829,9 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     
     response = {
         "success": True,
-        "message": f"Abatido R$ {abater_data.amount:.2f} da dívida de {customer_name}",
+        "message": f"Abatido R$ {requested_amount:.2f} da dívida de {customer_name}",
         "previous_debt": total_debt,
-        "amount_paid": abater_data.amount,
+        "amount_paid": requested_amount,
         "new_debt": new_total_debt,
         "payment_method": abater_data.payment_method,
         "orders_updated": orders_updated,
@@ -822,7 +843,7 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
         response["credit_used"] = credit_used
         response["previous_credit"] = previous_credit
         response["new_credit"] = new_credit
-        response["message"] = f"Abatido R$ {abater_data.amount:.2f} da dívida de {customer_name} usando Saldo a Favor. Saldo restante: R$ {new_credit:.2f}"
+        response["message"] = f"Abatido R$ {requested_amount:.2f} da dívida de {customer_name} usando Saldo a Favor. Saldo restante: R$ {new_credit:.2f}"
     
     return response
 

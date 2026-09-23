@@ -1,7 +1,7 @@
 # GANOH — Continuidade do trabalho
 
 ## Etapa atual
-Etapa 1 em andamento — incrementos 1A, 1B.1, 1B.2, 1B.3a, 1B.3a.1–1B.3a.6 (valor real do pedido individual) implementados e validados.
+Etapa 1 em andamento — incrementos 1A, 1B.1, 1B.2, 1B.3a, 1B.3a.1–1B.3a.7 (pagamento parcial calculado em centavos) implementados e validados.
 Etapa 0 — auditoria de código e navegação pública concluída em 22/09/2026.
 Validação autenticada, reconciliação do banco real e confirmação dos segredos de implantação continuam pendentes; não declarar produção validada.
 Próximo incremento: 1B.3b, transação da quitação e teste concorrente em Mongo descartável. Não avançar à etapa 2 enquanto os gates financeiros estiverem pendentes.
@@ -16,7 +16,7 @@ Próximo incremento: 1B.3b, transação da quitação e teste concorrente em Mon
 
 ## Base, rollback e último commit
 - Base de código auditada: def13cf952811907329e0da79544699b2783ee37.
-- Último commit anterior a esta atualização / ponto de rollback: 71d51df599a00cc22c2dd8400d320bbcb2033b6a (pagamento individual não repetível).
+- Último commit anterior a esta atualização / ponto de rollback: a43c49f90ee8455560a80cbe9bbd0a1daab6eef0 (pagamento individual calculado pelo banco).
 - O commit que contém este diagnóstico é obtido por git log -1 -- GANOH_PROGRESS.md. Um arquivo não pode conter o próprio SHA final.
 - Rollback de código: conservar a base e reverter somente commits novos, sem apagar dados ou forçar referências.
 - Rollback de banco ainda NÃO existe como backup verificado. Não executar migração ou reparação de dados.
@@ -482,4 +482,28 @@ Preservar o teste de replay e ampliar contra Mongo descartável antes de declara
 - A conversão monetária e as decisões de saldo foram exercitadas isoladamente em centavos.
 - A suíte completa anterior permanece em 107 testes Python, 11 Jest e build aprovado. Este executor não possui FastAPI e as demais dependências, portanto as novas regressões devem rodar no ambiente completo antes de merge/deploy.
 - Esta rota ainda não cria auditoria financeira completa; isso permanece pendente para a transação/auditoria centralizada.
+- Nenhum dado real, banco de produção, WhatsApp ou Render foi alterado.
+
+
+## Incremento 1B.3a.7 — pagamento parcial calculado em centavos (23/09/2026)
+### Correção
+- O abatimento parcial ainda subtraía e comparava valores monetários diretamente como float.
+- Valores válidos como R$ 0,30 menos R$ 0,10 podiam resultar internamente em R$ 0,199999... e ser rejeitados como se R$ 0,20 excedesse a dívida.
+- Total, parcela já paga, valor solicitado, saldo a favor e distribuição entre pedidos agora são calculados em centavos com Decimal e ROUND_HALF_UP.
+- Registros e respostas recebem somente valores normalizados para duas casas decimais; valores abaixo de um centavo são bloqueados.
+- A correção foi aplicada nas implementações ativa e modular.
+
+### Arquivos alterados
+- backend/server.py
+- backend/routers/prazo.py
+- backend/tests/test_prazo_empty_settlement.py
+- GANOH_PROGRESS.md
+
+### Validação e limites
+- Sintaxe dos dois módulos e do teste validada com ast.parse.
+- A falha anterior com 0,30 - 0,10 foi reproduzida isoladamente; o novo cálculo confirmou 20 centavos, quitação exata e saldo zero.
+- Regressões FastAPI adicionadas para exigir que R$ 0,20 quite corretamente um pedido de R$ 0,30 com R$ 0,10 já pagos e para bloquear valores menores que R$ 0,01 nas duas implementações.
+- O executor atual não possui FastAPI e pymongo; a regressão integrada deve rodar no ambiente completo antes de merge/deploy.
+- A suíte completa anterior permanece em 107 testes Python, 11 Jest e build aprovado.
+- Pagamentos parciais ainda precisam de operation_id, idempotência persistente e transação Mongo para cobrir pedidos, saldo, recibo e histórico como uma única operação.
 - Nenhum dado real, banco de produção, WhatsApp ou Render foi alterado.

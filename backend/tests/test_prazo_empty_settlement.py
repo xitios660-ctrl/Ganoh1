@@ -68,7 +68,8 @@ class Orders:
                 or document.get("partial_paid") == query["partial_paid"]
             )
             if (document.get("id") == query["id"]
-                    and document.get("payment_method") == query["payment_method"]
+                    and ("payment_method" not in query
+                         or document.get("payment_method") == query["payment_method"])
                     and not document.get("prazo_paid")
                     and ("total" not in query or document.get("total") == query["total"])
                     and partial_matches):
@@ -184,9 +185,16 @@ def replay_after_restart(path, payload):
 def api(request, monkeypatch):
     implementation = request.param
     receipts = AsyncMock()
+    partial_receipts = AsyncMock()
+    customers = AsyncMock()
+    customers.find_one.return_value = {
+        "id": "customer-id", "name": "Cliente Teste", "store": "runner", "credit": 0,
+    }
     history = AsyncMock()
     database = SimpleNamespace(
         orders=Orders(), prazo_payments=receipts,
+        prazo_partial_payments=partial_receipts,
+        prazo_customers=customers,
         prazo_settlement_operations=SettlementOperations(),
     )
     monkeypatch.setattr(implementation, "db", database)
@@ -366,6 +374,43 @@ def test_completion_write_failure_is_not_reported_as_success(api):
     assert "Pagamento registrado" in response.json()["detail"]
     assert "Não tente novamente" in response.json()["detail"]
     api[1].prazo_payments.insert_one.assert_awaited_once()
+
+def test_partial_payment_rejects_subcent_value(api):
+    response = api[0].post("/api/prazo/abater/Cliente%20Teste", json={
+        "amount": 0.001,
+        "password": "isolated-test-password",
+        "payment_method": "cash",
+        "store": "runner",
+    })
+
+    assert response.status_code == 400
+    assert "0,01" in response.json()["detail"]
+    assert api[1].orders.documents[0]["prazo_paid"] is False
+    api[1].prazo_partial_payments.insert_one.assert_not_awaited()
+
+
+def test_partial_payment_calculates_fractional_values_in_cents(api):
+    api[1].orders.documents = [
+        {"id": "fractional-order", "customer_name": "Cliente Teste", "store": "runner",
+         "payment_method": "prazo", "prazo_paid": False, "total": 0.30, "partial_paid": 0.10}
+    ]
+
+    response = api[0].post("/api/prazo/abater/Cliente%20Teste", json={
+        "amount": 0.20,
+        "password": "isolated-test-password",
+        "payment_method": "cash",
+        "store": "runner",
+    })
+
+    assert response.status_code == 200
+    assert response.json()["previous_debt"] == 0.20
+    assert response.json().get("paid", response.json().get("amount_paid")) == 0.20
+    assert response.json().get("new_debt", 0) == 0
+    assert api[1].orders.documents[0]["partial_paid"] == 0.30
+    assert api[1].orders.documents[0]["prazo_paid"] is True
+    api[1].prazo_partial_payments.insert_one.assert_awaited_once()
+    assert api[1].prazo_partial_payments.insert_one.await_args.args[0]["amount"] == 0.20
+
 
 @pytest.mark.parametrize("amount", [0, -1, "NaN", "Infinity", "-Infinity"])
 def test_partial_payment_rejects_invalid_amount_before_database(api, amount):
