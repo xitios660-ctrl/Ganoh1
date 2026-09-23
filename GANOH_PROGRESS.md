@@ -536,3 +536,18 @@ Preservar o teste de replay e ampliar contra Mongo descartável antes de declara
 - Clientes antigos sem operation_id continuam sem proteção contra reenvio; a próxima integração de interface deve gerar e reutilizar o UUID até receber resposta definitiva.
 - Ainda falta transação Mongo para agrupar pedido, saldo, recebimento, histórico e conclusão da operação.
 - Nenhum dado real, banco de produção, WhatsApp ou Render foi alterado.
+
+
+## Verificação urgente de continuidade da produção (23/09/2026)
+### Estado verificado
+- O serviço `ganoh` em `https://ganoh.onrender.com` é um site estático na `main`, deploy live em `def13cf`. O bundle publicado ainda chama a API em `charts-3.emergent.host`. A página inicial carrega, mas isso não significa independência do Emergent.
+- O serviço web separado `Ganoh1` em `https://ganoh1.onrender.com` está no commit `351d1a7`, autoDeploy desativado. No painel autenticado de Environment, a única chave cadastrada é `MIGRATION_PENDING`; `MONGO_URL` e `DB_NAME` não estão configuradas. Não conectar o frontend a ele enquanto não houver banco e reconciliação.
+- A conta Emergent ainda não apresentou sessão autenticada após a tentativa de login pelo provedor. Não houve acesso ao banco de produção ou ao backup. O site público e a tela de senha da equipe carregaram; isso não concede acesso aos dados para exportação.
+- A documentação oficial Emergent recomenda exportar MongoDB ao substituir implantação ativa. O script `scripts/migrate_mongo.py` exige origem acessível, destino vazio, escritores parados e comparação de hashes; essas pré-condições ainda faltam.
+
+### Ações, arquivos, testes e decisão
+- Somente este arquivo foi alterado neste registro. Nenhum saldo, dado, segredo, serviço, envio ou código de produção foi modificado.
+- Checados pelo conector Render os tipos de serviço, repositório, branches, commits e a configuração nominal no painel; abertas as páginas públicas da origem e destino. O healthcheck do backend não foi confirmado: a tentativa pelo navegador foi bloqueada pelo cliente.
+- Sem backup recuperável e acesso ao MongoDB da origem, o corte de tráfego arrisca perder o histórico financeiro. Não executar deploy ou mudar a API por aparência.
+- Próxima ação recomendada: obter acesso autenticado ao projeto Emergent ou exportação nativa do banco de produção e configuração segura do banco de destino; fazer cópia/backup e verificar coleções, índices, contagens e hashes em janela controlada. Depois completar testes das etapas 1–11 e a implantação com rollback. A urgência do site antigo torna a captura do backup a primeira prioridade externa.
+- Último commit de código anterior a este registro: `67b86756127b21705eccf8a487409982dfbde0ed`; o commit deste registro deve ser consultado pelo histórico do arquivo.
