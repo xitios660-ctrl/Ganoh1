@@ -53,6 +53,7 @@ class PrazoAbaterRequest(BaseModel):
     amount: float = Field(gt=0, allow_inf_nan=False)
     payment_method: Literal["cash", "pix", "debit", "credit", "saldo"] = "cash"
     store: Literal["runner", "gym-londres"]
+    operation_id: Optional[uuid.UUID] = None
 
 class PrazoDebtAdjust(BaseModel):
     password: str
@@ -693,7 +694,38 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     """
     if abater_data.password != PRAZO_PASSWORD:
         raise HTTPException(status_code=403, detail="Senha incorreta")
-    
+
+    requested_cents = int(
+        (Decimal(str(abater_data.amount)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    )
+    partial_operation_id = str(abater_data.operation_id) if abater_data.operation_id else None
+    operation_key = (
+        f"prazo-partial:{abater_data.store}:{partial_operation_id}"
+        if partial_operation_id
+        else None
+    )
+    if operation_key:
+        existing_operation = await db.prazo_settlement_operations.find_one(
+            {"_id": operation_key}, {"_id": 0}
+        )
+        if existing_operation:
+            if (
+                existing_operation.get("customer_key") != customer_name.casefold()
+                or existing_operation.get("requested_cents") != requested_cents
+                or existing_operation.get("payment_method") != abater_data.payment_method
+                or existing_operation.get("store") != abater_data.store
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="Identificador de operação já usado com dados diferentes",
+                )
+            if existing_operation.get("status") == "completed":
+                return {**existing_operation["response"], "replayed": True}
+            raise HTTPException(
+                status_code=409,
+                detail="Operação anterior incompleta. Não repita; solicite conferência do gestor",
+            )
+
     prazo_orders = await db.orders.find({
         "customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
         "store": abater_data.store,
@@ -713,9 +745,6 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
             )
             for order in prazo_orders
         ]
-        requested_cents = int(
-            (Decimal(str(abater_data.amount)) * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
-        )
     except (InvalidOperation, OverflowError, TypeError, ValueError):
         raise HTTPException(status_code=409, detail="Há valor financeiro inválido nos pedidos; contate o gestor")
 
@@ -758,9 +787,41 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
                 status_code=400,
                 detail=f"Saldo a favor insuficiente. Disponível: R$ {previous_credit_cents / 100:.2f}, solicitado: R$ {requested_amount:.2f}"
             )
-
         credit_used = requested_amount
         new_credit = (previous_credit_cents - requested_cents) / 100
+
+    if operation_key:
+        operation_document = {
+            "_id": operation_key,
+            "operation_id": partial_operation_id,
+            "customer_key": customer_name.casefold(),
+            "requested_cents": requested_cents,
+            "payment_method": abater_data.payment_method,
+            "store": abater_data.store,
+            "status": "pending",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            await db.prazo_settlement_operations.insert_one(operation_document)
+        except DuplicateKeyError:
+            raced_operation = await db.prazo_settlement_operations.find_one(
+                {"_id": operation_key}, {"_id": 0}
+            )
+            if (
+                raced_operation
+                and raced_operation.get("customer_key") == customer_name.casefold()
+                and raced_operation.get("requested_cents") == requested_cents
+                and raced_operation.get("payment_method") == abater_data.payment_method
+                and raced_operation.get("store") == abater_data.store
+                and raced_operation.get("status") == "completed"
+            ):
+                return {**raced_operation["response"], "replayed": True}
+            raise HTTPException(
+                status_code=409,
+                detail="Operação concorrente ou incompleta. Não repita; solicite conferência do gestor",
+            )
+
+    if abater_data.payment_method == "saldo":
         credit_result = await db.prazo_customers.update_one(
             {"id": customer["id"], "credit": previous_credit},
             {"$set": {"credit": new_credit}}
@@ -770,7 +831,7 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
                 status_code=409,
                 detail="O saldo a favor mudou durante a operação. Atualize a tela e confira antes de tentar novamente",
             )
-    
+
     for order, order_total_cents, current_partial_cents in order_amounts:
         if remaining_to_apply_cents <= 0:
             break
@@ -809,7 +870,8 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
         "payment_method": abater_data.payment_method,
         "type": "partial_payment",
         "store": customer_store,
-        "created_at": datetime.now(timezone.utc).isoformat()
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "operation_id": partial_operation_id,
     }
     await db.prazo_partial_payments.insert_one(payment_record)
     
@@ -844,7 +906,22 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
         response["previous_credit"] = previous_credit
         response["new_credit"] = new_credit
         response["message"] = f"Abatido R$ {requested_amount:.2f} da dívida de {customer_name} usando Saldo a Favor. Saldo restante: R$ {new_credit:.2f}"
-    
+
+    if operation_key:
+        completion_result = await db.prazo_settlement_operations.update_one(
+            {"_id": operation_key, "status": "pending"},
+            {"$set": {
+                "status": "completed",
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                "response": response,
+            }},
+        )
+        if completion_result.modified_count != 1:
+            raise HTTPException(
+                status_code=503,
+                detail="Pagamento registrado, mas a confirmação final falhou. Não tente novamente; solicite conferência do gestor",
+            )
+
     return response
 
 @router.delete("/debt/{customer_name}")

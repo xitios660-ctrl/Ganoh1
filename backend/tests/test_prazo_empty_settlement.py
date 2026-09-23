@@ -217,6 +217,19 @@ def post(api, operation_id="11111111-1111-4111-8111-111111111111", **overrides):
     })
 
 
+def post_partial(api, operation_id=None, **overrides):
+    payload = {
+        "amount": 10,
+        "password": "isolated-test-password",
+        "payment_method": "cash",
+        "store": "runner",
+        **overrides,
+    }
+    if operation_id is not None:
+        payload["operation_id"] = operation_id
+    return api[0].post("/api/prazo/abater/Cliente%20Teste", json=payload)
+
+
 def test_first_settlement_then_repeated_calls_record_only_100(api):
     _, database, history, implementation = api
     response = post(api)
@@ -374,6 +387,38 @@ def test_completion_write_failure_is_not_reported_as_success(api):
     assert "Pagamento registrado" in response.json()["detail"]
     assert "Não tente novamente" in response.json()["detail"]
     api[1].prazo_payments.insert_one.assert_awaited_once()
+
+def test_partial_payment_operation_id_prevents_repeated_receipt(api):
+    operation_id = str(uuid4())
+
+    first = post_partial(api, operation_id=operation_id)
+    repeated = post_partial(api, operation_id=operation_id)
+
+    assert first.status_code == 200
+    assert repeated.status_code == 200
+    assert repeated.json()["replayed"] is True
+    assert repeated.json().get("paid", repeated.json().get("amount_paid")) == 10
+    api[1].prazo_partial_payments.insert_one.assert_awaited_once()
+    receipt = api[1].prazo_partial_payments.insert_one.await_args.args[0]
+    assert receipt["operation_id"] == operation_id
+    operation = api[1].prazo_settlement_operations.documents[
+        f"prazo-partial:runner:{operation_id}"
+    ]
+    assert operation["status"] == "completed"
+    if api[3] is prazo:
+        api[2].assert_awaited_once()
+
+
+def test_partial_payment_operation_id_rejects_conflicting_payload(api):
+    operation_id = str(uuid4())
+
+    assert post_partial(api, operation_id=operation_id).status_code == 200
+    conflict = post_partial(api, operation_id=operation_id, amount=11)
+
+    assert conflict.status_code == 409
+    assert "dados diferentes" in conflict.json()["detail"]
+    api[1].prazo_partial_payments.insert_one.assert_awaited_once()
+
 
 def test_partial_payment_rejects_subcent_value(api):
     response = api[0].post("/api/prazo/abater/Cliente%20Teste", json={

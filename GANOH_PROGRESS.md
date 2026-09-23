@@ -1,7 +1,7 @@
 # GANOH — Continuidade do trabalho
 
 ## Etapa atual
-Etapa 1 em andamento — incrementos 1A, 1B.1, 1B.2, 1B.3a, 1B.3a.1–1B.3a.7 (pagamento parcial calculado em centavos) implementados e validados.
+Etapa 1 em andamento — incrementos 1A, 1B.1, 1B.2, 1B.3a, 1B.3a.1–1B.3a.8 (idempotência persistente opcional no pagamento parcial) implementados e validados.
 Etapa 0 — auditoria de código e navegação pública concluída em 22/09/2026.
 Validação autenticada, reconciliação do banco real e confirmação dos segredos de implantação continuam pendentes; não declarar produção validada.
 Próximo incremento: 1B.3b, transação da quitação e teste concorrente em Mongo descartável. Não avançar à etapa 2 enquanto os gates financeiros estiverem pendentes.
@@ -16,7 +16,7 @@ Próximo incremento: 1B.3b, transação da quitação e teste concorrente em Mon
 
 ## Base, rollback e último commit
 - Base de código auditada: def13cf952811907329e0da79544699b2783ee37.
-- Último commit anterior a esta atualização / ponto de rollback: a43c49f90ee8455560a80cbe9bbd0a1daab6eef0 (pagamento individual calculado pelo banco).
+- Último commit anterior a esta atualização / ponto de rollback: 5d5e57cf5c41f35dc1cc6a8ad081363ca59265c0 (pagamento parcial calculado em centavos).
 - O commit que contém este diagnóstico é obtido por git log -1 -- GANOH_PROGRESS.md. Um arquivo não pode conter o próprio SHA final.
 - Rollback de código: conservar a base e reverter somente commits novos, sem apagar dados ou forçar referências.
 - Rollback de banco ainda NÃO existe como backup verificado. Não executar migração ou reparação de dados.
@@ -506,4 +506,33 @@ Preservar o teste de replay e ampliar contra Mongo descartável antes de declara
 - O executor atual não possui FastAPI e pymongo; a regressão integrada deve rodar no ambiente completo antes de merge/deploy.
 - A suíte completa anterior permanece em 107 testes Python, 11 Jest e build aprovado.
 - Pagamentos parciais ainda precisam de operation_id, idempotência persistente e transação Mongo para cobrir pedidos, saldo, recibo e histórico como uma única operação.
+- Nenhum dado real, banco de produção, WhatsApp ou Render foi alterado.
+
+
+## Incremento 1B.3a.8 — idempotência persistente opcional no pagamento parcial (23/09/2026)
+### Correção
+- O abatimento parcial podia ser reenviado após perda de resposta e criar outro abatimento e outro recebimento.
+- PrazoAbaterRequest agora aceita operation_id UUID opcional, preservando compatibilidade com clientes antigos.
+- Quando informado, o identificador é persistido antes da primeira alteração financeira, usando o _id único do Mongo para bloquear concorrência.
+- Repetição concluída retorna a resposta anterior com replayed=true, sem reler ou alterar pedidos e sem criar outro recebimento.
+- Reutilização do mesmo identificador com cliente, loja, valor ou forma de pagamento diferentes retorna 409.
+- Operação que ficou pendente não é repetida automaticamente e exige conferência do gestor.
+- Falha ao marcar a operação como concluída não é informada como sucesso.
+- A proteção foi aplicada nas implementações ativa e modular.
+
+### Arquivos alterados
+- backend/server.py
+- backend/routers/prazo.py
+- backend/tests/test_prazo_empty_settlement.py
+- GANOH_PROGRESS.md
+
+### Validação e limites
+- Sintaxe dos dois módulos e do teste validada com ast.parse.
+- A máquina de estados pending/completed, replay e conflito foi exercitada isoladamente.
+- Regressões FastAPI adicionadas para repetição do mesmo UUID e conflito de payload nas duas implementações.
+- A regressão anterior sem operation_id permanece, comprovando compatibilidade de entrada.
+- O executor atual não possui FastAPI e pymongo; as regressões integradas devem rodar no ambiente completo antes de merge/deploy.
+- A suíte completa anterior permanece em 107 testes Python, 11 Jest e build aprovado.
+- Clientes antigos sem operation_id continuam sem proteção contra reenvio; a próxima integração de interface deve gerar e reutilizar o UUID até receber resposta definitiva.
+- Ainda falta transação Mongo para agrupar pedido, saldo, recebimento, histórico e conclusão da operação.
 - Nenhum dado real, banco de produção, WhatsApp ou Render foi alterado.
