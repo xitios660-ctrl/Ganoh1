@@ -1,38 +1,53 @@
-"""Read-only WhatsApp AI bridge for Ganoh.
+"""WhatsApp + OpenAI bridge for Ganoh.
 
-The module is intentionally isolated from business write paths. Incoming WhatsApp
-messages are accepted only from the internal Baileys process, authorized against
-the configured manager group/JID allowlist, and answered from live Ganoh data.
+Financial questions are read-only. Receipt media can be analyzed, but a manager
+must explicitly confirm a matching pending PIX order before any financial state
+changes. WhatsApp media is retained encrypted by the loopback Baileys service.
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import os
 import re
 import secrets
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import httpx
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix="/whatsapp", tags=["WhatsApp AI"])
+security = HTTPBasic()
 
 db = None
 send_whatsapp_message = None
 BRAZIL_TZ = None
+verify_manager = None
 
 READONLY_MUTATION_WORDS = re.compile(
     r"\b(apag(?:a|ue|ar)|exclu(?:a|ir)|zer(?:a|e|ar)|alter(?:a|e|ar)|"
     r"mud(?:a|e|ar)|registr(?:a|e|ar)|lan[çc](?:a|e|ar)|confirm(?:a|e|ar)|"
-    r"aprov(?:a|e|ar)|saqu(?:e|ar)|pag(?:a|ue|ar)|baix(?:a|e|ar)|remov(?:a|a|er))\b",
+    r"aprov(?:a|e|ar)|saqu(?:e|ar)|pag(?:a|ue|ar)|baix(?:a|e|ar)|remov(?:a|er))\b",
     re.IGNORECASE,
 )
 FINANCIAL_WORDS = re.compile(
     r"\b(pix|caixa|venda|valor|d[ií]vida|prazo|pagamento|saldo|estoque|pedido|despesa)\b",
     re.IGNORECASE,
 )
+FINAL_EVENT_STATUSES = {
+    "answered",
+    "paused",
+    "unauthorized_source",
+    "ignored_media",
+    "requires_human",
+    "receipt_pending_review",
+    "receipt_duplicate_suspected",
+    "receipt_media_missing",
+}
 
 
 class IncomingWhatsAppMessage(BaseModel):
@@ -42,14 +57,32 @@ class IncomingWhatsAppMessage(BaseModel):
     fromGroup: bool = False
     kind: str = Field(default="unsupported", max_length=32)
     text: str = Field(default="", max_length=4000)
+    mimeType: str = Field(default="", max_length=120)
+    fileName: str = Field(default="", max_length=180)
+    mediaBase64: str = ""
     receivedAt: Optional[str] = Field(default=None, max_length=64)
 
 
-def set_dependencies(database, whatsapp_sender, brazil_tz):
-    global db, send_whatsapp_message, BRAZIL_TZ
+class ReceiptReview(BaseModel):
+    action: Literal["confirm", "reject", "correct"]
+    order_id: Optional[str] = Field(default=None, max_length=128)
+    amount: Optional[float] = Field(default=None, gt=0, allow_inf_nan=False)
+    payer_name: Optional[str] = Field(default=None, max_length=180)
+    notes: Optional[str] = Field(default=None, max_length=500)
+
+
+def set_dependencies(database, whatsapp_sender, brazil_tz, manager_verifier=None):
+    global db, send_whatsapp_message, BRAZIL_TZ, verify_manager
     db = database
     send_whatsapp_message = whatsapp_sender
     BRAZIL_TZ = brazil_tz
+    verify_manager = manager_verifier
+
+
+async def require_manager(credentials: HTTPBasicCredentials = Depends(security)):
+    if verify_manager is None:
+        raise HTTPException(status_code=503, detail="Manager authentication unavailable")
+    return await verify_manager(credentials)
 
 
 def classify_intent(text: str) -> str:
@@ -86,6 +119,20 @@ def extract_response_text(payload: dict[str, Any]) -> str:
     return "\n".join(chunks).strip()
 
 
+def parse_json_object(text: str) -> dict[str, Any]:
+    value = (text or "").strip()
+    if value.startswith("```"):
+        value = re.sub(r"^```(?:json)?\s*", "", value, flags=re.IGNORECASE)
+        value = re.sub(r"\s*```$", "", value)
+    start, end = value.find("{"), value.rfind("}")
+    if start < 0 or end <= start:
+        raise ValueError("No JSON object returned")
+    parsed = json.loads(value[start:end + 1])
+    if not isinstance(parsed, dict):
+        raise ValueError("Receipt analysis is not an object")
+    return parsed
+
+
 def _safe_jids_from_env() -> set[str]:
     raw = os.environ.get("WHATSAPP_AI_ALLOWED_JIDS", "")
     return {part.strip() for part in raw.split(",") if part.strip()}
@@ -99,10 +146,13 @@ async def _is_authorized_source(message: IncomingWhatsAppMessage) -> bool:
     return message.chatId in allowed or message.sender in allowed
 
 
+def _local_url(path: str) -> str:
+    return f"http://127.0.0.1:{os.environ.get('PORT', '10000')}{path}"
+
+
 async def _local_get(path: str) -> dict[str, Any]:
-    port = os.environ.get("PORT", "10000")
     async with httpx.AsyncClient(timeout=12.0) as client:
-        response = await client.get(f"http://127.0.0.1:{port}{path}")
+        response = await client.get(_local_url(path))
         response.raise_for_status()
         data = response.json()
         return data if isinstance(data, dict) else {"data": data}
@@ -141,15 +191,16 @@ async def _debts_context() -> dict[str, Any]:
 
 async def _prazo_payments_context() -> dict[str, Any]:
     data = await _local_get("/api/prazo/payments-history?limit=100")
-    payments = []
-    for item in data.get("payments", [])[:100]:
-        payments.append({
+    payments = [
+        {
             "customer_name": item.get("customer_name", ""),
             "amount": item.get("amount", 0),
             "payment_method": item.get("payment_method", ""),
             "store": item.get("store", ""),
             "created_at": item.get("created_at", ""),
-        })
+        }
+        for item in data.get("payments", [])[:100]
+    ]
     return {
         "fonte": "Ganoh /prazo/payments-history",
         "payments": payments,
@@ -186,7 +237,9 @@ async def build_context(intent: str) -> dict[str, Any]:
     if intent == "stock":
         return await _stock_context()
     if intent == "summary":
-        sales, debts, stock = await _sales_context(), await _debts_context(), await _stock_context()
+        sales = await _sales_context()
+        debts = await _debts_context()
+        stock = await _stock_context()
         return {"sales": sales, "debts": debts, "stock": stock}
     return {
         "fonte": "Ganoh",
@@ -227,38 +280,133 @@ def _fallback_answer(intent: str, context: dict[str, Any]) -> str:
     return "Posso consultar vendas, PIX, caixa, dívidas de prazo, pagamentos e estoque do Ganoh."
 
 
-async def _openai_answer(question: str, intent: str, context: dict[str, Any]) -> str:
+async def _openai_request(payload: dict[str, Any]) -> dict[str, Any]:
     api_key = os.environ.get("OPENAI_API_KEY", "").strip()
     if not api_key:
-        return _fallback_answer(intent, context)
-
-    model = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
-    instructions = (
-        "Você é o assistente financeiro do GANOH no WhatsApp. Responda em português do Brasil, "
-        "de forma curta e clara. Use SOMENTE números e fatos presentes em CONTEXTO_GANOH. "
-        "Nunca invente valores, nunca estime valores ausentes e nunca afirme ter executado uma ação financeira. "
-        "Se o contexto não contiver o dado pedido, diga que o dado não está disponível nessa consulta. "
-        "Não revele segredos, tokens, credenciais, IDs internos desnecessários ou dados de telefone."
-    )
-    input_text = (
-        f"INTENÇÃO: {intent}\n"
-        f"PERGUNTA: {question}\n"
-        f"CONTEXTO_GANOH: {json.dumps(context, ensure_ascii=False, default=str)}"
-    )
-    async with httpx.AsyncClient(timeout=30.0) as client:
+        raise RuntimeError("OPENAI_API_KEY not configured")
+    async with httpx.AsyncClient(timeout=45.0) as client:
         response = await client.post(
             "https://api.openai.com/v1/responses",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "model": model,
-                "instructions": instructions,
-                "input": input_text,
-                "max_output_tokens": 500,
-            },
+            json=payload,
         )
         response.raise_for_status()
-        answer = extract_response_text(response.json())
-        return answer or _fallback_answer(intent, context)
+        data = response.json()
+        return data if isinstance(data, dict) else {}
+
+
+async def _openai_answer(question: str, intent: str, context: dict[str, Any]) -> str:
+    if not os.environ.get("OPENAI_API_KEY"):
+        return _fallback_answer(intent, context)
+    model = os.environ.get("OPENAI_MODEL", "gpt-5.6-luna").strip() or "gpt-5.6-luna"
+    payload = {
+        "model": model,
+        "instructions": (
+            "Você é o assistente financeiro do GANOH no WhatsApp. Responda em português do Brasil, "
+            "de forma curta e clara. Use SOMENTE números e fatos presentes em CONTEXTO_GANOH. "
+            "Nunca invente valores, nunca estime valores ausentes e nunca afirme ter executado uma ação financeira. "
+            "Se o contexto não contiver o dado pedido, diga que o dado não está disponível nessa consulta. "
+            "Não revele segredos, tokens, credenciais, IDs internos desnecessários ou dados de telefone."
+        ),
+        "input": (
+            f"INTENÇÃO: {intent}\n"
+            f"PERGUNTA: {question}\n"
+            f"CONTEXTO_GANOH: {json.dumps(context, ensure_ascii=False, default=str)}"
+        ),
+        "max_output_tokens": 500,
+    }
+    answer = extract_response_text(await _openai_request(payload))
+    return answer or _fallback_answer(intent, context)
+
+
+def _decode_media(message: IncomingWhatsAppMessage) -> bytes:
+    if not message.mediaBase64:
+        raise ValueError("Missing media")
+    try:
+        data = base64.b64decode(message.mediaBase64, validate=True)
+    except Exception as exc:
+        raise ValueError("Invalid media encoding") from exc
+    if not data or len(data) > 8 * 1024 * 1024:
+        raise ValueError("Invalid media size")
+    return data
+
+
+async def _analyze_receipt(message: IncomingWhatsAppMessage) -> tuple[dict[str, Any], str]:
+    raw = _decode_media(message)
+    media_hash = hashlib.sha256(raw).hexdigest()
+    if not os.environ.get("OPENAI_API_KEY"):
+        return {
+            "amount": None,
+            "payer_name": None,
+            "transaction_date": None,
+            "transaction_time": None,
+            "reference": None,
+            "bank": None,
+            "confidence": 0,
+            "analysis_status": "ai_not_configured",
+        }, media_hash
+
+    model = os.environ.get("OPENAI_VISION_MODEL", os.environ.get("OPENAI_MODEL", "gpt-5.6-luna"))
+    prompt = (
+        "Analise este comprovante financeiro. Extraia apenas o que estiver visível. "
+        "Retorne SOMENTE JSON com: amount (número ou null), payer_name (string ou null), "
+        "transaction_date (string ou null), transaction_time (string ou null), "
+        "reference (string ou null), bank (string ou null), confidence (0 a 1). "
+        "Não conclua que o pagamento é válido e não invente campos ausentes."
+    )
+    if message.mimeType.startswith("image/"):
+        content = [
+            {"type": "input_text", "text": prompt},
+            {
+                "type": "input_image",
+                "image_url": f"data:{message.mimeType};base64,{message.mediaBase64}",
+                "detail": "high",
+            },
+        ]
+    elif message.mimeType == "application/pdf":
+        content = [
+            {"type": "input_text", "text": prompt},
+            {
+                "type": "input_file",
+                "filename": message.fileName or "comprovante.pdf",
+                "file_data": message.mediaBase64,
+            },
+        ]
+    else:
+        raise ValueError("Unsupported receipt media type")
+
+    response = await _openai_request({
+        "model": model,
+        "input": [{"role": "user", "content": content}],
+        "max_output_tokens": 500,
+    })
+    analysis = parse_json_object(extract_response_text(response))
+    analysis["analysis_status"] = "analyzed"
+    return analysis, media_hash
+
+
+async def _find_candidate_orders(amount: Any) -> list[dict[str, Any]]:
+    try:
+        numeric = float(amount)
+    except (TypeError, ValueError):
+        return []
+    orders = await db.orders.find(
+        {
+            "payment_method": "pix",
+            "status": "pending_payment",
+            "total": {"$gte": numeric - 0.01, "$lte": numeric + 0.01},
+        },
+        {
+            "_id": 0,
+            "id": 1,
+            "store": 1,
+            "customer_name": 1,
+            "order_number": 1,
+            "total": 1,
+            "created_at": 1,
+        },
+    ).sort("created_at", -1).to_list(20)
+    return orders
 
 
 async def _record_event(message: IncomingWhatsAppMessage, status: str, **extra: Any) -> None:
@@ -278,6 +426,41 @@ async def _record_event(message: IncomingWhatsAppMessage, status: str, **extra: 
     )
 
 
+async def _store_receipt(
+    message: IncomingWhatsAppMessage,
+    analysis: dict[str, Any],
+    media_hash: str,
+    candidates: list[dict[str, Any]],
+) -> str:
+    duplicate = await db.whatsapp_receipts.find_one(
+        {"media_hash": media_hash, "_id": {"$ne": message.messageId}, "status": {"$ne": "rejected"}},
+        {"_id": 1, "status": 1},
+    )
+    status = "duplicate_suspected" if duplicate else "pending_review"
+    await db.whatsapp_receipts.update_one(
+        {"_id": message.messageId},
+        {
+            "$set": {
+                "message_id": message.messageId,
+                "chat_id": message.chatId,
+                "sender": message.sender,
+                "mime_type": message.mimeType,
+                "file_name": message.fileName,
+                "media_hash": media_hash,
+                "analysis": analysis,
+                "candidate_orders": candidates,
+                "status": status,
+                "duplicate_of": duplicate.get("_id") if duplicate else None,
+                "source": "whatsapp_receipt",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+            "$setOnInsert": {"created_at": datetime.now(timezone.utc).isoformat()},
+        },
+        upsert=True,
+    )
+    return status
+
+
 @router.get("/ai/status")
 async def whatsapp_ai_status():
     return {
@@ -286,6 +469,137 @@ async def whatsapp_ai_status():
         "sendingEnabled": os.environ.get("WHATSAPP_SEND_ENABLED", "false").lower() == "true",
         "mode": "read_only",
     }
+
+
+@router.get("/receipts", dependencies=[Depends(require_manager)])
+async def list_whatsapp_receipts(limit: int = 50):
+    limit = max(1, min(limit, 100))
+    docs = await db.whatsapp_receipts.find(
+        {"status": {"$in": ["pending_review", "duplicate_suspected"]}},
+        {"media_hash": 0},
+    ).sort("created_at", -1).to_list(limit)
+    for item in docs:
+        item["id"] = str(item.pop("_id"))
+    return {"receipts": docs}
+
+
+@router.get("/receipts/{receipt_id}/media", dependencies=[Depends(require_manager)])
+async def get_whatsapp_receipt_media(receipt_id: str):
+    token = os.environ.get("WHATSAPP_INTERNAL_TOKEN", "")
+    if not token:
+        raise HTTPException(status_code=503, detail="WhatsApp internal token unavailable")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(
+            f"http://127.0.0.1:8002/media/{receipt_id}",
+            headers={"x-whatsapp-token": token},
+        )
+    if response.status_code == 404:
+        raise HTTPException(status_code=404, detail="Receipt media expired or unavailable")
+    if response.status_code != 200:
+        raise HTTPException(status_code=503, detail="Receipt media service unavailable")
+    return response.json()
+
+
+@router.post("/receipts/{receipt_id}/review", dependencies=[Depends(require_manager)])
+async def review_whatsapp_receipt(receipt_id: str, review: ReceiptReview):
+    receipt = await db.whatsapp_receipts.find_one({"_id": receipt_id})
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    if receipt.get("status") == "confirmed":
+        return {"success": True, "status": "confirmed", "duplicate": True}
+
+    now = datetime.now(timezone.utc).isoformat()
+    analysis = dict(receipt.get("analysis") or {})
+    if review.amount is not None:
+        analysis["amount"] = review.amount
+    if review.payer_name is not None:
+        analysis["payer_name"] = review.payer_name
+
+    if review.action == "reject":
+        await db.whatsapp_receipts.update_one(
+            {"_id": receipt_id},
+            {"$set": {"status": "rejected", "analysis": analysis, "notes": review.notes or "", "reviewed_at": now, "updated_at": now}},
+        )
+        return {"success": True, "status": "rejected"}
+
+    if review.action == "correct":
+        candidates = await _find_candidate_orders(analysis.get("amount"))
+        selected_order_id = review.order_id
+        if selected_order_id and not any(item.get("id") == selected_order_id for item in candidates):
+            selected_order_id = None
+        await db.whatsapp_receipts.update_one(
+            {"_id": receipt_id},
+            {"$set": {
+                "status": "pending_review",
+                "analysis": analysis,
+                "candidate_orders": candidates,
+                "selected_order_id": selected_order_id,
+                "notes": review.notes or "",
+                "updated_at": now,
+            }},
+        )
+        return {"success": True, "status": "pending_review", "candidate_count": len(candidates)}
+
+    order_id = review.order_id or receipt.get("selected_order_id")
+    if not order_id:
+        raise HTTPException(status_code=400, detail="Select an order before confirming")
+
+    order = await db.orders.find_one(
+        {"id": order_id, "payment_method": "pix"},
+        {"_id": 0, "id": 1, "store": 1, "status": 1, "total": 1},
+    )
+    if not order:
+        raise HTTPException(status_code=404, detail="PIX order not found")
+    if order.get("status") != "pending_payment":
+        raise HTTPException(status_code=409, detail="Order is no longer pending payment")
+
+    amount = analysis.get("amount")
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="Receipt amount must be reviewed before confirmation")
+    if abs(amount - float(order.get("total", 0) or 0)) > 0.01:
+        raise HTTPException(status_code=409, detail="Receipt amount does not match the selected order")
+
+    duplicate_confirmed = await db.whatsapp_receipts.find_one({
+        "media_hash": receipt.get("media_hash"),
+        "_id": {"$ne": receipt_id},
+        "status": "confirmed",
+    })
+    if duplicate_confirmed:
+        raise HTTPException(status_code=409, detail="This receipt was already confirmed")
+
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        response = await client.post(
+            _local_url(f"/api/orders/{order['store']}/{order_id}/approve-payment"),
+            json={"approved": True},
+        )
+    if response.status_code >= 400:
+        raise HTTPException(status_code=409, detail="Order approval failed")
+
+    await db.orders.update_one(
+        {"id": order_id, "store": order["store"]},
+        {"$set": {
+            "payment_origin": "whatsapp_receipt",
+            "whatsapp_receipt_id": receipt_id,
+            "pix_payer_name": analysis.get("payer_name") or "",
+            "whatsapp_receipt_analysis": analysis,
+            "updated_at": now,
+        }},
+    )
+    await db.whatsapp_receipts.update_one(
+        {"_id": receipt_id},
+        {"$set": {
+            "status": "confirmed",
+            "analysis": analysis,
+            "selected_order_id": order_id,
+            "confirmed_order_id": order_id,
+            "notes": review.notes or "",
+            "reviewed_at": now,
+            "updated_at": now,
+        }},
+    )
+    return {"success": True, "status": "confirmed", "order_id": order_id}
 
 
 @router.post("/internal/incoming")
@@ -298,9 +612,7 @@ async def incoming_whatsapp(
         raise HTTPException(status_code=401, detail="Unauthorized")
 
     existing = await db.whatsapp_ai_events.find_one({"_id": message.messageId}, {"_id": 0, "status": 1})
-    if existing and existing.get("status") in {
-        "answered", "paused", "unauthorized_source", "ignored_media", "requires_human"
-    }:
+    if existing and existing.get("status") in FINAL_EVENT_STATUSES:
         return {"success": True, "duplicate": True, "status": existing.get("status")}
 
     if not await _is_authorized_source(message):
@@ -308,8 +620,26 @@ async def incoming_whatsapp(
         return {"success": True, "status": "unauthorized_source"}
 
     if message.kind in {"image", "document"}:
-        await _record_event(message, "ignored_media", note="media_receipt_pipeline_pending")
-        return {"success": True, "status": "ignored_media"}
+        if not message.mediaBase64:
+            await _record_event(message, "receipt_media_missing")
+            return {"success": True, "status": "receipt_media_missing"}
+        try:
+            analysis, media_hash = await _analyze_receipt(message)
+            candidates = await _find_candidate_orders(analysis.get("amount"))
+            status = await _store_receipt(message, analysis, media_hash, candidates)
+        except Exception as exc:
+            await _record_event(message, "error", error=type(exc).__name__)
+            raise HTTPException(status_code=503, detail="Receipt analysis unavailable")
+
+        event_status = "receipt_duplicate_suspected" if status == "duplicate_suspected" else "receipt_pending_review"
+        await _record_event(message, event_status, candidate_count=len(candidates))
+        if os.environ.get("WHATSAPP_SEND_ENABLED", "false").lower() == "true":
+            notice = (
+                "Recebi o comprovante e deixei no Gestor para conferência. "
+                "Nenhum pagamento foi confirmado automaticamente."
+            )
+            await send_whatsapp_message(notice, message.chatId)
+        return {"success": True, "status": event_status, "candidate_count": len(candidates)}
 
     if message.kind != "text" or not message.text.strip():
         await _record_event(message, "ignored_media")
