@@ -5306,26 +5306,32 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
 async def get_daily_chart_with_expenses(date: str = None, store: str = None, username: str = Depends(verify_gestor)):
     """Get hourly sales AND expenses data for a specific day, optionally filtered by store.
     Revenue = order totals (excl. prazo) + PIX manual adjustments + prazo payments received.
+    Day bounds and hour buckets use America/Sao_Paulo (aligned with /gestor/chart/daily).
     """
-    now = datetime.now(timezone.utc)
-    
+    brazil_tz = pytz.timezone('America/Sao_Paulo')
+    now_brazil = datetime.now(brazil_tz)
+
     if date:
-        target_date = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        try:
+            target_date = brazil_tz.localize(datetime.strptime(date, "%Y-%m-%d"))
+        except Exception:
+            target_date = now_brazil.replace(hour=0, minute=0, second=0, microsecond=0)
     else:
-        target_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    day_start = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    day_end = day_start + timedelta(days=1)
-    
-    # Get orders and expenses for this day (filter by store if provided)
+        target_date = now_brazil.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    day_start_brazil = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end_brazil = day_start_brazil + timedelta(days=1)
+    day_start = day_start_brazil.astimezone(pytz.UTC)
+    day_end = day_end_brazil.astimezone(pytz.UTC)
+
     orders_query = {
-        "status": {"$in": ["ready", "delivered", "received", "preparing"]},
+        "status": {"$in": ["ready", "delivered", "received"]},
         "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
     }
     if store and store != "all":
         orders_query["store"] = store
     orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "payment_method": 1}).to_list(10000)
-    
+
     expenses_query = {
         "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
     }
@@ -5333,7 +5339,6 @@ async def get_daily_chart_with_expenses(date: str = None, store: str = None, use
         expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
     expenses = await db.expenses.find(expenses_query, {"_id": 0}).to_list(1000)
 
-    # PIX manual adjustments + Prazo payments
     pix_query = {
         "removed": {"$ne": True},
         "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
@@ -5350,8 +5355,7 @@ async def get_daily_chart_with_expenses(date: str = None, store: str = None, use
     prazo_payments = await db.prazo_payments.find(prazo_query, {"_id": 0}).to_list(10000)
     prazo_partial_payments = await db.prazo_partial_payments.find(prazo_query, {"_id": 0}).to_list(10000)
     all_prazo_payments = prazo_payments + prazo_partial_payments
-    
-    # Group by hour
+
     hourly_data = {}
     for hour in range(24):
         hourly_data[hour] = {
@@ -5361,53 +5365,51 @@ async def get_daily_chart_with_expenses(date: str = None, store: str = None, use
             "profit": 0,
             "order_count": 0
         }
-    
+
+    def _brazil_hour(iso_str):
+        try:
+            dt = datetime.fromisoformat((iso_str or "").replace("Z", "+00:00"))
+            return dt.astimezone(brazil_tz).hour
+        except Exception:
+            return None
+
     for order in orders:
-        # Skip prazo orders - they're not real revenue until paid
         if order.get("payment_method") == "prazo":
             continue
-        try:
-            order_time = datetime.fromisoformat(order.get("created_at", "").replace("Z", "+00:00"))
-            brazil_hour = (order_time.hour - 3) % 24
-            hourly_data[brazil_hour]["revenue"] += order.get("total", 0)
-            hourly_data[brazil_hour]["order_count"] += 1
-        except:
-            pass
+        brazil_hour = _brazil_hour(order.get("created_at", ""))
+        if brazil_hour is None:
+            continue
+        hourly_data[brazil_hour]["revenue"] += order.get("total", 0)
+        hourly_data[brazil_hour]["order_count"] += 1
 
     for adj in pix_adjustments:
-        try:
-            adj_time = datetime.fromisoformat(adj.get("created_at", "").replace("Z", "+00:00"))
-            brazil_hour = (adj_time.hour - 3) % 24
-            hourly_data[brazil_hour]["revenue"] += adj.get("amount", 0)
-        except:
-            pass
+        brazil_hour = _brazil_hour(adj.get("created_at", ""))
+        if brazil_hour is None:
+            continue
+        hourly_data[brazil_hour]["revenue"] += adj.get("amount", 0)
 
     for payment in all_prazo_payments:
-        try:
-            p_time = datetime.fromisoformat(payment.get("created_at", "").replace("Z", "+00:00"))
-            brazil_hour = (p_time.hour - 3) % 24
-            hourly_data[brazil_hour]["revenue"] += payment.get("amount", 0)
-        except:
-            pass
-    
+        brazil_hour = _brazil_hour(payment.get("created_at", ""))
+        if brazil_hour is None:
+            continue
+        hourly_data[brazil_hour]["revenue"] += payment.get("amount", 0)
+
     for exp in expenses:
-        try:
-            exp_time = datetime.fromisoformat(exp.get("created_at", "").replace("Z", "+00:00"))
-            brazil_hour = (exp_time.hour - 3) % 24
-            hourly_data[brazil_hour]["expenses"] += exp.get("amount", 0)
-        except:
-            pass
-    
+        brazil_hour = _brazil_hour(exp.get("created_at", ""))
+        if brazil_hour is None:
+            continue
+        hourly_data[brazil_hour]["expenses"] += exp.get("amount", 0)
+
     for h in hourly_data.values():
         h["profit"] = h["revenue"] - h["expenses"]
-    
+
     chart_data = sorted(hourly_data.values(), key=lambda x: x["hour"])
-    
+
     total_revenue = sum(d["revenue"] for d in chart_data)
     total_expenses = sum(d["expenses"] for d in chart_data)
-    
+
     return {
-        "date": target_date.strftime("%d/%m/%Y"),
+        "date": day_start_brazil.strftime("%d/%m/%Y"),
         "period": "day",
         "data": chart_data,
         "total_revenue": total_revenue,
@@ -5420,21 +5422,25 @@ async def get_daily_chart_with_expenses(date: str = None, store: str = None, use
 async def get_yearly_chart_with_expenses(year: int = None, store: str = None, username: str = Depends(verify_gestor)):
     """Get monthly sales AND expenses data for a specific year, optionally filtered by store.
     Revenue = order totals (excl. prazo) + PIX manual adjustments + prazo payments received.
+    Year bounds and month buckets use America/Sao_Paulo (aligned with /gestor/chart/yearly).
     """
-    now = datetime.now(timezone.utc)
-    target_year = year if year else now.year
-    
-    year_start = datetime(target_year, 1, 1, tzinfo=timezone.utc)
-    year_end = datetime(target_year + 1, 1, 1, tzinfo=timezone.utc)
-    
+    brazil_tz = pytz.timezone('America/Sao_Paulo')
+    now_brazil = datetime.now(brazil_tz)
+    target_year = year if year else now_brazil.year
+
+    year_start_brazil = brazil_tz.localize(datetime(target_year, 1, 1))
+    year_end_brazil = brazil_tz.localize(datetime(target_year + 1, 1, 1))
+    year_start = year_start_brazil.astimezone(pytz.UTC)
+    year_end = year_end_brazil.astimezone(pytz.UTC)
+
     orders_query = {
-        "status": {"$in": ["ready", "delivered", "received", "preparing"]},
+        "status": {"$in": ["ready", "delivered", "received"]},
         "created_at": {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
     }
     if store and store != "all":
         orders_query["store"] = store
     orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "payment_method": 1}).to_list(100000)
-    
+
     expenses_query = {
         "created_at": {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
     }
@@ -5442,7 +5448,6 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
         expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
     expenses = await db.expenses.find(expenses_query, {"_id": 0}).to_list(10000)
 
-    # PIX manual adjustments + Prazo payments
     pix_query = {
         "removed": {"$ne": True},
         "created_at": {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
@@ -5459,7 +5464,7 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
     prazo_payments = await db.prazo_payments.find(prazo_query, {"_id": 0}).to_list(100000)
     prazo_partial_payments = await db.prazo_partial_payments.find(prazo_query, {"_id": 0}).to_list(100000)
     all_prazo_payments = prazo_payments + prazo_partial_payments
-    
+
     month_names = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
     monthly_data = {}
     for m in range(1, 13):
@@ -5471,47 +5476,49 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
             "profit": 0,
             "order_count": 0
         }
-    
+
+    def _brazil_month(iso_str):
+        try:
+            dt = datetime.fromisoformat((iso_str or "").replace("Z", "+00:00"))
+            return dt.astimezone(brazil_tz).month
+        except Exception:
+            return None
+
     for order in orders:
-        # Skip prazo orders - they're not real revenue until paid
         if order.get("payment_method") == "prazo":
             continue
-        try:
-            order_date = datetime.fromisoformat(order.get("created_at", "").replace("Z", "+00:00"))
-            monthly_data[order_date.month]["revenue"] += order.get("total", 0)
-            monthly_data[order_date.month]["order_count"] += 1
-        except:
-            pass
+        month = _brazil_month(order.get("created_at", ""))
+        if month is None:
+            continue
+        monthly_data[month]["revenue"] += order.get("total", 0)
+        monthly_data[month]["order_count"] += 1
 
     for adj in pix_adjustments:
-        try:
-            adj_date = datetime.fromisoformat(adj.get("created_at", "").replace("Z", "+00:00"))
-            monthly_data[adj_date.month]["revenue"] += adj.get("amount", 0)
-        except:
-            pass
+        month = _brazil_month(adj.get("created_at", ""))
+        if month is None:
+            continue
+        monthly_data[month]["revenue"] += adj.get("amount", 0)
 
     for payment in all_prazo_payments:
-        try:
-            p_date = datetime.fromisoformat(payment.get("created_at", "").replace("Z", "+00:00"))
-            monthly_data[p_date.month]["revenue"] += payment.get("amount", 0)
-        except:
-            pass
-    
+        month = _brazil_month(payment.get("created_at", ""))
+        if month is None:
+            continue
+        monthly_data[month]["revenue"] += payment.get("amount", 0)
+
     for exp in expenses:
-        try:
-            exp_date = datetime.fromisoformat(exp.get("created_at", "").replace("Z", "+00:00"))
-            monthly_data[exp_date.month]["expenses"] += exp.get("amount", 0)
-        except:
-            pass
-    
+        month = _brazil_month(exp.get("created_at", ""))
+        if month is None:
+            continue
+        monthly_data[month]["expenses"] += exp.get("amount", 0)
+
     for m in monthly_data.values():
         m["profit"] = m["revenue"] - m["expenses"]
-    
-    chart_data = sorted(monthly_data.values(), key=lambda x: x["month"])
-    
+
+    chart_data = [monthly_data[m] for m in range(1, 13)]
+
     total_revenue = sum(d["revenue"] for d in chart_data)
     total_expenses = sum(d["expenses"] for d in chart_data)
-    
+
     return {
         "year": target_year,
         "period": "year",
@@ -5521,14 +5528,6 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
         "total_profit": total_revenue - total_expenses,
         "total_orders": sum(d["order_count"] for d in chart_data)
     }
-
-# ==================== ADMIN CLEAR DATA ROUTE ====================
-CLEAR_DATA_PASSWORD = os.environ.get("CLEAR_DATA_PASSWORD", "")  # required via env; empty = fail closed
-
-def _require_clear_data_password(provided: str) -> None:
-    expected = (CLEAR_DATA_PASSWORD or "").strip()
-    if not expected or (provided or "").strip() != expected:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
 
 @api_router.post("/admin/clear-data")
 async def clear_all_data(
