@@ -1,14 +1,15 @@
 # GANOH — Progresso Grok (WhatsApp AI)
 
 ## Etapa atual
-**ETAPA 7 — Consultas financeiras Mongo (WhatsApp AI): CONCLUÍDA** em 24/09/2026 ~04:00 BRT (America/Sao_Paulo), branch local `ganoh/grok-whatsapp-ai` only.  
+**ETAPA 8 — Comprovantes via WhatsApp Baileys: CONCLUÍDA** em 24/09/2026 ~05:10 BRT (America/Sao_Paulo), branch local `ganoh/grok-whatsapp-ai` only.  
+**ETAPA 7 — Consultas financeiras Mongo:** concluída.  
 **ETAPA 6 — AI WhatsApp (OpenAI seguro):** concluída.  
 **ETAPA 5 — Gestor QR/status UI:** concluída.  
 **ETAPA 4 — Baileys inbound:** concluída.  
 **ETAPA 3 — Security hardening:** concluída.  
 **ETAPA 2 — Branch remota:** ainda BLOQUEADA — MCP GitHub write **403** (Contents:write). Sem push / sem criar branch remota. Sem merge / sem deploy.
 
-Regras respeitadas: sem push/deploy/merge em produção; sem alterar branches reservadas (`main`, `ganoh/continuity-sync`, `ganoh/staged-audit`, `ganoh/whatsapp-ai`); flags `MIGRATION_PENDING` / `SCHEDULER_ENABLED` / `WHATSAPP_SEND_ENABLED` intactas em `render.yaml`. Sem Meta Cloud API. Sem inventar números financeiros (fatos oficiais do Mongo ou “sem dados”). Sem keys/MONGO_URL em código/logs/commits.
+Regras respeitadas: sem push/deploy/merge em produção; sem alterar branches reservadas (`main`, `ganoh/continuity-sync`, `ganoh/staged-audit`, `ganoh/whatsapp-ai`); flags `MIGRATION_PENDING` / `SCHEDULER_ENABLED` / `WHATSAPP_SEND_ENABLED` intactas em `render.yaml`. Sem Meta Cloud API. Sem inventar números financeiros. Sem keys/MONGO_URL em código/logs/commits. Comprovantes **nunca** auto-confirmam pagamento.
 
 ## Referências
 | Item | Valor |
@@ -27,67 +28,69 @@ Regras respeitadas: sem push/deploy/merge em produção; sem alterar branches re
 | ganoh/whatsapp-ai | intocado |
 | ganoh/continuity-sync | intocado |
 | ganoh/staged-audit | intocado |
-| ganoh/grok-whatsapp-ai | **local** — ETAPA 1/3/4/5/6/7; **remoto inexistente** (403) |
+| ganoh/grok-whatsapp-ai | **local** — ETAPA 1/3/4/5/6/7/8; **remoto inexistente** (403) |
 
 ## Env vars (nomes apenas — nunca gravar valores)
 | Nome | Uso |
 | --- | --- |
-| `OPENAI_API_KEY` | Obrigatória para respostas WhatsApp AI |
+| `OPENAI_API_KEY` | Obrigatória para respostas WhatsApp AI / OCR comprovante |
 | `OPENAI_MODEL` | Opcional; default `gpt-4o-mini` |
 | `EMERGENT_LLM_KEY` | Fallback só para `is_configured()` / `aiStatus=pending` (path AI WhatsApp prefere OPENAI) |
-| `WHATSAPP_SEND_ENABLED` | Se não `true`, IA calcula resposta mas **não envia** (`would_reply`) |
-| `MONGO_URL` / `DB_NAME` | Backend; AI finance usa `whatsapp_finance.set_db(db)` — sem ler URL no módulo AI |
+| `WHATSAPP_SEND_ENABLED` | Se não `true`, IA/ack calcula resposta mas **não envia** (`would_reply`) |
+| `WHATSAPP_INTERNAL_TOKEN` | Auth sidecar Baileys → backend (`/inbound`, `/inbound/media`) |
+| `MONGO_URL` / `DB_NAME` | Backend; módulos usam `set_db(db)` — sem ler URL no módulo |
 
-## ETAPA 7 — Consultas financeiras (esta sessão)
+## ETAPA 8 — Comprovantes (esta sessão)
 
 ### Decisão de desenho
-**Intent detect + fetch Mongo read-only + fatos no prompt** (não OpenAI function-calling). Motivo: mais simples, 100% testável com FakeDB, sem schema de tools, alinhado ao stub ETAPA 6.
+**Pending review + Gestor confirm/correct/refuse** — sem auto-mutação financeira.  
+No confirm: grava revisão + audit (`origin=WhatsApp / comprovante`); **não** chama APIs de PIX/prazo/caixa (caminho incompleto mais seguro). Gestor aplica dinheiro pelos fluxos existentes.
 
 ### Fluxo
-1. Inbound 1:1 texto → `achat_reply`.
-2. Sensível (apagar/zerar/confirmar PIX/saque/…) → stub Gestor; **sem** DB mutate; **sem** OpenAI.
-3. Financeiro → `whatsapp_finance.fetch_facts_for_text` (collections `orders`, `pix_adjustments`, `prazo_*`, `cash_*`, `stock`).
-4. Fatos oficiais injetados no system prompt → OpenAI **só formata/explica**.
-5. Sem dados / falha de consulta → mensagem explícita; **nunca inventa números**.
-6. `WHATSAPP_SEND_ENABLED!=true` → `would_reply` (inalterado).
+1. Cliente envia imagem → Baileys `normalizeInbound` marca `comprovanteStub`.
+2. Sidecar notifica `POST /api/whatsapp/inbound` → backend cria pending (`awaiting_media`).
+3. Sidecar baixa mídia (Baileys `downloadMediaMessage`) e envia `POST /api/whatsapp/inbound/media` (base64, ≤2 MiB, jpeg/png/webp).
+4. Backend armazena binary em `whatsapp_comprovante_media` (Mongo), OCR opcional (OpenAI vision), match read-only (orders/prazo), status `awaiting_gestor`.
+5. Gestor UI: lista + Confirmar / Corrigir / Recusar.
+6. PDF/document: metadata only — **images only** para OCR (PDF adiado).
+7. `WHATSAPP_SEND_ENABLED!=true` → ack `would_reply` (sem send).
 
-### Intents cobertos
-| Intent | Exemplos |
+### Status
+| Status | Significado |
 | --- | --- |
-| `sales_today` / `sales_by_store` | quanto vendeu hoje; por loja Runner / GYM Londres |
-| `pix_today` / `cash_today` | PIX; dinheiro |
-| `debts_list` / `debt_customer` | quem está devendo; quanto X deve |
-| `prazo_payments_today` | pagamentos de prazo hoje |
-| `morning_close` | fechamento da manhã (06:00–14:00 BRT) |
-| `cash_drawer` | saldo/diferença no caixa (saldo **esperado** sistema; física = Gestor) |
-| `low_stock` | estoque baixo |
-| `day_summary` | resumo do dia |
-
-Timezone “hoje” / turnos: **America/Sao_Paulo** (mesmo critério de `get_today_cash`).
+| `awaiting_media` | Candidate sem binary ainda |
+| `awaiting_gestor` | Pronto para revisão (default após doubt/extração) |
+| `confirmed` / `corrected` | Revisão Gestor (sem money apply automático) |
+| `refused` | Recusado pelo Gestor |
 
 ### Arquivos
 | Arquivo | Mudança |
 | --- | --- |
-| `backend/whatsapp_finance.py` | **novo** — intents + queries read-only + `FinanceFacts` |
-| `backend/whatsapp_ai.py` | remove stub cego ETAPA 7; injeta fatos; `achat_reply` busca DB |
-| `backend/server.py` | `whatsapp_finance.set_db(db)`; docstring inbound |
-| `backend/tests/test_whatsapp_finance.py` | **novo** — FakeDB / mocks |
-| `backend/tests/test_whatsapp_ai.py` | ajuste path financeiro sem fatos |
-| `backend/tests/test_whatsapp_inbound_ai_path.py` | ajuste mirror sync |
+| `backend/whatsapp_comprovantes.py` | **novo** — pending, media, extract, match, confirm/refuse, audit |
+| `backend/server.py` | inbound cria pending; `/inbound/media`; rotas Gestor `/whatsapp/comprovantes*` |
+| `backend/whatsapp_ai.py` | prompt: comprovantes = fluxo Gestor (não “etapa futura”); `MSG_COMPROVANTE_PENDING` |
+| `whatsapp/inbound.mjs` | `notifyBackendMedia` + download hook no pipeline |
+| `whatsapp/server.mjs` | `downloadMediaMessage` para imagens comprovante |
+| `frontend/.../WhatsAppTab.js` | seção Comprovantes (lista + ações) |
+| `backend/tests/test_whatsapp_comprovantes.py` | **novo** — FakeDB |
+| `backend/tests/test_whatsapp_inbound_ai_path.py` | media skip AI + prompt |
+| `whatsapp/inbound.test.mjs` | media upload / mime / size |
 | `GANOH_GROK_PROGRESS.md` | este doc |
 
 ### Testes
-- `python3 -m py_compile` `whatsapp_ai.py` + `whatsapp_finance.py`; AST `server.py`: OK
-- pytest (venv `/tmp/ganoh-venv`) `test_whatsapp_finance.py` + `test_whatsapp_ai.py` + `test_whatsapp_inbound_ai_path.py`: **30 passed**
-- Sem conexão Mongo produção; sem mutação financeira; sem OpenAI real; sem deploy
-- `render.yaml` travas intactas (`MIGRATION_PENDING=true`, `SCHEDULER_ENABLED=false`, `WHATSAPP_SEND_ENABLED=false`)
+- `python3 -m py_compile` `whatsapp_comprovantes.py` + `whatsapp_ai.py`; AST `server.py`: OK
+- `node --check` WhatsAppTab / inbound / server.mjs: OK
+- pytest (venv `/tmp/ganoh-venv`) comprovantes + ai + finance + inbound path: **40 passed**
+- node `--test` `whatsapp/inbound.test.mjs`: **11 passed**
+- Sem Mongo produção; sem OpenAI real; sem send; sem deploy
+- `render.yaml` travas intactas
 - `frontend` `npm run build`: **não** executado (`node_modules` ausente)
 
 ### Riscos / limitações
-- Envio real continua bloqueado por `WHATSAPP_SEND_ENABLED=false` (correto).
-- “Diferença no caixa” = saldo esperado do sistema; contagem física continua Gestor.
-- Breakdown por **vendedor** individual não existe no schema — responde por **loja**.
-- FakeDB cobre queries usadas; edge cases de offsets mistos herdados do backend.
+- Confirm **não** aplica dinheiro automaticamente — Gestor usa PIX/prazo UI existente.
+- PDF não suportado no OCR/download (só imagens jpeg/png/webp).
+- Retention de binary Mongo: nota no record; política de purge TBD (nunca apagar audit financeiro).
+- Envio real bloqueado por `WHATSAPP_SEND_ENABLED=false` (correto).
 - Push remoto ainda 403.
 - Credenciais historicamente hardcoded (ETAPA 3) ainda precisam rotação no provedor.
 
@@ -95,18 +98,9 @@ Timezone “hoje” / turnos: **America/Sao_Paulo** (mesmo critério de `get_tod
 - `render.yaml` flags de manutenção
 - Branches reservadas / main
 - Sem push / merge / deploy
-- Sem UPSERT/DELETE financeiro
+- Sem UPSERT/DELETE financeiro em orders/prazo/cash/pix via WhatsApp
 - Sem Meta Cloud API; Baileys only
-- Sem ETAPA 8 comprovantes / 9 reports / Charts sync
+- Sem ETAPA 9 reports / Charts sync
 
-### Commits locais nesta branch (ETAPA 7)
-| SHA | Mensagem |
-| --- | --- |
-| (ver `git log`) | feat: Mongo finance tools for WhatsApp AI |
-| (ver `git log`) | docs: ETAPA 7 progress |
-
-## Próxima etapa
-**ETAPA 8 — Comprovantes** (interpretação/anexo de comprovantes no WhatsApp AI), sem ligar send / sem deploy, só em `ganoh/grok-whatsapp-ai`.
-
-## Bloqueio operacional persistente
-MCP GitHub Contents:write → **403**. Não tentar push/create remote branch até o usuário conceder permissão. Artefatos ficam locais em `/workspace/Ganoh1`.
+## Próxima
+**ETAPA 9** — relatórios / agendamento (respeitando `SCHEDULER_ENABLED=false` até liberação).
