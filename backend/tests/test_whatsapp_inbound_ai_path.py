@@ -75,7 +75,8 @@ def test_group_and_non_text_skipped(monkeypatch):
     assert decide_ai_path(text=None, message_type="image", is_group=False, send_enabled=False)["reason"] == "non_text"
 
 
-def test_financial_never_calls_model_on_inbound_path(monkeypatch):
+def test_financial_without_facts_on_inbound_sync_mirror(monkeypatch):
+    """Mirror uses sync chat_reply; without finance_facts → unavailable message, no OpenAI."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     wai.set_complete_override(lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no call")))
     out = decide_ai_path(
@@ -85,4 +86,4 @@ def test_financial_never_calls_model_on_inbound_path(monkeypatch):
         send_enabled=False,
     )
     assert out["status"] == "would_reply"
-    assert "ETAPA 7" in out["reply"] or "sistema" in out["reply"].lower()
+    assert out["reply"] == wai.MSG_FINANCIAL_UNAVAILABLE

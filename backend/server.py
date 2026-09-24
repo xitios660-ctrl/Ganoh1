@@ -21,6 +21,7 @@ import pytz
 import resend
 
 import whatsapp_ai
+import whatsapp_finance
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -5620,7 +5621,8 @@ async def _process_whatsapp_inbound_ai(
     push_name: Optional[str],
 ) -> dict:
     """
-    ETAPA 6: draft AI reply for 1:1 text. Never logs message bodies or keys.
+    ETAPA 6+7: draft AI reply for 1:1 text. Financial intents fetch read-only
+    Mongo facts before OpenAI formats the answer. Never logs message bodies or keys.
     Does not send unless WHATSAPP_SEND_ENABLED=true.
     """
     result = {
@@ -6733,6 +6735,7 @@ menu.set_dependencies(db, verify_gestor)
 stock.set_dependencies(db, verify_gestor)
 cash.set_dependencies(db, BRAZIL_TZ)
 live.set_dependencies(db, BRAZIL_TZ)
+whatsapp_finance.set_db(db)  # ETAPA 7: read-only finance tools for WhatsApp AI
 
 # Include routers - api_router must be LAST to ensure new routers take priority
 api_router.include_router(prazo.router)

@@ -63,19 +63,20 @@ def test_chat_reply_missing_key_safe_message():
     assert "OPENAI_API_KEY" in reply or "configurada" in reply.lower()
 
 
-def test_chat_reply_financial_stub_without_db(monkeypatch):
+def test_chat_reply_financial_without_facts_no_openai(monkeypatch):
+    """Sync path without pre-fetched facts must not call OpenAI or invent numbers."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     called = {"n": 0}
 
     def boom(*_a, **_k):
         called["n"] += 1
-        raise AssertionError("must not call OpenAI for financial stub")
+        raise AssertionError("must not call OpenAI without finance facts")
 
     wai.set_complete_override(boom)
     reply = wai.chat_reply("Qual o saldo do caixa de hoje?")
     assert called["n"] == 0
-    assert "ETAPA 7" in reply or "sistema" in reply.lower()
-    assert reply == wai.MSG_FINANCIAL_STUB
+    assert reply == wai.MSG_FINANCIAL_UNAVAILABLE
+    assert "invent" in reply.lower() or "números" in reply.lower() or "numeros" in reply.lower()
 
 
 def test_chat_reply_sensitive_stub(monkeypatch):
