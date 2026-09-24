@@ -80,7 +80,7 @@ class TestMenuDedup:
 # ============ AUTH ============
 class TestAuth:
     def test_login_with_new_password(self, http):
-        r = http.post(f"{API}/auth/login", json={"username": "gestor", "password": "Gan0h#G3st0r@2026"})
+        r = http.post(f"{API}/auth/login", json={"username": "gestor", "password": "test-only-value"})
         assert r.status_code == 200, r.text
         data = r.json()
         assert data.get("success") is True
@@ -88,7 +88,7 @@ class TestAuth:
         assert data.get("username") == "gestor"
 
     def test_login_with_old_password_rejected(self, http):
-        r = http.post(f"{API}/auth/login", json={"username": "gestor", "password": "ganoh2024"})
+        r = http.post(f"{API}/auth/login", json={"username": "gestor", "password": "test-only-value"})
         assert r.status_code == 401
 
     def test_accounts_endpoint_does_not_expose_usernames(self, http):

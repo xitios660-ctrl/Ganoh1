@@ -16,7 +16,7 @@ if not BASE_URL:
     raise ValueError("REACT_APP_BACKEND_URL environment variable not set")
 
 # Auth credentials
-AUTH = HTTPBasicAuth('gestor', 'ganoh2024')
+AUTH = HTTPBasicAuth('gestor', 'test-only-value')
 
 
 class TestPrazoStoresSeparation:

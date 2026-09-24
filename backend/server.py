@@ -33,12 +33,12 @@ WHATSAPP_PROVIDER = os.environ.get("WHATSAPP_PROVIDER", "greenapi").lower()
 BAILEYS_URL = "http://127.0.0.1:8002"
 BAILEYS_TOKEN = os.environ.get("WHATSAPP_INTERNAL_TOKEN", "")
 
-# Green API Configuration (Cloud WhatsApp)
-GREEN_API_URL = os.environ.get("GREEN_API_URL", "https://7107.api.greenapi.com")
-GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE", "7107550497")
-GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "ddbec57064a544909aecfbebe1e4d95faa1677ff39b04f68b2")
-WHATSAPP_GROUP_ID = os.environ.get("WHATSAPP_GROUP_ID", "120363424613813278@g.us")  # GYM Londres
-WHATSAPP_GROUP_RUNNER = os.environ.get("WHATSAPP_GROUP_RUNNER", "5511974449533-1572969909@g.us")  # Runner
+# Green API Configuration (Cloud WhatsApp) — no secret defaults; require env (fail closed).
+GREEN_API_URL = os.environ.get("GREEN_API_URL", "")
+GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE", "")
+GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "")
+WHATSAPP_GROUP_ID = os.environ.get("WHATSAPP_GROUP_ID", "")  # empty = no default JID
+WHATSAPP_GROUP_RUNNER = os.environ.get("WHATSAPP_GROUP_RUNNER", "")  # empty = no default JID
 
 # Map stores to their WhatsApp groups
 STORE_WHATSAPP_GROUPS = {
@@ -58,6 +58,8 @@ def get_green_api_url(method: str) -> str:
     """Build the selected provider URL (Baileys listens only on loopback)."""
     if WHATSAPP_PROVIDER == "baileys":
         return f"{BAILEYS_URL}/{method}"
+    if not (GREEN_API_URL and GREEN_API_INSTANCE and GREEN_API_TOKEN):
+        raise RuntimeError("Green API not configured (set GREEN_API_URL/INSTANCE/TOKEN)")
     return f"{GREEN_API_URL}/waInstance{GREEN_API_INSTANCE}/{method}/{GREEN_API_TOKEN}"
 
 def get_whatsapp_headers() -> dict:
@@ -74,6 +76,8 @@ async def verify_whatsapp_manager(credentials: HTTPBasicCredentials = Depends(se
 async def send_whatsapp_message(message: str, group_id: str = None) -> dict:
     """Send a text message via Green API"""
     target = group_id or WHATSAPP_GROUP_ID
+    if not target:
+        return {"success": False, "error": "WhatsApp group not configured"}
     try:
         async with httpx.AsyncClient(timeout=15.0) as client_http:
             response = await client_http.post(
@@ -230,8 +234,11 @@ async def ensure_default_tenant():
     """Create default Gestor tenant if it doesn't exist"""
     import hashlib
     existing = await db.tenants.find_one({"username": "gestor"})
-    # Allow override via env, otherwise use a strong default
-    default_password = os.environ.get('GESTOR_PASSWORD', 'Gan0h#G3st0r@2026')
+    # Require env; never fall back to a hard-coded password.
+    default_password = (os.environ.get('GESTOR_PASSWORD') or '').strip()
+    if not default_password:
+        logging.warning("GESTOR_PASSWORD not set; skipping default tenant create/sync")
+        return
     if not existing:
         password_hash = hashlib.sha256(default_password.encode()).hexdigest()
         await db.tenants.insert_one({
@@ -257,7 +264,7 @@ async def ensure_default_tenant():
 
 # Legacy support - will be replaced by tenant system
 GESTOR_USERNAME = os.environ.get('GESTOR_USERNAME', 'gestor')
-GESTOR_PASSWORD = os.environ.get('GESTOR_PASSWORD', 'Gan0h#G3st0r@2026')
+GESTOR_PASSWORD = os.environ.get('GESTOR_PASSWORD', '')  # required via env; empty = fail closed
 
 def verify_gestor(credentials: HTTPBasicCredentials = Depends(security)):
     # Trim whitespace and lowercase username to fix intermittent login bugs
@@ -266,6 +273,12 @@ def verify_gestor(credentials: HTTPBasicCredentials = Depends(security)):
     incoming_pass = (credentials.password or "").strip()
     expected_user = (GESTOR_USERNAME or "").strip().lower()
     expected_pass = (GESTOR_PASSWORD or "").strip()
+    if not expected_pass:
+        raise HTTPException(
+            status_code=503,
+            detail="GESTOR_PASSWORD not configured",
+            headers={"WWW-Authenticate": "Basic"},
+        )
     correct_username = secrets.compare_digest(incoming_user, expected_user)
     correct_password = secrets.compare_digest(incoming_pass, expected_pass)
     if not (correct_username and correct_password):
@@ -3326,7 +3339,13 @@ async def delete_adicional(adicional_id: str, username: str = Depends(verify_ges
 
 # ==================== PRAZO (CREDIT/TAB) MANAGEMENT ====================
 # Configurable via env var so the default can be rotated easily.
-PRAZO_PASSWORD = os.environ.get("PRAZO_PASSWORD", "1234")
+PRAZO_PASSWORD = os.environ.get("PRAZO_PASSWORD", "")  # required via env; empty = fail closed
+
+def _require_prazo_password(provided: str) -> None:
+    """Reject when env unset or password mismatch (fail closed on empty expected)."""
+    expected = (PRAZO_PASSWORD or "").strip()
+    if not expected or (provided or "").strip() != expected:
+        raise HTTPException(status_code=403, detail="Senha incorreta")
 
 class PrazoCustomerCreate(BaseModel):
     name: str
@@ -3571,8 +3590,7 @@ async def get_prazo_debts(store: Optional[str] = None):
 @api_router.post("/prazo/pay/{order_id}")
 async def pay_prazo_order(order_id: str, payment: PrazoPayment):
     """Mark a prazo order as paid (requires password)"""
-    if payment.password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(payment.password)
     
     result = await db.orders.update_one(
         {"id": order_id, "payment_method": "prazo"},
@@ -3587,8 +3605,7 @@ async def pay_prazo_order(order_id: str, payment: PrazoPayment):
 @api_router.post("/prazo/pay-all/{customer_name}")
 async def pay_all_prazo_customer(customer_name: str, payment: PrazoPayment):
     """Mark all prazo orders for a customer as paid (requires password)"""
-    if payment.password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(payment.password)
     
     # Get the store from the first unpaid order
     first_order = await db.orders.find_one(
@@ -3623,8 +3640,7 @@ async def pay_all_prazo_customer(customer_name: str, payment: PrazoPayment):
 @api_router.delete("/prazo/debt/{customer_name}")
 async def delete_prazo_debt(customer_name: str, password: str = None):
     """Delete/clear all prazo debts for a customer (marks as paid without recording payment)"""
-    if password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(password)
     
     # Mark all unpaid prazo orders for this customer as paid (zeroing the debt)
     result = await db.orders.update_many(
@@ -3672,8 +3688,7 @@ async def get_prazo_payments_history(store: str = None, limit: int = 100):
 @api_router.delete("/prazo/debt-order/{order_id}")
 async def delete_single_prazo_debt(order_id: str, password: str = None):
     """Delete/clear a single prazo debt order"""
-    if password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(password)
     
     result = await db.orders.update_one(
         {"id": order_id, "payment_method": "prazo", "prazo_paid": {"$ne": True}},
@@ -3876,8 +3891,7 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     If the customer has credit, it will be reduced by the payment amount.
     The partial payment is recorded as a payment applied to the oldest orders first.
     """
-    if abater_data.password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(abater_data.password)
     
     # Get unpaid prazo orders for this customer
     prazo_orders = await db.orders.find(
@@ -5435,7 +5449,12 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
     }
 
 # ==================== ADMIN CLEAR DATA ROUTE ====================
-CLEAR_DATA_PASSWORD = os.environ.get("CLEAR_DATA_PASSWORD", "152637")
+CLEAR_DATA_PASSWORD = os.environ.get("CLEAR_DATA_PASSWORD", "")  # required via env; empty = fail closed
+
+def _require_clear_data_password(provided: str) -> None:
+    expected = (CLEAR_DATA_PASSWORD or "").strip()
+    if not expected or (provided or "").strip() != expected:
+        raise HTTPException(status_code=403, detail="Senha incorreta")
 
 @api_router.post("/admin/clear-data")
 async def clear_all_data(
@@ -5443,8 +5462,7 @@ async def clear_all_data(
     username: str = Depends(verify_gestor),
 ):
     """Clear all orders, expenses, history, and related data. Protected with manager login and password."""
-    if password != CLEAR_DATA_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_clear_data_password(password)
     
     # Delete all orders
     await db.orders.delete_many({})
@@ -5470,8 +5488,7 @@ async def clear_store_data(
     username: str = Depends(verify_gestor),
 ):
     """Clear all data for a specific store. Protected with manager login and password."""
-    if password != CLEAR_DATA_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_clear_data_password(password)
     
     # Delete orders for this store
     result = await db.orders.delete_many({"store": store.value})

@@ -50,7 +50,7 @@ class TestVoucherPaymentMethod:
         """Test /api/gestor/dashboard returns 'voucher' in today.by_payment_method"""
         response = requests.get(
             f"{BASE_URL}/api/gestor/dashboard",
-            auth=("gestor", "ganoh2024")
+            auth=("gestor", "test-only-value")
         )
         assert response.status_code == 200
         
@@ -73,7 +73,7 @@ class TestVoucherPaymentMethod:
         """Test /api/gestor/dashboard returns 'prazo' in today.by_payment_method"""
         response = requests.get(
             f"{BASE_URL}/api/gestor/dashboard",
-            auth=("gestor", "ganoh2024")
+            auth=("gestor", "test-only-value")
         )
         assert response.status_code == 200
         
@@ -132,7 +132,7 @@ class TestVoucherPaymentMethod:
         """Test that all 6 payment methods are present in dashboard endpoint"""
         response = requests.get(
             f"{BASE_URL}/api/gestor/dashboard",
-            auth=("gestor", "ganoh2024")
+            auth=("gestor", "test-only-value")
         )
         assert response.status_code == 200
         

@@ -10,7 +10,7 @@ const STORES = [
   { id: 'gym-londres', name: 'GYM Londres' },
 ];
 
-const STAFF_PASSWORD = 'ganoh2025';
+const STAFF_PASSWORD = (process.env.REACT_APP_STAFF_PASSWORD || '').trim();
 const STAFF_SESSION_KEY = 'ganoh_staff_unlocked';
 
 /* Tela de acesso interno - separa Cozinha e Gestor em sessões distintas */
@@ -39,12 +39,12 @@ export const StaffAccessPage = () => {
 
   const handleUnlock = (e) => {
     e.preventDefault();
-    if (pwd.trim() === STAFF_PASSWORD) {
+    if (STAFF_PASSWORD && pwd.trim() === STAFF_PASSWORD) {
       try { sessionStorage.setItem(STAFF_SESSION_KEY, '1'); } catch {}
       setUnlocked(true);
       setPwdError('');
     } else {
-      setPwdError('Senha incorreta');
+      setPwdError(STAFF_PASSWORD ? 'Senha incorreta' : 'Acesso staff não configurado');
       setPwdShake(true);
       setTimeout(() => setPwdShake(false), 500);
     }

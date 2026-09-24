@@ -89,7 +89,7 @@ def test_lookup_accent_insensitive_paulao(session):
     created = session.post(
         f"{API}/prazo/customers",
         json=create_payload,
-        auth=("gestor", "ganoh2024"),
+        auth=("gestor", "test-only-value"),
         timeout=15,
     )
     assert created.status_code == 200, f"Create failed: {created.status_code} {created.text}"
@@ -114,7 +114,7 @@ def test_lookup_accent_insensitive_paulao(session):
         # Cleanup
         session.delete(
             f"{API}/prazo/customers/{customer_id}",
-            auth=("gestor", "ganoh2024"),
+            auth=("gestor", "test-only-value"),
             timeout=15,
         )
 

@@ -10,7 +10,7 @@ import requests
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://kitchen-order-system-6.preview.emergentagent.com").rstrip("/")
 API = f"{BASE_URL}/api"
 GESTOR_USER = "gestor"
-GESTOR_PASS = "ganoh2024"
+GESTOR_PASS = "test-only-value"
 
 
 @pytest.fixture(scope="module")
@@ -63,7 +63,7 @@ def test_auth_login_invalid(session):
 
 def test_auth_login_trim_whitespace(session):
     # mobile keyboards add a space sometimes; backend trims
-    r = session.post(f"{API}/auth/login", json={"username": "  Gestor  ", "password": " ganoh2024 "})
+    r = session.post(f"{API}/auth/login", json={"username": "  Gestor  ", "password": " test-only-value "})
     assert r.status_code == 200
 
 

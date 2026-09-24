@@ -48,7 +48,7 @@ def _pick_base_url() -> str:
 
 BASE_URL = _pick_base_url()
 GESTOR_USER = "gestor"
-GESTOR_PASS = "ganoh2024"
+GESTOR_PASS = "test-only-value"
 PRAZO_PASSWORD = "1234"
 TEST_CUSTOMER = f"TestUser_{uuid.uuid4().hex[:8]}"  # unique per run
 GESTOR_AUTH = HTTPBasicAuth(GESTOR_USER, GESTOR_PASS)

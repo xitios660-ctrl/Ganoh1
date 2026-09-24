@@ -16,7 +16,7 @@ import pytest
 BASE = os.environ.get("BASE_URL", "http://localhost:8001")
 API = f"{BASE}/api"
 KITCHEN_PWD = "1234"
-GESTOR = ("gestor", "ganoh2024")
+GESTOR = ("gestor", "test-only-value")
 STORE = "runner"
 
 TEST_TAG = uuid.uuid4().hex[:6]

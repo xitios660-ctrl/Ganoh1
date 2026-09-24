@@ -10,7 +10,7 @@ import requests
 import uuid
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://charts-3.preview.emergentagent.com").rstrip("/")
-AUTH = ("gestor", "ganoh2024")
+AUTH = ("gestor", "test-only-value")
 
 
 # -------------------- Categories (Pão Doce) --------------------

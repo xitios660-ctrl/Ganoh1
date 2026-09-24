@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 # Will be set by main app
 db = None
-PRAZO_PASSWORD = "1234"
+PRAZO_PASSWORD = ""  # set via set_dependencies from env; empty = fail closed
 send_whatsapp_message = None
 
 def set_dependencies(database, password, whatsapp_func=None):
@@ -20,6 +20,12 @@ def set_dependencies(database, password, whatsapp_func=None):
     db = database
     PRAZO_PASSWORD = password
     send_whatsapp_message = whatsapp_func
+
+
+def _require_prazo_password(provided: str) -> None:
+    expected = (PRAZO_PASSWORD or "").strip()
+    if not expected or (provided or "").strip() != expected:
+        raise HTTPException(status_code=403, detail="Senha incorreta")
 
 # ==================== MODELS ====================
 
@@ -476,8 +482,7 @@ async def get_prazo_debts(store: Optional[str] = None):
 @router.post("/pay/{order_id}")
 async def pay_prazo_order(order_id: str, payment: PrazoPayment):
     """Mark a prazo order as paid (requires password)"""
-    if payment.password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(payment.password)
     
     result = await db.orders.update_one(
         {"id": order_id, "payment_method": "prazo"},
@@ -492,8 +497,7 @@ async def pay_prazo_order(order_id: str, payment: PrazoPayment):
 @router.post("/pay-all/{customer_name}")
 async def pay_all_prazo_customer(customer_name: str, payment: PrazoPayment):
     """Mark all prazo orders for a customer as paid (requires password)"""
-    if payment.password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(payment.password)
     
     first_order = await db.orders.find_one(
         {"customer_name": customer_name, "payment_method": "prazo", "prazo_paid": {"$ne": True}},
@@ -538,8 +542,7 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     This reduces the total debt by the specified amount.
     If the customer has credit, it will be reduced by the payment amount.
     """
-    if abater_data.password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(abater_data.password)
     
     prazo_orders = await db.orders.find({
         "customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"},
@@ -670,8 +673,7 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
 @router.delete("/debt/{customer_name}")
 async def delete_prazo_debt(customer_name: str, password: str = None):
     """Delete/clear all prazo debts for a customer (marks as paid without recording payment)"""
-    if password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(password)
     
     result = await db.orders.update_many(
         {"customer_name": customer_name, "payment_method": "prazo", "prazo_paid": {"$ne": True}},
@@ -687,8 +689,7 @@ async def delete_prazo_debt(customer_name: str, password: str = None):
 @router.delete("/debt-order/{order_id}")
 async def delete_single_prazo_debt(order_id: str, password: str = None):
     """Delete/clear a single prazo debt order"""
-    if password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(password)
     
     result = await db.orders.update_one(
         {"id": order_id, "payment_method": "prazo", "prazo_paid": {"$ne": True}},
@@ -738,8 +739,7 @@ async def add_prazo_debt(customer_id: str, data: PrazoDebtAdjust):
     and logs the event in prazo_history.
     Requires PRAZO_PASSWORD.
     """
-    if data.password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(data.password)
     if data.amount is None or data.amount <= 0:
         raise HTTPException(status_code=400, detail="Valor inválido")
 
@@ -802,8 +802,7 @@ async def remove_prazo_debt(customer_id: str, data: PrazoDebtAdjust):
     Records the event in prazo_history.
     Requires PRAZO_PASSWORD.
     """
-    if data.password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(data.password)
     if data.amount is None or data.amount <= 0:
         raise HTTPException(status_code=400, detail="Valor inválido")
 

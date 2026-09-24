@@ -31,7 +31,7 @@ if not BASE_URL:
 
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "ganoh_db")
-AUTH = ("gestor", "ganoh2024")
+AUTH = ("gestor", "test-only-value")
 
 TEST_PREFIX = "TEST_PRAZO_CRED_"
 

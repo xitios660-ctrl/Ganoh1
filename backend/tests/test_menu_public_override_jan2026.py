@@ -31,7 +31,7 @@ def _load_backend_url():
     raise RuntimeError("REACT_APP_BACKEND_URL not configured")
 
 BASE_URL = _load_backend_url()
-AUTH = ("gestor", "ganoh2024")
+AUTH = ("gestor", "test-only-value")
 
 # Item 53 = Capuccino / Mocaccino default price 9.00
 # Item 54 = Chocolate Quente default price 9.00

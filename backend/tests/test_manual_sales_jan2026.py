@@ -11,7 +11,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://charts-3.preview.emergentagent.com").rstrip("/")
-AUTH = HTTPBasicAuth("gestor", "ganoh2024")
+AUTH = HTTPBasicAuth("gestor", "test-only-value")
 BAD_AUTH = HTTPBasicAuth("gestor", "wrong-password-xxx")
 
 

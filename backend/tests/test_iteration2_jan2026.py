@@ -11,7 +11,7 @@ BASE_URL = os.environ["REACT_APP_BACKEND_URL"].rstrip("/")
 API = f"{BASE_URL}/api"
 
 USER = "gestor"
-PWD = "Gan0h#G3st0r@2026"
+PWD = "test-only-value"
 AUTH = HTTPBasicAuth(USER, PWD)
 
 
@@ -125,7 +125,7 @@ class TestAdminEndpoints:
 # ============ REGRESSION (iteration 1 cases - smoke) ============
 class TestRegression:
     def test_old_password_rejected(self, http):
-        r = http.post(f"{API}/auth/login", json={"username": "gestor", "password": "ganoh2024"})
+        r = http.post(f"{API}/auth/login", json={"username": "gestor", "password": "test-only-value"})
         assert r.status_code == 401
 
     def test_new_password_works(self, http):
