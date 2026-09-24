@@ -10,12 +10,14 @@ router = APIRouter(prefix="/whatsapp", tags=["WhatsApp"])
 logger = logging.getLogger(__name__)
 
 # Green API Configuration
-GREEN_API_URL = os.environ.get("GREEN_API_URL", "https://7107.api.greenapi.com")
+GREEN_API_URL = os.environ.get("GREEN_API_URL", "")
 GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE", "")
 GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "")
 WHATSAPP_GROUP_ID = os.environ.get("WHATSAPP_GROUP_ID", "")
 
 def get_green_api_url(method: str) -> str:
+    if not (GREEN_API_URL and GREEN_API_INSTANCE and GREEN_API_TOKEN):
+        raise RuntimeError("Green API not configured (set GREEN_API_URL/INSTANCE/TOKEN)")
     return f"{GREEN_API_URL}/waInstance{GREEN_API_INSTANCE}/{method}/{GREEN_API_TOKEN}"
 
 # ==================== HELPER FUNCTIONS ====================

@@ -13,7 +13,7 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
-AUTH = ("gestor", "ganoh2024")
+AUTH = ("gestor", "test-only-value")
 
 # Track items created so we always clean up
 _created_item_ids: list[str] = []

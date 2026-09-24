@@ -46,10 +46,18 @@ async def get_tenant_by_id(tenant_id: str):
 
 def verify_gestor(credentials: HTTPBasicCredentials = Depends(security)):
     import os
+    import secrets
     GESTOR_USERNAME = os.environ.get("GESTOR_USERNAME", "gestor")
-    GESTOR_PASSWORD = os.environ.get("GESTOR_PASSWORD", "admin123")
-    
-    if credentials.username != GESTOR_USERNAME or credentials.password != GESTOR_PASSWORD:
+    GESTOR_PASSWORD = (os.environ.get("GESTOR_PASSWORD") or "").strip()
+    if not GESTOR_PASSWORD:
+        raise HTTPException(
+            status_code=503,
+            detail="GESTOR_PASSWORD not configured",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    user_ok = secrets.compare_digest((credentials.username or "").strip(), GESTOR_USERNAME)
+    pass_ok = secrets.compare_digest((credentials.password or "").strip(), GESTOR_PASSWORD)
+    if not (user_ok and pass_ok):
         raise HTTPException(
             status_code=401,
             detail="Credenciais inválidas",

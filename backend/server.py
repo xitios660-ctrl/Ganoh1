@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -20,6 +20,10 @@ from apscheduler.triggers.cron import CronTrigger
 import pytz
 import resend
 
+import whatsapp_ai
+import whatsapp_finance
+import whatsapp_comprovantes
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -33,12 +37,12 @@ WHATSAPP_PROVIDER = os.environ.get("WHATSAPP_PROVIDER", "greenapi").lower()
 BAILEYS_URL = "http://127.0.0.1:8002"
 BAILEYS_TOKEN = os.environ.get("WHATSAPP_INTERNAL_TOKEN", "")
 
-# Green API Configuration (Cloud WhatsApp)
-GREEN_API_URL = os.environ.get("GREEN_API_URL", "https://7107.api.greenapi.com")
-GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE", "7107550497")
-GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "ddbec57064a544909aecfbebe1e4d95faa1677ff39b04f68b2")
-WHATSAPP_GROUP_ID = os.environ.get("WHATSAPP_GROUP_ID", "120363424613813278@g.us")  # GYM Londres
-WHATSAPP_GROUP_RUNNER = os.environ.get("WHATSAPP_GROUP_RUNNER", "5511974449533-1572969909@g.us")  # Runner
+# Green API Configuration (Cloud WhatsApp) — no secret defaults; require env (fail closed).
+GREEN_API_URL = os.environ.get("GREEN_API_URL", "")
+GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE", "")
+GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "")
+WHATSAPP_GROUP_ID = os.environ.get("WHATSAPP_GROUP_ID", "")  # empty = no default JID
+WHATSAPP_GROUP_RUNNER = os.environ.get("WHATSAPP_GROUP_RUNNER", "")  # empty = no default JID
 
 # Map stores to their WhatsApp groups
 STORE_WHATSAPP_GROUPS = {
@@ -58,10 +62,23 @@ def get_green_api_url(method: str) -> str:
     """Build the selected provider URL (Baileys listens only on loopback)."""
     if WHATSAPP_PROVIDER == "baileys":
         return f"{BAILEYS_URL}/{method}"
+    if not (GREEN_API_URL and GREEN_API_INSTANCE and GREEN_API_TOKEN):
+        raise RuntimeError("Green API not configured (set GREEN_API_URL/INSTANCE/TOKEN)")
     return f"{GREEN_API_URL}/waInstance{GREEN_API_INSTANCE}/{method}/{GREEN_API_TOKEN}"
 
 def get_whatsapp_headers() -> dict:
     return {"x-whatsapp-token": BAILEYS_TOKEN} if WHATSAPP_PROVIDER == "baileys" else {}
+
+def verify_baileys_internal_token(x_whatsapp_token: Optional[str] = Header(default=None, alias="x-whatsapp-token")):
+    """Loopback Baileys sidecar auth — shared WHATSAPP_INTERNAL_TOKEN, timing-safe."""
+    expected = BAILEYS_TOKEN or ""
+    if len(expected) < 32:
+        raise HTTPException(status_code=503, detail="WhatsApp internal token not configured")
+    incoming = x_whatsapp_token or ""
+    if len(incoming) != len(expected) or not secrets.compare_digest(incoming, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return True
+
 
 async def verify_whatsapp_manager(credentials: HTTPBasicCredentials = Depends(security)):
     user = (credentials.username or "").strip().lower()
@@ -74,6 +91,8 @@ async def verify_whatsapp_manager(credentials: HTTPBasicCredentials = Depends(se
 async def send_whatsapp_message(message: str, group_id: str = None) -> dict:
     """Send a text message via Green API"""
     target = group_id or WHATSAPP_GROUP_ID
+    if not target:
+        return {"success": False, "error": "WhatsApp group not configured"}
     try:
         async with httpx.AsyncClient(timeout=15.0) as client_http:
             response = await client_http.post(
@@ -230,8 +249,11 @@ async def ensure_default_tenant():
     """Create default Gestor tenant if it doesn't exist"""
     import hashlib
     existing = await db.tenants.find_one({"username": "gestor"})
-    # Allow override via env, otherwise use a strong default
-    default_password = os.environ.get('GESTOR_PASSWORD', 'Gan0h#G3st0r@2026')
+    # Require env; never fall back to a hard-coded password.
+    default_password = (os.environ.get('GESTOR_PASSWORD') or '').strip()
+    if not default_password:
+        logging.warning("GESTOR_PASSWORD not set; skipping default tenant create/sync")
+        return
     if not existing:
         password_hash = hashlib.sha256(default_password.encode()).hexdigest()
         await db.tenants.insert_one({
@@ -257,7 +279,7 @@ async def ensure_default_tenant():
 
 # Legacy support - will be replaced by tenant system
 GESTOR_USERNAME = os.environ.get('GESTOR_USERNAME', 'gestor')
-GESTOR_PASSWORD = os.environ.get('GESTOR_PASSWORD', 'Gan0h#G3st0r@2026')
+GESTOR_PASSWORD = os.environ.get('GESTOR_PASSWORD', '')  # required via env; empty = fail closed
 
 def verify_gestor(credentials: HTTPBasicCredentials = Depends(security)):
     # Trim whitespace and lowercase username to fix intermittent login bugs
@@ -266,6 +288,12 @@ def verify_gestor(credentials: HTTPBasicCredentials = Depends(security)):
     incoming_pass = (credentials.password or "").strip()
     expected_user = (GESTOR_USERNAME or "").strip().lower()
     expected_pass = (GESTOR_PASSWORD or "").strip()
+    if not expected_pass:
+        raise HTTPException(
+            status_code=503,
+            detail="GESTOR_PASSWORD not configured",
+            headers={"WWW-Authenticate": "Basic"},
+        )
     correct_username = secrets.compare_digest(incoming_user, expected_user)
     correct_password = secrets.compare_digest(incoming_pass, expected_pass)
     if not (correct_username and correct_password):
@@ -973,7 +1001,10 @@ async def get_orders(store: StoreLocation, status: Optional[str] = None):
     # Auto-archive: ready orders older than 12 hours are considered stale and
     # should not pollute the operational kitchen view. They are moved to history
     # so they still appear under "Histórico" but disappear from the live screen.
-    if status == "ready":
+    # Must also run on the default kitchen poll (no status filter) used by KitchenPage;
+    # previously only ?status=ready archived, so top-bar stats (12h filter) disagreed
+    # with the Prontos list (all ready rows).
+    if status is None or status == "ready":
         stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
         stale_iso = stale_cutoff.isoformat()
         stale_query = {
@@ -2306,7 +2337,20 @@ async def get_gestor_dashboard(username: str = Depends(verify_gestor)):
     # Convert to UTC for database query
     today_utc = today_brazil.astimezone(pytz.UTC)
     month_start_utc = month_start_brazil.astimezone(pytz.UTC)
-    
+
+    # Cash-basis revenue (align with /gestor/chart/monthly and Gastos):
+    # exclude prazo orders; include ready/delivered/received; add PIX adj + prazo payments.
+    REVENUE_STATUSES = ("ready", "delivered", "received")
+
+    def _is_revenue_order(order):
+        return (
+            order.get("status") in REVENUE_STATUSES
+            and order.get("payment_method") != "prazo"
+        )
+
+    def _sum_amounts(docs, key="amount"):
+        return sum(float(d.get(key, 0) or 0) for d in docs)
+
     result = {"stores": {}}
     
     for store_key in STORES.keys():
@@ -2321,22 +2365,61 @@ async def get_gestor_dashboard(username: str = Depends(verify_gestor)):
             "store": store_key,
             "created_at": {"$gte": month_start_utc.isoformat()}
         }, {"_id": 0}).to_list(10000)
+
+        # PIX manual adjustments + prazo cash received (same sources as chart endpoints)
+        pix_query_base = {"removed": {"$ne": True}, "store": store_key}
+        prazo_query_base = {"store": store_key}
+        pix_today = await db.pix_adjustments.find(
+            {**pix_query_base, "created_at": {"$gte": today_utc.isoformat()}}, {"_id": 0}
+        ).to_list(10000)
+        pix_month = await db.pix_adjustments.find(
+            {**pix_query_base, "created_at": {"$gte": month_start_utc.isoformat()}}, {"_id": 0}
+        ).to_list(10000)
+        prazo_today_full = await db.prazo_payments.find(
+            {**prazo_query_base, "created_at": {"$gte": today_utc.isoformat()}}, {"_id": 0}
+        ).to_list(10000)
+        prazo_today_partial = await db.prazo_partial_payments.find(
+            {**prazo_query_base, "created_at": {"$gte": today_utc.isoformat()}}, {"_id": 0}
+        ).to_list(10000)
+        prazo_month_full = await db.prazo_payments.find(
+            {**prazo_query_base, "created_at": {"$gte": month_start_utc.isoformat()}}, {"_id": 0}
+        ).to_list(10000)
+        prazo_month_partial = await db.prazo_partial_payments.find(
+            {**prazo_query_base, "created_at": {"$gte": month_start_utc.isoformat()}}, {"_id": 0}
+        ).to_list(10000)
+
+        today_order_revenue = sum(o.get("total", 0) for o in today_orders if _is_revenue_order(o))
+        month_order_revenue = sum(o.get("total", 0) for o in month_orders if _is_revenue_order(o))
+        today_total = (
+            today_order_revenue
+            + _sum_amounts(pix_today)
+            + _sum_amounts(prazo_today_full)
+            + _sum_amounts(prazo_today_partial)
+        )
+        month_total = (
+            month_order_revenue
+            + _sum_amounts(pix_month)
+            + _sum_amounts(prazo_month_full)
+            + _sum_amounts(prazo_month_partial)
+        )
+        today_order_count = len([o for o in today_orders if _is_revenue_order(o)])
+        month_order_count = len([o for o in month_orders if _is_revenue_order(o)])
         
-        # Calculate totals - inclui pedidos prontos e entregues
-        today_total = sum(o.get("total", 0) for o in today_orders if o.get("status") in ["ready", "delivered"])
-        month_total = sum(o.get("total", 0) for o in month_orders if o.get("status") in ["ready", "delivered"])
-        
-        # By payment method (today)
+        # By payment method (today) — cash-basis (excl. unpaid prazo orders)
         today_by_payment = {"pix": 0, "debit": 0, "credit": 0, "cash": 0, "prazo": 0, "voucher": 0}
         for order in today_orders:
-            if order.get("status") in ["ready", "delivered"]:
+            if _is_revenue_order(order):
                 pm = order.get("payment_method", "cash")
                 today_by_payment[pm] = today_by_payment.get(pm, 0) + order.get("total", 0)
+        today_by_payment["pix"] = today_by_payment.get("pix", 0) + _sum_amounts(pix_today)
+        for payment in prazo_today_full + prazo_today_partial:
+            pm = payment.get("payment_method", "cash")
+            today_by_payment[pm] = today_by_payment.get(pm, 0) + payment.get("amount", 0)
         
-        # Product sales count
+        # Product sales count (same revenue statuses; prazo excluded from revenue products)
         product_sales = {}
         for order in month_orders:
-            if order.get("status") in ["ready", "delivered"]:
+            if order.get("status") in REVENUE_STATUSES:
                 for item in order.get("items", []):
                     name = item.get("name", "").split(" + ")[0]  # Remove adicionais from name
                     if name not in product_sales:
@@ -2359,12 +2442,12 @@ async def get_gestor_dashboard(username: str = Depends(verify_gestor)):
             "name": STORES[store_key]["name"],
             "today": {
                 "total": today_total,
-                "order_count": len([o for o in today_orders if o.get("status") in ["ready", "delivered"]]),
+                "order_count": today_order_count,
                 "by_payment_method": today_by_payment
             },
             "month": {
                 "total": month_total,
-                "order_count": len([o for o in month_orders if o.get("status") in ["ready", "delivered"]])
+                "order_count": month_order_count
             },
             "top_products": top_products,
             "low_products": low_products,
@@ -3326,7 +3409,13 @@ async def delete_adicional(adicional_id: str, username: str = Depends(verify_ges
 
 # ==================== PRAZO (CREDIT/TAB) MANAGEMENT ====================
 # Configurable via env var so the default can be rotated easily.
-PRAZO_PASSWORD = os.environ.get("PRAZO_PASSWORD", "1234")
+PRAZO_PASSWORD = os.environ.get("PRAZO_PASSWORD", "")  # required via env; empty = fail closed
+
+def _require_prazo_password(provided: str) -> None:
+    """Reject when env unset or password mismatch (fail closed on empty expected)."""
+    expected = (PRAZO_PASSWORD or "").strip()
+    if not expected or (provided or "").strip() != expected:
+        raise HTTPException(status_code=403, detail="Senha incorreta")
 
 class PrazoCustomerCreate(BaseModel):
     name: str
@@ -3571,8 +3660,7 @@ async def get_prazo_debts(store: Optional[str] = None):
 @api_router.post("/prazo/pay/{order_id}")
 async def pay_prazo_order(order_id: str, payment: PrazoPayment):
     """Mark a prazo order as paid (requires password)"""
-    if payment.password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(payment.password)
     
     result = await db.orders.update_one(
         {"id": order_id, "payment_method": "prazo"},
@@ -3587,8 +3675,7 @@ async def pay_prazo_order(order_id: str, payment: PrazoPayment):
 @api_router.post("/prazo/pay-all/{customer_name}")
 async def pay_all_prazo_customer(customer_name: str, payment: PrazoPayment):
     """Mark all prazo orders for a customer as paid (requires password)"""
-    if payment.password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(payment.password)
     
     # Get the store from the first unpaid order
     first_order = await db.orders.find_one(
@@ -3623,8 +3710,7 @@ async def pay_all_prazo_customer(customer_name: str, payment: PrazoPayment):
 @api_router.delete("/prazo/debt/{customer_name}")
 async def delete_prazo_debt(customer_name: str, password: str = None):
     """Delete/clear all prazo debts for a customer (marks as paid without recording payment)"""
-    if password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(password)
     
     # Mark all unpaid prazo orders for this customer as paid (zeroing the debt)
     result = await db.orders.update_many(
@@ -3672,8 +3758,7 @@ async def get_prazo_payments_history(store: str = None, limit: int = 100):
 @api_router.delete("/prazo/debt-order/{order_id}")
 async def delete_single_prazo_debt(order_id: str, password: str = None):
     """Delete/clear a single prazo debt order"""
-    if password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(password)
     
     result = await db.orders.update_one(
         {"id": order_id, "payment_method": "prazo", "prazo_paid": {"$ne": True}},
@@ -3876,8 +3961,7 @@ async def abater_prazo_debt(customer_name: str, abater_data: PrazoAbaterRequest)
     If the customer has credit, it will be reduced by the payment amount.
     The partial payment is recorded as a payment applied to the oldest orders first.
     """
-    if abater_data.password != PRAZO_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_prazo_password(abater_data.password)
     
     # Get unpaid prazo orders for this customer
     prazo_orders = await db.orders.find(
@@ -5090,32 +5174,35 @@ Obrigado! ☕"""
 async def get_monthly_chart_with_expenses(month: int = None, year: int = None, store: str = None, username: str = Depends(verify_gestor)):
     """Get daily sales AND expenses data for a specific month, optionally filtered by store.
     Revenue = order totals (excl. prazo) + PIX manual adjustments + prazo payments received.
+    Month bounds and day buckets use America/Sao_Paulo (aligned with /gestor/chart/monthly).
     """
-    now = datetime.now(timezone.utc)
-    
-    target_month = month if month else now.month
-    target_year = year if year else now.year
-    
-    month_start = datetime(target_year, target_month, 1, tzinfo=timezone.utc)
-    
+    brazil_tz = pytz.timezone('America/Sao_Paulo')
+    now_brazil = datetime.now(brazil_tz)
+
+    target_month = month if month else now_brazil.month
+    target_year = year if year else now_brazil.year
+
+    month_start_brazil = brazil_tz.localize(datetime(target_year, target_month, 1))
     if target_month == 12:
-        month_end = datetime(target_year + 1, 1, 1, tzinfo=timezone.utc)
+        month_end_brazil = brazil_tz.localize(datetime(target_year + 1, 1, 1))
     else:
-        month_end = datetime(target_year, target_month + 1, 1, tzinfo=timezone.utc)
-    
+        month_end_brazil = brazil_tz.localize(datetime(target_year, target_month + 1, 1))
+
+    month_start = month_start_brazil.astimezone(pytz.UTC)
+    month_end = month_end_brazil.astimezone(pytz.UTC)
+
     import calendar
     days_in_month = calendar.monthrange(target_year, target_month)[1]
-    
-    # Get all completed orders this month (filter by store if provided)
+
+    # Align status with /gestor/chart/monthly (no preparing — kitchen WIP is not closed revenue)
     orders_query = {
-        "status": {"$in": ["ready", "delivered", "received", "preparing"]},
+        "status": {"$in": ["ready", "delivered", "received"]},
         "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
     }
     if store and store != "all":
         orders_query["store"] = store
     orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "store": 1, "payment_method": 1}).to_list(10000)
-    
-    # Get all expenses this month (filter by store if provided)
+
     expenses_query = {
         "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
     }
@@ -5123,7 +5210,6 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
         expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
     expenses = await db.expenses.find(expenses_query, {"_id": 0}).to_list(1000)
 
-    # PIX manual adjustments (real revenue not represented as orders)
     pix_query = {
         "removed": {"$ne": True},
         "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
@@ -5132,7 +5218,6 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
         pix_query["store"] = store
     pix_adjustments = await db.pix_adjustments.find(pix_query, {"_id": 0}).to_list(10000)
 
-    # Prazo payments (cash actually received from customers paying their debt)
     prazo_query = {
         "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
     }
@@ -5141,43 +5226,49 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
     prazo_payments = await db.prazo_payments.find(prazo_query, {"_id": 0}).to_list(10000)
     prazo_partial_payments = await db.prazo_partial_payments.find(prazo_query, {"_id": 0}).to_list(10000)
     all_prazo_payments = prazo_payments + prazo_partial_payments
-    
-    # Group by day
+
     daily_data = {}
     for i in range(days_in_month):
-        day_date = month_start + timedelta(days=i)
+        day_date = month_start_brazil + timedelta(days=i)
         day_str = day_date.strftime("%Y-%m-%d")
         daily_data[day_str] = {
-            "date": day_str, 
-            "day": i + 1, 
-            "revenue": 0, 
+            "date": day_str,
+            "day": i + 1,
+            "revenue": 0,
             "expenses": 0,
             "profit": 0,
             "order_count": 0,
             "expenses_by_category": {}
         }
-    
+
+    def _brazil_day(iso_str):
+        try:
+            dt = datetime.fromisoformat((iso_str or "").replace("Z", "+00:00"))
+            return dt.astimezone(brazil_tz).strftime("%Y-%m-%d")
+        except Exception:
+            return (iso_str or "")[:10]
+
     for order in orders:
         # Skip prazo orders - they're not real revenue until paid
         if order.get("payment_method") == "prazo":
             continue
-        date = order.get("created_at", "")[:10]
+        date = _brazil_day(order.get("created_at", ""))
         if date in daily_data:
             daily_data[date]["revenue"] += order.get("total", 0)
             daily_data[date]["order_count"] += 1
 
     for adj in pix_adjustments:
-        date = adj.get("created_at", "")[:10]
+        date = _brazil_day(adj.get("created_at", ""))
         if date in daily_data:
             daily_data[date]["revenue"] += adj.get("amount", 0)
 
     for payment in all_prazo_payments:
-        date = payment.get("created_at", "")[:10]
+        date = _brazil_day(payment.get("created_at", ""))
         if date in daily_data:
             daily_data[date]["revenue"] += payment.get("amount", 0)
-    
+
     for exp in expenses:
-        date = exp.get("created_at", "")[:10]
+        date = _brazil_day(exp.get("created_at", ""))
         if date in daily_data:
             daily_data[date]["expenses"] += exp.get("amount", 0)
             cat = exp.get("category", "outros")
@@ -5218,26 +5309,32 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
 async def get_daily_chart_with_expenses(date: str = None, store: str = None, username: str = Depends(verify_gestor)):
     """Get hourly sales AND expenses data for a specific day, optionally filtered by store.
     Revenue = order totals (excl. prazo) + PIX manual adjustments + prazo payments received.
+    Day bounds and hour buckets use America/Sao_Paulo (aligned with /gestor/chart/daily).
     """
-    now = datetime.now(timezone.utc)
-    
+    brazil_tz = pytz.timezone('America/Sao_Paulo')
+    now_brazil = datetime.now(brazil_tz)
+
     if date:
-        target_date = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        try:
+            target_date = brazil_tz.localize(datetime.strptime(date, "%Y-%m-%d"))
+        except Exception:
+            target_date = now_brazil.replace(hour=0, minute=0, second=0, microsecond=0)
     else:
-        target_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    day_start = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
-    day_end = day_start + timedelta(days=1)
-    
-    # Get orders and expenses for this day (filter by store if provided)
+        target_date = now_brazil.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    day_start_brazil = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+    day_end_brazil = day_start_brazil + timedelta(days=1)
+    day_start = day_start_brazil.astimezone(pytz.UTC)
+    day_end = day_end_brazil.astimezone(pytz.UTC)
+
     orders_query = {
-        "status": {"$in": ["ready", "delivered", "received", "preparing"]},
+        "status": {"$in": ["ready", "delivered", "received"]},
         "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
     }
     if store and store != "all":
         orders_query["store"] = store
     orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "payment_method": 1}).to_list(10000)
-    
+
     expenses_query = {
         "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
     }
@@ -5245,7 +5342,6 @@ async def get_daily_chart_with_expenses(date: str = None, store: str = None, use
         expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
     expenses = await db.expenses.find(expenses_query, {"_id": 0}).to_list(1000)
 
-    # PIX manual adjustments + Prazo payments
     pix_query = {
         "removed": {"$ne": True},
         "created_at": {"$gte": day_start.isoformat(), "$lt": day_end.isoformat()}
@@ -5262,8 +5358,7 @@ async def get_daily_chart_with_expenses(date: str = None, store: str = None, use
     prazo_payments = await db.prazo_payments.find(prazo_query, {"_id": 0}).to_list(10000)
     prazo_partial_payments = await db.prazo_partial_payments.find(prazo_query, {"_id": 0}).to_list(10000)
     all_prazo_payments = prazo_payments + prazo_partial_payments
-    
-    # Group by hour
+
     hourly_data = {}
     for hour in range(24):
         hourly_data[hour] = {
@@ -5273,53 +5368,51 @@ async def get_daily_chart_with_expenses(date: str = None, store: str = None, use
             "profit": 0,
             "order_count": 0
         }
-    
+
+    def _brazil_hour(iso_str):
+        try:
+            dt = datetime.fromisoformat((iso_str or "").replace("Z", "+00:00"))
+            return dt.astimezone(brazil_tz).hour
+        except Exception:
+            return None
+
     for order in orders:
-        # Skip prazo orders - they're not real revenue until paid
         if order.get("payment_method") == "prazo":
             continue
-        try:
-            order_time = datetime.fromisoformat(order.get("created_at", "").replace("Z", "+00:00"))
-            brazil_hour = (order_time.hour - 3) % 24
-            hourly_data[brazil_hour]["revenue"] += order.get("total", 0)
-            hourly_data[brazil_hour]["order_count"] += 1
-        except:
-            pass
+        brazil_hour = _brazil_hour(order.get("created_at", ""))
+        if brazil_hour is None:
+            continue
+        hourly_data[brazil_hour]["revenue"] += order.get("total", 0)
+        hourly_data[brazil_hour]["order_count"] += 1
 
     for adj in pix_adjustments:
-        try:
-            adj_time = datetime.fromisoformat(adj.get("created_at", "").replace("Z", "+00:00"))
-            brazil_hour = (adj_time.hour - 3) % 24
-            hourly_data[brazil_hour]["revenue"] += adj.get("amount", 0)
-        except:
-            pass
+        brazil_hour = _brazil_hour(adj.get("created_at", ""))
+        if brazil_hour is None:
+            continue
+        hourly_data[brazil_hour]["revenue"] += adj.get("amount", 0)
 
     for payment in all_prazo_payments:
-        try:
-            p_time = datetime.fromisoformat(payment.get("created_at", "").replace("Z", "+00:00"))
-            brazil_hour = (p_time.hour - 3) % 24
-            hourly_data[brazil_hour]["revenue"] += payment.get("amount", 0)
-        except:
-            pass
-    
+        brazil_hour = _brazil_hour(payment.get("created_at", ""))
+        if brazil_hour is None:
+            continue
+        hourly_data[brazil_hour]["revenue"] += payment.get("amount", 0)
+
     for exp in expenses:
-        try:
-            exp_time = datetime.fromisoformat(exp.get("created_at", "").replace("Z", "+00:00"))
-            brazil_hour = (exp_time.hour - 3) % 24
-            hourly_data[brazil_hour]["expenses"] += exp.get("amount", 0)
-        except:
-            pass
-    
+        brazil_hour = _brazil_hour(exp.get("created_at", ""))
+        if brazil_hour is None:
+            continue
+        hourly_data[brazil_hour]["expenses"] += exp.get("amount", 0)
+
     for h in hourly_data.values():
         h["profit"] = h["revenue"] - h["expenses"]
-    
+
     chart_data = sorted(hourly_data.values(), key=lambda x: x["hour"])
-    
+
     total_revenue = sum(d["revenue"] for d in chart_data)
     total_expenses = sum(d["expenses"] for d in chart_data)
-    
+
     return {
-        "date": target_date.strftime("%d/%m/%Y"),
+        "date": day_start_brazil.strftime("%d/%m/%Y"),
         "period": "day",
         "data": chart_data,
         "total_revenue": total_revenue,
@@ -5332,21 +5425,25 @@ async def get_daily_chart_with_expenses(date: str = None, store: str = None, use
 async def get_yearly_chart_with_expenses(year: int = None, store: str = None, username: str = Depends(verify_gestor)):
     """Get monthly sales AND expenses data for a specific year, optionally filtered by store.
     Revenue = order totals (excl. prazo) + PIX manual adjustments + prazo payments received.
+    Year bounds and month buckets use America/Sao_Paulo (aligned with /gestor/chart/yearly).
     """
-    now = datetime.now(timezone.utc)
-    target_year = year if year else now.year
-    
-    year_start = datetime(target_year, 1, 1, tzinfo=timezone.utc)
-    year_end = datetime(target_year + 1, 1, 1, tzinfo=timezone.utc)
-    
+    brazil_tz = pytz.timezone('America/Sao_Paulo')
+    now_brazil = datetime.now(brazil_tz)
+    target_year = year if year else now_brazil.year
+
+    year_start_brazil = brazil_tz.localize(datetime(target_year, 1, 1))
+    year_end_brazil = brazil_tz.localize(datetime(target_year + 1, 1, 1))
+    year_start = year_start_brazil.astimezone(pytz.UTC)
+    year_end = year_end_brazil.astimezone(pytz.UTC)
+
     orders_query = {
-        "status": {"$in": ["ready", "delivered", "received", "preparing"]},
+        "status": {"$in": ["ready", "delivered", "received"]},
         "created_at": {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
     }
     if store and store != "all":
         orders_query["store"] = store
     orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "payment_method": 1}).to_list(100000)
-    
+
     expenses_query = {
         "created_at": {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
     }
@@ -5354,7 +5451,6 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
         expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
     expenses = await db.expenses.find(expenses_query, {"_id": 0}).to_list(10000)
 
-    # PIX manual adjustments + Prazo payments
     pix_query = {
         "removed": {"$ne": True},
         "created_at": {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
@@ -5371,7 +5467,7 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
     prazo_payments = await db.prazo_payments.find(prazo_query, {"_id": 0}).to_list(100000)
     prazo_partial_payments = await db.prazo_partial_payments.find(prazo_query, {"_id": 0}).to_list(100000)
     all_prazo_payments = prazo_payments + prazo_partial_payments
-    
+
     month_names = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
     monthly_data = {}
     for m in range(1, 13):
@@ -5383,47 +5479,49 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
             "profit": 0,
             "order_count": 0
         }
-    
+
+    def _brazil_month(iso_str):
+        try:
+            dt = datetime.fromisoformat((iso_str or "").replace("Z", "+00:00"))
+            return dt.astimezone(brazil_tz).month
+        except Exception:
+            return None
+
     for order in orders:
-        # Skip prazo orders - they're not real revenue until paid
         if order.get("payment_method") == "prazo":
             continue
-        try:
-            order_date = datetime.fromisoformat(order.get("created_at", "").replace("Z", "+00:00"))
-            monthly_data[order_date.month]["revenue"] += order.get("total", 0)
-            monthly_data[order_date.month]["order_count"] += 1
-        except:
-            pass
+        month = _brazil_month(order.get("created_at", ""))
+        if month is None:
+            continue
+        monthly_data[month]["revenue"] += order.get("total", 0)
+        monthly_data[month]["order_count"] += 1
 
     for adj in pix_adjustments:
-        try:
-            adj_date = datetime.fromisoformat(adj.get("created_at", "").replace("Z", "+00:00"))
-            monthly_data[adj_date.month]["revenue"] += adj.get("amount", 0)
-        except:
-            pass
+        month = _brazil_month(adj.get("created_at", ""))
+        if month is None:
+            continue
+        monthly_data[month]["revenue"] += adj.get("amount", 0)
 
     for payment in all_prazo_payments:
-        try:
-            p_date = datetime.fromisoformat(payment.get("created_at", "").replace("Z", "+00:00"))
-            monthly_data[p_date.month]["revenue"] += payment.get("amount", 0)
-        except:
-            pass
-    
+        month = _brazil_month(payment.get("created_at", ""))
+        if month is None:
+            continue
+        monthly_data[month]["revenue"] += payment.get("amount", 0)
+
     for exp in expenses:
-        try:
-            exp_date = datetime.fromisoformat(exp.get("created_at", "").replace("Z", "+00:00"))
-            monthly_data[exp_date.month]["expenses"] += exp.get("amount", 0)
-        except:
-            pass
-    
+        month = _brazil_month(exp.get("created_at", ""))
+        if month is None:
+            continue
+        monthly_data[month]["expenses"] += exp.get("amount", 0)
+
     for m in monthly_data.values():
         m["profit"] = m["revenue"] - m["expenses"]
-    
-    chart_data = sorted(monthly_data.values(), key=lambda x: x["month"])
-    
+
+    chart_data = [monthly_data[m] for m in range(1, 13)]
+
     total_revenue = sum(d["revenue"] for d in chart_data)
     total_expenses = sum(d["expenses"] for d in chart_data)
-    
+
     return {
         "year": target_year,
         "period": "year",
@@ -5434,17 +5532,13 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
         "total_orders": sum(d["order_count"] for d in chart_data)
     }
 
-# ==================== ADMIN CLEAR DATA ROUTE ====================
-CLEAR_DATA_PASSWORD = os.environ.get("CLEAR_DATA_PASSWORD", "152637")
-
 @api_router.post("/admin/clear-data")
 async def clear_all_data(
     password: str,
     username: str = Depends(verify_gestor),
 ):
     """Clear all orders, expenses, history, and related data. Protected with manager login and password."""
-    if password != CLEAR_DATA_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_clear_data_password(password)
     
     # Delete all orders
     await db.orders.delete_many({})
@@ -5470,8 +5564,7 @@ async def clear_store_data(
     username: str = Depends(verify_gestor),
 ):
     """Clear all data for a specific store. Protected with manager login and password."""
-    if password != CLEAR_DATA_PASSWORD:
-        raise HTTPException(status_code=403, detail="Senha incorreta")
+    _require_clear_data_password(password)
     
     # Delete orders for this store
     result = await db.orders.delete_many({"store": store.value})
@@ -5490,6 +5583,442 @@ async def clear_store_data(
 
 # ==================== WHATSAPP PROVIDER PROXY ====================
 
+class WhatsAppInboundEvent(BaseModel):
+    """Safe inbound payload from Baileys sidecar (ETAPA 4). No financial mutations."""
+    messageId: str
+    remoteJid: str
+    participant: Optional[str] = None
+    isGroup: bool = False
+    fromMe: bool = False
+    pushName: Optional[str] = None
+    messageType: str = "unknown"
+    text: Optional[str] = None
+    hasMedia: bool = False
+    mediaMime: Optional[str] = None
+    mediaCaption: Optional[str] = None
+    mediaFileName: Optional[str] = None
+    comprovanteStub: Optional[dict] = None
+    messageTimestamp: Optional[str] = None
+    receivedAt: Optional[str] = None
+    provider: str = "baileys"
+
+
+@api_router.post("/whatsapp/inbound", dependencies=[Depends(verify_baileys_internal_token)])
+async def receive_whatsapp_inbound(event: WhatsAppInboundEvent):
+    """
+    Accept inbound WhatsApp events from the Baileys sidecar.
+    Persist + optional AI reply draft (ETAPA 6). No financial writes.
+    Respects WHATSAPP_SEND_ENABLED (default off — compute/would_reply only).
+    """
+    message_id = (event.messageId or "").strip()
+    remote_jid = (event.remoteJid or "").strip()
+    if not message_id or not remote_jid:
+        raise HTTPException(status_code=400, detail="messageId and remoteJid required")
+    if event.fromMe:
+        return {"success": True, "skipped": True, "reason": "fromMe"}
+
+    # Bound retention fields; never trust text/media for money movement here.
+    text = event.text[:4000] if isinstance(event.text, str) else None
+    caption = event.mediaCaption[:1000] if isinstance(event.mediaCaption, str) else None
+    now_iso = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "messageId": message_id,
+        "remoteJid": remote_jid,
+        "participant": event.participant,
+        "isGroup": bool(event.isGroup),
+        "pushName": (event.pushName or "")[:120] or None,
+        "messageType": (event.messageType or "unknown")[:40],
+        "text": text,
+        "hasMedia": bool(event.hasMedia),
+        "mediaMime": (event.mediaMime or None),
+        "mediaCaption": caption,
+        "mediaFileName": (event.mediaFileName or None),
+        "comprovanteStub": event.comprovanteStub if isinstance(event.comprovanteStub, dict) else None,
+        "messageTimestamp": event.messageTimestamp,
+        "receivedAt": event.receivedAt or now_iso,
+        "provider": "baileys",
+        "source": "baileys_webhook",
+        "processed": False,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "aiProcessed": False,
+        "aiStatus": None,
+        "aiSendAttempted": False,
+        "aiSendSkippedReason": None,
+        "aiReplyLen": None,
+    }
+    try:
+        await db.whatsapp_inbound.update_one(
+            {"messageId": message_id},
+            {"$setOnInsert": doc},
+            upsert=True,
+        )
+    except Exception:
+        logging.exception("whatsapp inbound persist failed")
+        raise HTTPException(status_code=500, detail="Failed to persist inbound event")
+
+    comprovante_result = None
+    stub = event.comprovanteStub if isinstance(event.comprovanteStub, dict) else None
+    is_comprovante_media = bool(stub) or (
+        bool(event.hasMedia)
+        and (event.messageType or "") in ("image", "document")
+    )
+    if is_comprovante_media and not event.isGroup:
+        try:
+            comprovante_result = await whatsapp_comprovantes.create_pending_from_inbound(
+                message_id=message_id,
+                remote_jid=remote_jid,
+                push_name=(event.pushName or "")[:120] or None,
+                media_mime=event.mediaMime,
+                media_caption=caption,
+                media_file_name=event.mediaFileName,
+                message_type=(event.messageType or "unknown"),
+                comprovante_stub=stub,
+            )
+            await db.whatsapp_inbound.update_one(
+                {"messageId": message_id},
+                {
+                    "$set": {
+                        "comprovanteId": (comprovante_result.get("record") or {}).get("id"),
+                        "comprovanteStatus": (comprovante_result.get("record") or {}).get("status"),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                },
+            )
+        except Exception:
+            logging.warning("whatsapp comprovante pending create failed messageId=%s", message_id)
+            comprovante_result = {"created": False, "error": "create_failed"}
+
+    ai_result = await _process_whatsapp_inbound_ai(
+        message_id=message_id,
+        remote_jid=remote_jid,
+        text=text,
+        message_type=(event.messageType or "unknown"),
+        is_group=bool(event.isGroup),
+        push_name=(event.pushName or "")[:120] or None,
+    )
+    return {
+        "success": True,
+        "messageId": message_id,
+        "stored": True,
+        "ai": ai_result,
+        "comprovante": (
+            {
+                "created": bool((comprovante_result or {}).get("created")),
+                "id": ((comprovante_result or {}).get("record") or {}).get("id"),
+                "status": ((comprovante_result or {}).get("record") or {}).get("status"),
+            }
+            if comprovante_result is not None
+            else None
+        ),
+    }
+
+
+async def _process_whatsapp_inbound_ai(
+    *,
+    message_id: str,
+    remote_jid: str,
+    text: Optional[str],
+    message_type: str,
+    is_group: bool,
+    push_name: Optional[str],
+) -> dict:
+    """
+    ETAPA 6+7: draft AI reply for 1:1 text. Financial intents fetch read-only
+    Mongo facts before OpenAI formats the answer. Never logs message bodies or keys.
+    Does not send unless WHATSAPP_SEND_ENABLED=true.
+    """
+    result = {
+        "processed": False,
+        "status": "skipped",
+        "reason": None,
+        "sendAttempted": False,
+    }
+    if is_group:
+        result["reason"] = "group_skip"
+        await _patch_inbound_ai(message_id, result)
+        return result
+    if message_type != "text" or not text:
+        result["reason"] = "non_text"
+        await _patch_inbound_ai(message_id, result)
+        return result
+    if not whatsapp_ai.is_openai_ready():
+        result["status"] = "unavailable"
+        result["reason"] = "openai_not_configured"
+        await _patch_inbound_ai(message_id, result)
+        return result
+
+    try:
+        reply = await whatsapp_ai.achat_reply(
+            text,
+            context={"isGroup": False, "pushName": push_name, "remoteJid": remote_jid},
+        )
+    except Exception:
+        logging.warning("whatsapp ai reply failed messageId=%s", message_id)
+        result["status"] = "error"
+        result["reason"] = "ai_error"
+        await _patch_inbound_ai(message_id, result)
+        return result
+
+    reply = (reply or "")[:2000]
+    result["processed"] = True
+    result["replyLen"] = len(reply)
+    send_enabled = (os.environ.get("WHATSAPP_SEND_ENABLED") or "").strip().lower() == "true"
+    if not send_enabled:
+        result["status"] = "would_reply"
+        result["reason"] = "WHATSAPP_SEND_ENABLED_off"
+        await _patch_inbound_ai(message_id, result, reply=reply)
+        logging.info(
+            "whatsapp ai would_reply messageId=%s replyLen=%s send=off",
+            message_id,
+            len(reply),
+        )
+        return result
+
+    result["sendAttempted"] = True
+    try:
+        send_result = await send_whatsapp_message(reply, group_id=remote_jid)
+        if send_result.get("success"):
+            result["status"] = "replied"
+            result["reason"] = None
+        else:
+            result["status"] = "send_failed"
+            result["reason"] = "send_failed"
+    except Exception:
+        logging.warning("whatsapp ai send failed messageId=%s", message_id)
+        result["status"] = "send_failed"
+        result["reason"] = "send_exception"
+    await _patch_inbound_ai(message_id, result, reply=reply)
+    return result
+
+
+async def _patch_inbound_ai(message_id: str, result: dict, reply: Optional[str] = None) -> None:
+    patch = {
+        "aiProcessed": bool(result.get("processed")),
+        "aiStatus": result.get("status"),
+        "aiSendAttempted": bool(result.get("sendAttempted")),
+        "aiSendSkippedReason": result.get("reason"),
+        "aiReplyLen": result.get("replyLen"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "processed": bool(result.get("processed")),
+    }
+    # Store draft reply only when computed; list endpoints must not project this field.
+    if reply is not None:
+        patch["aiReplyDraft"] = reply
+    try:
+        await db.whatsapp_inbound.update_one({"messageId": message_id}, {"$set": patch})
+    except Exception:
+        logging.warning("whatsapp inbound ai patch failed messageId=%s", message_id)
+
+
+
+class WhatsAppComprovanteMediaIn(BaseModel):
+    """Baileys sidecar media upload (ETAPA 8). Base64 image only, size-capped in module."""
+    messageId: str
+    mediaBase64: str
+    mediaMime: Optional[str] = None
+
+
+class WhatsAppComprovanteAction(BaseModel):
+    note: Optional[str] = None
+    linkedOrderId: Optional[str] = None
+    correctedAmount: Optional[float] = None
+
+
+@api_router.post("/whatsapp/inbound/media", dependencies=[Depends(verify_baileys_internal_token)])
+async def receive_whatsapp_inbound_media(payload: WhatsAppComprovanteMediaIn):
+    """
+    Accept size-capped image bytes from Baileys for a comprovante candidate.
+    Never logs binary. Does not auto-confirm payment.
+    """
+    message_id = (payload.messageId or "").strip()
+    if not message_id:
+        raise HTTPException(status_code=400, detail="messageId required")
+
+    inbound = await db.whatsapp_inbound.find_one(
+        {"messageId": message_id},
+        {
+            "_id": 0,
+            "remoteJid": 1,
+            "pushName": 1,
+            "mediaMime": 1,
+            "mediaCaption": 1,
+            "mediaFileName": 1,
+            "messageType": 1,
+            "comprovanteStub": 1,
+        },
+    )
+    existing = await whatsapp_comprovantes.get_one_by_message_id(message_id)
+    if not existing:
+        if not inbound or not inbound.get("remoteJid"):
+            raise HTTPException(status_code=404, detail="inbound_not_found")
+        try:
+            await whatsapp_comprovantes.create_pending_from_inbound(
+                message_id=message_id,
+                remote_jid=inbound["remoteJid"],
+                push_name=inbound.get("pushName"),
+                media_mime=payload.mediaMime or inbound.get("mediaMime"),
+                media_caption=inbound.get("mediaCaption"),
+                media_file_name=inbound.get("mediaFileName"),
+                message_type=inbound.get("messageType") or "image",
+                comprovante_stub=inbound.get("comprovanteStub")
+                or {"awaitingDownload": False, "purpose": "comprovante_candidate"},
+            )
+        except Exception:
+            logging.warning("comprovante ensure pending failed messageId=%s", message_id)
+            raise HTTPException(status_code=500, detail="ensure_pending_failed")
+
+    result = await whatsapp_comprovantes.attach_media(
+        message_id=message_id,
+        media_base64=payload.mediaBase64,
+        media_mime=payload.mediaMime,
+    )
+    if not result.get("ok"):
+        err = result.get("error") or "attach_failed"
+        code = 404 if err == "comprovante_not_found" else 400
+        raise HTTPException(status_code=code, detail=err)
+
+    record = result.get("record") or {}
+    cid = record.get("id")
+    if cid:
+        try:
+            extracted = await whatsapp_comprovantes.run_extraction(comprovante_id=cid)
+            if extracted.get("ok") and extracted.get("record"):
+                record = extracted["record"]
+        except Exception:
+            logging.warning("comprovante extraction skipped messageId=%s", message_id)
+
+    send_enabled = (os.environ.get("WHATSAPP_SEND_ENABLED") or "").strip().lower() == "true"
+    ack = whatsapp_comprovantes.ack_message_for_inbound(send_enabled=send_enabled)
+    if send_enabled and ack.get("reply") and inbound and inbound.get("remoteJid"):
+        try:
+            await send_whatsapp_message(ack["reply"], group_id=inbound["remoteJid"])
+        except Exception:
+            logging.warning("comprovante ack send failed messageId=%s", message_id)
+            ack["status"] = "send_failed"
+
+    return {
+        "success": True,
+        "messageId": message_id,
+        "comprovanteId": cid,
+        "status": record.get("status"),
+        "ack": {
+            "status": ack.get("status"),
+            "reason": ack.get("reason"),
+            "sendAttempted": bool(ack.get("sendAttempted")),
+        },
+    }
+
+
+@api_router.get("/whatsapp/comprovantes", dependencies=[Depends(verify_whatsapp_manager)])
+async def list_whatsapp_comprovantes(status: Optional[str] = None, limit: int = 50):
+    """Gestor list of comprovante candidates (no media bytes)."""
+    items = await whatsapp_comprovantes.list_pending(status=status, limit=limit)
+    return {"count": len(items), "items": items}
+
+
+@api_router.get("/whatsapp/comprovantes/{comprovante_id}", dependencies=[Depends(verify_whatsapp_manager)])
+async def get_whatsapp_comprovante(comprovante_id: str):
+    row = await whatsapp_comprovantes.get_one(comprovante_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="not_found")
+    return row
+
+
+@api_router.post("/whatsapp/comprovantes/{comprovante_id}/confirm", dependencies=[Depends(verify_whatsapp_manager)])
+async def confirm_whatsapp_comprovante(comprovante_id: str, body: Optional[WhatsAppComprovanteAction] = None):
+    """
+    Gestor confirm — audit + review only; does NOT auto-apply money.
+    Use existing PIX/prazo UI to register the payment.
+    """
+    body = body or WhatsAppComprovanteAction()
+    result = await whatsapp_comprovantes.confirm(
+        comprovante_id=comprovante_id,
+        actor="gestor",
+        linked_order_id=body.linkedOrderId,
+        note=body.note,
+        as_corrected=False,
+    )
+    if not result.get("ok"):
+        err = result.get("error") or "confirm_failed"
+        code = 404 if err == "not_found" else 409
+        raise HTTPException(status_code=code, detail=err)
+    return result
+
+
+@api_router.post("/whatsapp/comprovantes/{comprovante_id}/correct", dependencies=[Depends(verify_whatsapp_manager)])
+async def correct_whatsapp_comprovante(comprovante_id: str, body: Optional[WhatsAppComprovanteAction] = None):
+    body = body or WhatsAppComprovanteAction()
+    result = await whatsapp_comprovantes.confirm(
+        comprovante_id=comprovante_id,
+        actor="gestor",
+        linked_order_id=body.linkedOrderId,
+        note=body.note,
+        corrected_amount=body.correctedAmount,
+        as_corrected=True,
+    )
+    if not result.get("ok"):
+        err = result.get("error") or "correct_failed"
+        code = 404 if err == "not_found" else 409
+        raise HTTPException(status_code=code, detail=err)
+    return result
+
+
+@api_router.post("/whatsapp/comprovantes/{comprovante_id}/refuse", dependencies=[Depends(verify_whatsapp_manager)])
+async def refuse_whatsapp_comprovante(comprovante_id: str, body: Optional[WhatsAppComprovanteAction] = None):
+    body = body or WhatsAppComprovanteAction()
+    result = await whatsapp_comprovantes.refuse(
+        comprovante_id=comprovante_id,
+        actor="gestor",
+        note=body.note,
+    )
+    if not result.get("ok"):
+        err = result.get("error") or "refuse_failed"
+        code = 404 if err == "not_found" else 409
+        raise HTTPException(status_code=code, detail=err)
+    return result
+
+
+@api_router.post("/whatsapp/comprovantes/{comprovante_id}/extract", dependencies=[Depends(verify_whatsapp_manager)])
+async def extract_whatsapp_comprovante(comprovante_id: str):
+    """Re-run AI extraction + Mongo match suggestions (no payment mutation)."""
+    result = await whatsapp_comprovantes.run_extraction(comprovante_id=comprovante_id)
+    if not result.get("ok"):
+        err = result.get("error") or "extract_failed"
+        code = 404 if err == "not_found" else 400
+        raise HTTPException(status_code=code, detail=err)
+    return result
+
+
+@api_router.get("/whatsapp/inbound", dependencies=[Depends(verify_whatsapp_manager)])
+async def list_whatsapp_inbound(limit: int = 20):
+    """Gestor peek at recent inbound events (metadata; bodies omitted from list)."""
+    limit = max(1, min(100, int(limit or 20)))
+    rows = await db.whatsapp_inbound.find(
+        {},
+        {
+            "_id": 0,
+            "messageId": 1,
+            "remoteJid": 1,
+            "participant": 1,
+            "isGroup": 1,
+            "messageType": 1,
+            "hasMedia": 1,
+            "mediaMime": 1,
+            "pushName": 1,
+            "messageTimestamp": 1,
+            "receivedAt": 1,
+            "processed": 1,
+            "aiProcessed": 1,
+            "aiStatus": 1,
+            "aiReplyLen": 1,
+            "comprovanteStub": 1,
+            "provider": 1,
+        },
+    ).sort("receivedAt", -1).to_list(limit)
+    return {"count": len(rows), "items": rows}
+
+
 @api_router.post("/whatsapp/connect", dependencies=[Depends(verify_whatsapp_manager)])
 async def connect_whatsapp():
     if WHATSAPP_PROVIDER != "baileys":
@@ -5503,25 +6032,78 @@ async def connect_whatsapp():
         raise HTTPException(status_code=503, detail="Serviço do WhatsApp indisponível")
 
 
+def _safe_whatsapp_error_message(raw: Optional[str]) -> Optional[str]:
+    """UI-safe error text: short, no secrets/URLs with credentials."""
+    if not raw:
+        return None
+    text = str(raw).strip().replace("\n", " ").replace("\r", " ")[:160]
+    lowered = text.lower()
+    if any(token in lowered for token in ("mongo", "password", "token", "secret", "bearer", "authorization", "api_key", "apikey")):
+        return "Falha interna do serviço WhatsApp"
+    return text or None
+
+
 @api_router.get("/whatsapp/status", dependencies=[Depends(verify_whatsapp_manager)])
 async def get_whatsapp_status():
-    """Get WhatsApp status via Green API"""
+    """Get WhatsApp connection status (Baileys or Green API) for Gestor UI."""
+    ai_configured = whatsapp_ai.is_configured()
+    ai_status = whatsapp_ai.get_ai_status()
+    report_schedule = ["14:00", "22:00"]
+    last_report_at = None
+    try:
+        report_setting = await db.settings.find_one({"key": "whatsapp_last_report_at"}, {"_id": 0, "value": 1})
+        if report_setting and isinstance(report_setting.get("value"), str):
+            last_report_at = report_setting["value"]
+    except Exception:
+        last_report_at = None
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client_http:
             response = await client_http.get(get_green_api_url("getStateInstance"), headers=get_whatsapp_headers())
             response.raise_for_status()
             data = response.json()
             state = data.get("stateInstance", "unknown")
+            recent_errors = []
+            for item in (data.get("recentErrors") or [])[-5:]:
+                if isinstance(item, dict):
+                    msg = _safe_whatsapp_error_message(item.get("message"))
+                    if msg:
+                        recent_errors.append({"at": item.get("at"), "message": msg})
+                elif isinstance(item, str):
+                    msg = _safe_whatsapp_error_message(item)
+                    if msg:
+                        recent_errors.append({"at": None, "message": msg})
             return {
                 "status": "connected" if state == "authorized" else state,
                 "connected": state == "authorized",
                 "qrCode": None,
                 "greenApi": WHATSAPP_PROVIDER == "greenapi",
                 "provider": WHATSAPP_PROVIDER,
-                "sendingEnabled": data.get("sendingEnabled", True)
+                "sendingEnabled": data.get("sendingEnabled", False) is True,
+                "lastConnectedAt": data.get("lastConnectedAt"),
+                "lastReportAt": last_report_at,
+                "recentErrors": recent_errors,
+                "aiConfigured": ai_configured,
+                "aiStatus": ai_status,
+                "reportSchedule": report_schedule,
+                "currentTarget": WHATSAPP_GROUP_ID or None,
             }
-    except Exception as e:
-        return {"status": "offline", "connected": False, "qrCode": None, "error": str(e)}
+    except Exception:
+        return {
+            "status": "offline",
+            "connected": False,
+            "qrCode": None,
+            "error": "Serviço do WhatsApp indisponível",
+            "sendingEnabled": False,
+            "lastConnectedAt": None,
+            "lastReportAt": last_report_at,
+            "recentErrors": [{"at": None, "message": "Serviço do WhatsApp indisponível"}],
+            "aiConfigured": ai_configured,
+            "aiStatus": ai_status,
+            "reportSchedule": report_schedule,
+            "currentTarget": WHATSAPP_GROUP_ID or None,
+            "provider": WHATSAPP_PROVIDER,
+        }
 
 @api_router.get("/whatsapp/qr", dependencies=[Depends(verify_whatsapp_manager)])
 async def get_whatsapp_qr():
@@ -5532,8 +6114,8 @@ async def get_whatsapp_qr():
             response.raise_for_status()
             data = response.json()
             return {"qrCode": data.get("message"), "connected": False}
-    except Exception as e:
-        return {"qrCode": None, "connected": False, "error": str(e)}
+    except Exception:
+        return {"qrCode": None, "connected": False, "error": "Não foi possível obter o QR Code"}
 
 @api_router.get("/whatsapp/groups", dependencies=[Depends(verify_whatsapp_manager)])
 async def get_whatsapp_groups():
@@ -5548,8 +6130,8 @@ async def get_whatsapp_groups():
                 for chat in data if "@g.us" in chat.get("id", "")
             ]
             return {"success": True, "groups": groups, "currentTarget": WHATSAPP_GROUP_ID}
-    except Exception as e:
-        return {"success": False, "groups": [], "error": str(e)}
+    except Exception:
+        return {"success": False, "groups": [], "error": "Não foi possível listar grupos"}
 
 class WhatsAppTargetUpdate(BaseModel):
     target: str
@@ -6391,6 +6973,9 @@ async def startup_db_client():
         await db.prazo_partial_payments.create_index([("store", 1), ("created_at", -1)])
         await db.cash_withdrawals.create_index([("store", 1), ("created_at", -1)])
         await db.tenants.create_index("username", unique=True)
+        await db.whatsapp_inbound.create_index("messageId", unique=True)
+        await db.whatsapp_inbound.create_index([("receivedAt", -1)])
+        await db.whatsapp_inbound.create_index([("processed", 1), ("receivedAt", -1)])
         logger.info("MongoDB indexes ensured (performance optimization)")
     except Exception as e:
         logger.warning(f"Could not ensure all indexes (non-fatal): {e}")
@@ -6432,6 +7017,8 @@ menu.set_dependencies(db, verify_gestor)
 stock.set_dependencies(db, verify_gestor)
 cash.set_dependencies(db, BRAZIL_TZ)
 live.set_dependencies(db, BRAZIL_TZ)
+whatsapp_finance.set_db(db)  # ETAPA 7: read-only finance tools for WhatsApp AI
+whatsapp_comprovantes.set_db(db)  # ETAPA 8: comprovante review (no auto money)
 
 # Include routers - api_router must be LAST to ensure new routers take priority
 api_router.include_router(prazo.router)

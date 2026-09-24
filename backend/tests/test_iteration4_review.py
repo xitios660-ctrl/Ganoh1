@@ -51,7 +51,7 @@ class TestHealthAndMeta:
 class TestAuth:
     def test_login_success(self, session):
         r = session.post(f"{API}/auth/login",
-                         json={"username": "gestor", "password": "ganoh2024"})
+                         json={"username": "gestor", "password": "test-only-value"})
         assert r.status_code == 200
         data = r.json()
         assert data["success"] is True
@@ -66,7 +66,7 @@ class TestAuth:
     def test_login_with_whitespace_and_case(self, session):
         """PRD mentions strip+case-insensitive fix."""
         r = session.post(f"{API}/auth/login",
-                         json={"username": " GESTOR ", "password": "ganoh2024"})
+                         json={"username": " GESTOR ", "password": "test-only-value"})
         assert r.status_code == 200
 
 
@@ -163,7 +163,7 @@ class TestGestorDashboard:
         assert r.status_code in (401, 403)
 
     def test_dashboard_with_basic_auth(self):
-        r = requests.get(f"{API}/gestor/dashboard", auth=("gestor", "ganoh2024"))
+        r = requests.get(f"{API}/gestor/dashboard", auth=("gestor", "test-only-value"))
         assert r.status_code == 200, r.text
         data = r.json()
         assert "stores" in data

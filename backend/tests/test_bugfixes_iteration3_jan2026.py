@@ -10,7 +10,7 @@ import pytest
 import requests
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL").rstrip("/")
-AUTH = ("gestor", "ganoh2024")
+AUTH = ("gestor", "test-only-value")
 
 
 # -------------------- Menu add: Chiclete, price 0.50, Doces --------------------

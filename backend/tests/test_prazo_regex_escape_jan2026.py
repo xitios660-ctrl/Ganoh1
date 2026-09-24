@@ -39,7 +39,7 @@ MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "ganoh_db")
 PRAZO_PASSWORD = os.environ.get("PRAZO_PASSWORD", "1234")
 GESTOR_USER = "gestor"
-GESTOR_PASS = "ganoh2024"
+GESTOR_PASS = "test-only-value"
 
 # --- environment validation ---------------------------------------------------
 

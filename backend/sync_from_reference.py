@@ -26,7 +26,7 @@ from motor.motor_asyncio import AsyncIOMotorClient
 
 REF_URL = os.environ.get("REF_URL", "https://prazo-payment-sys.emergent.host")
 GESTOR_USER = os.environ.get("GESTOR_USERNAME", "gestor")
-GESTOR_PASS = os.environ.get("GESTOR_PASSWORD", "ganoh2024")
+GESTOR_PASS = os.environ.get("GESTOR_PASSWORD", "")  # required via env; empty = fail closed
 GESTOR_AUTH = (GESTOR_USER, GESTOR_PASS)
 STORES = ["runner", "gym-londres"]
 

@@ -70,15 +70,37 @@ def test_maintenance_blocks_business_writes(monkeypatch):
         assert response.headers['Retry-After'] == '300'
 
 
-def test_spa_reload_works_and_unknown_api_does_not_return_html(monkeypatch):
-    if not (BACKEND.parent / 'frontend/build/index.html').exists():
-        pytest.skip('Build frontend before running SPA integration check')
+def test_spa_reload_works_and_unknown_api_does_not_return_html(monkeypatch, tmp_path):
+    """Deep links must serve index.html; /api and missing assets must not."""
+    build = tmp_path / 'frontend_build'
+    (build / 'static' / 'js').mkdir(parents=True)
+    index = build / 'index.html'
+    index.write_text('<!doctype html><html><body>SPA-INDEX</body></html>\n', encoding='utf-8')
+    (build / 'static' / 'js' / 'main.js').write_text('asset-ok', encoding='utf-8')
+
     monkeypatch.setenv('MIGRATION_PENDING', 'false')
+    monkeypatch.setenv('FRONTEND_BUILD_DIR', str(build))
     monkeypatch.setattr(server, 'db', MagicMock(command=AsyncMock(return_value={'ok': 1})))
     sys.modules.pop('render_app', None)
     app = importlib.import_module('render_app').app
     client = TestClient(app)
-    assert client.get('/gestor').status_code == 200
-    assert client.get('/api/not-a-route').status_code == 404
-    assert client.get('/static/missing.js').status_code == 404
+
+    for path in ('/', '/auth', '/equipe', '/gestor/dashboard', '/runner', '/runner/live'):
+        response = client.get(path)
+        assert response.status_code == 200, path
+        assert 'text/html' in response.headers.get('content-type', '')
+        assert b'SPA-INDEX' in response.content
+
+    asset = client.get('/static/js/main.js')
+    assert asset.status_code == 200
+    assert asset.content == b'asset-ok'
+
+    api_404 = client.get('/api/not-a-route')
+    assert api_404.status_code == 404
+    assert b'SPA-INDEX' not in api_404.content
+
+    missing_asset = client.get('/static/missing.js')
+    assert missing_asset.status_code == 404
+    assert b'SPA-INDEX' not in missing_asset.content
+
     assert client.get('/healthz').json()['status'] == 'ok'

@@ -2,7 +2,7 @@
 Backend tests for the GANOH redesign iteration (green theme + Semana chart + VT flow).
 
 Focus areas (per review_request):
-  - POST /api/auth/login with gestor / ganoh2024
+  - POST /api/auth/login with gestor / test-only-value
   - GET /api/gestor/chart/weekly returns 7 daily buckets
   - POST /api/cash/{store}/withdraw with category=vt -> creates BOTH a
     cash withdrawal AND an automatic expense
@@ -31,7 +31,7 @@ def _read_backend_url():
 
 BASE_URL = _read_backend_url()
 API = f"{BASE_URL}/api"
-GESTOR_AUTH = ("gestor", "ganoh2024")
+GESTOR_AUTH = ("gestor", "test-only-value")
 TAG = f"TestE2E-{int(time.time())}"
 
 
@@ -40,7 +40,7 @@ class TestAuth:
     def test_login_success(self):
         r = requests.post(
             f"{API}/auth/login",
-            json={"username": "gestor", "password": "ganoh2024"},
+            json={"username": "gestor", "password": "test-only-value"},
             timeout=15,
         )
         assert r.status_code == 200, r.text

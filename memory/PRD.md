@@ -3,7 +3,7 @@
 ## Original Problem Statement
 Copiar todos os números, vendas, gráficos, caixa, gastos do site
 https://prazo-payment-sys.emergent.host para esta cópia.
-Senha do gestor: `ganoh2024`. Inclui parte da Cozinha e do Gestor.
+Senha do gestor: `[REDACTED — rotate if still in use]`. Inclui parte da Cozinha e do Gestor.
 
 ## Architecture
 - Backend: FastAPI + MongoDB (motor)
@@ -56,7 +56,7 @@ Senha do gestor: `ganoh2024`. Inclui parte da Cozinha e do Gestor.
 
 ## Routes (Frontend)
 - `/` Store selector
-- `/auth` Login do Gestor (`gestor` / `ganoh2024`)
+- `/auth` Login do Gestor (`gestor` / env GESTOR_PASSWORD)
 - `/gestor/dashboard` Dashboard (KPIs, gráficos, caixa, gastos, prazo)
 - `/:store` Cardápio · `/:store/cozinha` · `/:store/estoque` · `/equipe`
 
@@ -121,7 +121,7 @@ Senha do gestor: `ganoh2024`. Inclui parte da Cozinha e do Gestor.
 ### Auditoria de Segurança (Jul 2026) — AGUARDANDO DECISÃO DO USUÁRIO
 - Resultado: FAIL. SEC-001 caixa sem auth (leitura/escrita pública);
   SEC-002 PII de clientes exposta (prazo/orders/drawer-debug);
-  SEC-003 PRAZO_PASSWORD default "1234" + senha staff hardcoded no JS;
+  SEC-003 PRAZO_PASSWORD weak default + senha staff hardcoded no JS (neutralized in ETAPA 3);
   SEC-004 login gestor fraco, base64 em localStorage, sem rate limit
 - Plano proposto via ask_human (login de equipe no servidor etc.) — sem resposta ainda
 

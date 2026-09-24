@@ -13,7 +13,7 @@ BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:8001").rstr
 API = f"{BASE_URL}/api"
 
 GESTOR_USER = "gestor"
-GESTOR_PASS = "ganoh2024"
+GESTOR_PASS = "test-only-value"
 
 
 @pytest.fixture(scope="module")

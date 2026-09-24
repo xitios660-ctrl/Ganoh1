@@ -17,7 +17,7 @@ BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 
 # Credentials
 GESTOR_USER = "gestor"
-GESTOR_PASS = "ganoh2024"
+GESTOR_PASS = "test-only-value"
 PRAZO_PASSWORD = "1234"
 
 

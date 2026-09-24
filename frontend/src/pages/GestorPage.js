@@ -148,6 +148,12 @@ export const GestorPage = () => {
   const [whatsappGroups, setWhatsappGroups] = useState([]);
   const [whatsappTarget, setWhatsappTarget] = useState('');
   const [whatsappTargetInput, setWhatsappTargetInput] = useState('');
+  const [whatsappLastConnectedAt, setWhatsappLastConnectedAt] = useState(null);
+  const [whatsappLastReportAt, setWhatsappLastReportAt] = useState(null);
+  const [whatsappRecentErrors, setWhatsappRecentErrors] = useState([]);
+  const [whatsappAiConfigured, setWhatsappAiConfigured] = useState(false);
+  const [whatsappAiStatus, setWhatsappAiStatus] = useState(null);
+  const [whatsappReportSchedule, setWhatsappReportSchedule] = useState(['14:00', '22:00']);
   
   // Adicionais states
   const [adicionais, setAdicionais] = useState([]);
@@ -499,14 +505,26 @@ export const GestorPage = () => {
   const fetchWhatsAppStatus = async () => {
     try {
       const response = await axios.get(`${API}/whatsapp/status`, whatsappAuthConfig());
-      setWhatsappStatus(response.data.status);
-      setWhatsappSendingEnabled(response.data.sendingEnabled === true);
+      const data = response.data || {};
+      setWhatsappStatus(data.status || 'disconnected');
+      setWhatsappSendingEnabled(data.sendingEnabled === true);
+      setWhatsappLastConnectedAt(data.lastConnectedAt || null);
+      setWhatsappLastReportAt(data.lastReportAt || null);
+      setWhatsappRecentErrors(Array.isArray(data.recentErrors) ? data.recentErrors : []);
+      setWhatsappAiConfigured(data.aiConfigured === true);
+      setWhatsappAiStatus(typeof data.aiStatus === 'string' ? data.aiStatus : null);
+      if (Array.isArray(data.reportSchedule) && data.reportSchedule.length) {
+        setWhatsappReportSchedule(data.reportSchedule);
+      }
+      if (data.currentTarget) {
+        setWhatsappTarget(data.currentTarget);
+      }
       
-      // If not connected, fetch QR code
-      if (response.data.status !== 'connected' && response.data.status !== 'offline') {
+      // If not connected, fetch QR code (respect persistence: no QR when connected)
+      if (data.status !== 'connected' && data.status !== 'offline') {
         try {
           const qrResponse = await axios.get(`${API}/whatsapp/qr`, whatsappAuthConfig());
-          setWhatsappQR(qrResponse.data.qrCode);
+          setWhatsappQR(qrResponse.data.qrCode || null);
         } catch (e) {
           console.log('Could not fetch QR code');
         }
@@ -515,11 +533,11 @@ export const GestorPage = () => {
       }
       
       // Fetch groups if connected
-      if (response.data.status === 'connected') {
+      if (data.status === 'connected') {
         try {
           const groupsResponse = await axios.get(`${API}/whatsapp/groups`, whatsappAuthConfig());
           setWhatsappGroups(groupsResponse.data.groups || []);
-          setWhatsappTarget(groupsResponse.data.currentTarget || '');
+          setWhatsappTarget(groupsResponse.data.currentTarget || data.currentTarget || '');
         } catch (e) {
           console.log('Could not fetch groups');
         }
@@ -527,6 +545,7 @@ export const GestorPage = () => {
     } catch (error) {
       setWhatsappStatus('offline');
       setWhatsappQR(null);
+      setWhatsappRecentErrors([{ at: null, message: 'Serviço do WhatsApp indisponível' }]);
     }
   };
 
@@ -2271,6 +2290,12 @@ export const GestorPage = () => {
               onSaveTarget={saveWhatsAppTarget}
               sendingEnabled={whatsappSendingEnabled}
               onRefreshStatus={fetchWhatsAppStatus}
+              lastConnectedAt={whatsappLastConnectedAt}
+              lastReportAt={whatsappLastReportAt}
+              recentErrors={whatsappRecentErrors}
+              aiConfigured={whatsappAiConfigured}
+              aiStatus={whatsappAiStatus}
+              reportSchedule={whatsappReportSchedule}
             />
           </TabsContent>
         </Tabs>

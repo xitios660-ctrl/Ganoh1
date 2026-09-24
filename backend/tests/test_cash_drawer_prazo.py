@@ -256,8 +256,8 @@ class TestWhatsAppGroupSelection:
         assert response.status_code == 200
         
         print("✅ API is accessible - WhatsApp groups configured in backend:")
-        print("   - Runner: WHATSAPP_GROUP_RUNNER (5511974449533-1572969909@g.us)")
-        print("   - GYM Londres: WHATSAPP_GROUP_ID (120363424613813278@g.us)")
+        print("   - Runner: WHATSAPP_GROUP_RUNNER (from env; no default)")
+        print("   - GYM Londres: WHATSAPP_GROUP_ID (from env; no default)")
 
 
 class TestKitchenEndpoints:

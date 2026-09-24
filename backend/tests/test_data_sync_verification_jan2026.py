@@ -8,7 +8,7 @@ import pytest
 
 BASE_URL = os.environ.get("REACT_APP_BACKEND_URL", "https://0b70e0ff-bd72-49a6-9a5e-947a6db8f30e.preview.emergentagent.com").rstrip("/")
 GESTOR_USER = "gestor"
-GESTOR_PASS = "ganoh2024"
+GESTOR_PASS = "test-only-value"
 
 
 @pytest.fixture(scope="module")
