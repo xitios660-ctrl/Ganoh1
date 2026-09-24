@@ -31,7 +31,8 @@ const STATUS_CONFIG = {
   pending_payment: { label: 'Aguardando PIX', color: 'bg-blue-500', bgLight: 'bg-blue-50', borderColor: 'border-l-blue-500' },
   received: { label: 'Recebido', color: 'bg-gray-500', bgLight: 'bg-gray-50', borderColor: 'border-l-gray-500' },
   preparing: { label: 'Preparando', color: 'bg-amber-500', bgLight: 'bg-amber-50', borderColor: 'border-l-amber-500' },
-  ready: { label: 'Pronto', color: 'bg-brand-500', bgLight: 'bg-brand-50', borderColor: 'border-l-brand-500' }
+  ready: { label: 'Pronto', color: 'bg-brand-500', bgLight: 'bg-brand-50', borderColor: 'border-l-brand-500' },
+  delivered: { label: 'Entregue', color: 'bg-emerald-600', bgLight: 'bg-emerald-50', borderColor: 'border-l-emerald-600' }
 };
 
 const PAYMENT_ICONS = { pix: Smartphone, debit: CreditCard, credit: CreditCard, cash: Banknote, prazo: Clock, voucher: Ticket };
@@ -60,6 +61,7 @@ const OrderCard = ({ order, onStatusChange, onDelete }) => {
   const getNextStatus = () => {
     if (order.status === 'received') return 'preparing';
     if (order.status === 'preparing') return 'ready';
+    if (order.status === 'ready') return 'delivered';
     return null;
   };
 
@@ -95,8 +97,14 @@ const OrderCard = ({ order, onStatusChange, onDelete }) => {
                 Pronto
               </Button>
             )}
+            {getNextStatus() === 'delivered' && (
+              <Button size="sm" className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700" onClick={() => onStatusChange(order.id, 'delivered')} title="Marcar como entregue">
+                <Package className="h-3 w-3 mr-1" />
+                Entregar
+              </Button>
+            )}
             {order.status === 'ready' && (
-              <Button size="sm" variant="outline" className="h-7 px-2 text-xs text-destructive" onClick={() => onDelete(order.id)}>
+              <Button size="sm" variant="outline" className="h-7 px-2 text-xs text-destructive" onClick={() => onDelete(order.id)} title="Apagar pedido permanentemente">
                 <Trash2 className="h-3 w-3" />
               </Button>
             )}
@@ -1326,15 +1334,15 @@ export const KitchenPage = () => {
             <span className="text-muted-foreground ml-1">PIX</span>
           </div>
           <div className="bg-gray-100 rounded py-1">
-            <span className="font-bold text-gray-700">{stats.pending}</span>
+            <span className="font-bold text-gray-700">{receivedOrders.length}</span>
             <span className="text-muted-foreground ml-1">Aguard.</span>
           </div>
           <div className="bg-amber-100 rounded py-1">
-            <span className="font-bold text-amber-700">{stats.preparing}</span>
+            <span className="font-bold text-amber-700">{preparingOrders.length}</span>
             <span className="text-muted-foreground ml-1">Prep.</span>
           </div>
           <div className="bg-brand-100 rounded py-1">
-            <span className="font-bold text-brand-700">{stats.ready}</span>
+            <span className="font-bold text-brand-700">{readyOrders.length}</span>
             <span className="text-muted-foreground ml-1">Prontos</span>
           </div>
         </div>
@@ -1347,7 +1355,7 @@ export const KitchenPage = () => {
               PIX {pendingPixOrders.length > 0 && <Badge className="ml-1 bg-blue-600 h-4 min-w-4 p-0 justify-center text-[10px]">{pendingPixOrders.length}</Badge>}
             </TabsTrigger>
             <TabsTrigger value="pedidos" className="text-xs h-7 px-1">
-              Pedidos {(stats.pending + stats.preparing) > 0 && <Badge className="ml-1 bg-brand-600 h-4 min-w-4 p-0 justify-center text-[10px]">{stats.pending + stats.preparing}</Badge>}
+              Pedidos {(receivedOrders.length + preparingOrders.length) > 0 && <Badge className="ml-1 bg-brand-600 h-4 min-w-4 p-0 justify-center text-[10px]">{receivedOrders.length + preparingOrders.length}</Badge>}
             </TabsTrigger>
             <TabsTrigger value="vendas" className="text-xs h-7 px-1">Vendas</TabsTrigger>
             <TabsTrigger value="prazo" className="text-xs h-7 px-1">

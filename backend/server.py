@@ -1001,7 +1001,10 @@ async def get_orders(store: StoreLocation, status: Optional[str] = None):
     # Auto-archive: ready orders older than 12 hours are considered stale and
     # should not pollute the operational kitchen view. They are moved to history
     # so they still appear under "Histórico" but disappear from the live screen.
-    if status == "ready":
+    # Must also run on the default kitchen poll (no status filter) used by KitchenPage;
+    # previously only ?status=ready archived, so top-bar stats (12h filter) disagreed
+    # with the Prontos list (all ready rows).
+    if status is None or status == "ready":
         stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
         stale_iso = stale_cutoff.isoformat()
         stale_query = {
