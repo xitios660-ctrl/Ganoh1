@@ -2,7 +2,7 @@ import express from 'express';
 import multer from 'multer';
 import { MongoClient } from 'mongodb';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import makeWASocket, { DisconnectReason, makeCacheableSignalKeyStore, Browsers } from '@whiskeysockets/baileys';
+import makeWASocket, { DisconnectReason, makeCacheableSignalKeyStore, Browsers, downloadMediaMessage } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import pino from 'pino';
 import { mongoAuth } from './auth.mjs';
@@ -79,7 +79,20 @@ function attachInboundHandler(current) {
         processedCollection: processedMessages,
         inboundCollection,
         token,
-        upsertType: type
+        upsertType: type,
+        // ETAPA 8: download image media for comprovante candidates (never log bytes).
+        downloadMediaFn: async (waMessage) => {
+          const content = waMessage?.message || {};
+          if (!content.imageMessage) return null; // documents/PDF deferred
+          const buffer = await downloadMediaMessage(
+            waMessage,
+            'buffer',
+            {},
+            { logger, reuploadRequest: current.updateMediaMessage }
+          );
+          if (!buffer || !Buffer.isBuffer(buffer)) return null;
+          return buffer;
+        }
       }).catch(error => {
         // Safe codes/names only — never log QR, credentials, or message bodies.
         const code = error?.code || error?.name || 'unknown';

@@ -87,3 +87,17 @@ def test_financial_without_facts_on_inbound_sync_mirror(monkeypatch):
     )
     assert out["status"] == "would_reply"
     assert out["reply"] == wai.MSG_FINANCIAL_UNAVAILABLE
+
+
+def test_comprovante_media_non_text_skipped_for_ai(monkeypatch):
+    """Image/document inbound still skips text AI path (comprovante module owns media)."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    wai.set_complete_override(lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no call")))
+    out = decide_ai_path(text=None, message_type="image", is_group=False, send_enabled=False)
+    assert out["reason"] == "non_text"
+    assert out["processed"] is False
+
+
+def test_system_prompt_no_longer_says_comprovantes_future():
+    assert "etapa futura" not in wai.SYSTEM_PROMPT.lower()
+    assert "Gestor" in wai.SYSTEM_PROMPT

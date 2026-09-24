@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -12,7 +13,11 @@ import {
   Bot,
   Clock,
   AlertTriangle,
-  QrCode
+  QrCode,
+  Receipt,
+  XCircle,
+  Check,
+  Pencil
 } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -78,6 +83,28 @@ function formatDateTime(value) {
   }
 }
 
+
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL;
+const COMPROVANTE_API = BACKEND_URL ? `${BACKEND_URL}/api` : '/api';
+
+function comprovanteAuthConfig() {
+  const value = typeof localStorage !== 'undefined' ? localStorage.getItem('gestor_auth') : null;
+  return { headers: value ? { Authorization: `Basic ${value}` } : {}, timeout: 20000 };
+}
+
+function formatMoney(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+  return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(value));
+}
+
+const COMPROVANTE_STATUS = {
+  awaiting_gestor: { label: 'Aguardando Gestor', badge: 'bg-amber-50 text-amber-900 border-amber-200' },
+  awaiting_media: { label: 'Aguardando mídia', badge: 'bg-blue-50 text-blue-900 border-blue-200' },
+  confirmed: { label: 'Confirmado (revisão)', badge: 'bg-green-50 text-green-800 border-green-200' },
+  corrected: { label: 'Corrigido (revisão)', badge: 'bg-green-50 text-green-800 border-green-200' },
+  refused: { label: 'Recusado', badge: 'bg-red-50 text-red-800 border-red-200' }
+};
+
 export function WhatsAppTab({
   whatsappStatus,
   whatsappQR,
@@ -111,6 +138,59 @@ export function WhatsAppTab({
   const scheduleLabel = Array.isArray(reportSchedule) && reportSchedule.length
     ? reportSchedule.join(' / ')
     : '14:00 / 22:00';
+
+  const [comprovantes, setComprovantes] = useState([]);
+  const [comprovantesLoading, setComprovantesLoading] = useState(false);
+  const [comprovanteActionId, setComprovanteActionId] = useState(null);
+  const [correctAmountById, setCorrectAmountById] = useState({});
+
+  const fetchComprovantes = useCallback(async () => {
+    setComprovantesLoading(true);
+    try {
+      const response = await axios.get(
+        `${COMPROVANTE_API}/whatsapp/comprovantes?limit=30`,
+        comprovanteAuthConfig()
+      );
+      const items = Array.isArray(response.data?.items) ? response.data.items : [];
+      setComprovantes(items);
+    } catch {
+      // Silent — tab still usable without comprovantes
+      setComprovantes([]);
+    } finally {
+      setComprovantesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchComprovantes();
+  }, [fetchComprovantes]);
+
+  const runComprovanteAction = async (id, action, extra = {}) => {
+    setComprovanteActionId(id);
+    try {
+      await axios.post(
+        `${COMPROVANTE_API}/whatsapp/comprovantes/${id}/${action}`,
+        extra,
+        comprovanteAuthConfig()
+      );
+      const labels = {
+        confirm: 'Comprovante marcado como confirmado (revisão). Aplique o valor no PIX/prazo.',
+        correct: 'Comprovante corrigido (revisão). Aplique o valor no PIX/prazo.',
+        refuse: 'Comprovante recusado.'
+      };
+      toast.success(labels[action] || 'Atualizado');
+      await fetchComprovantes();
+    } catch (error) {
+      const detail = error?.response?.data?.detail;
+      toast.error(
+        typeof detail === 'string'
+          ? detail
+          : 'Não foi possível atualizar o comprovante.'
+      );
+    } finally {
+      setComprovanteActionId(null);
+    }
+  };
 
   return (
     <Card>
@@ -319,7 +399,7 @@ export function WhatsAppTab({
           </div>
           <p className="text-xs text-muted-foreground mt-2">
             {aiStatus === 'active'
-              ? 'Respostas de texto via OpenAI ativas no fluxo WhatsApp. Consultas financeiras aguardam ETAPA 7. Envio respeita WHATSAPP_SEND_ENABLED.'
+              ? 'Respostas de texto e consultas financeiras (Mongo) ativas. Comprovantes de mídia vão para revisão do Gestor — sem auto-confirmação. Envio respeita WHATSAPP_SEND_ENABLED.'
               : 'Defina OPENAI_API_KEY no ambiente para ativar respostas da IA no WhatsApp.'}
           </p>
         </div>
@@ -346,6 +426,176 @@ export function WhatsAppTab({
               <span className="font-medium">{formatDateTime(lastReportAt)}</span>
             </div>
           </div>
+        </div>
+
+
+        {/* Comprovantes pendentes (ETAPA 8) */}
+        <div className="bg-secondary/30 p-4 rounded-lg border space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+            <Label className="font-medium flex items-center gap-2">
+              <Receipt className="h-4 w-4" /> Comprovantes WhatsApp
+            </Label>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={fetchComprovantes}
+              disabled={comprovantesLoading}
+              className="sm:ml-auto w-full sm:w-auto"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 mr-2 ${comprovantesLoading ? 'animate-spin' : ''}`} />
+              Atualizar lista
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Imagens recebidas via Baileys entram como candidatos. A confirmação aqui só registra revisão/auditoria —
+            o valor continua sendo aplicado pelo fluxo PIX/prazo existente. Sem auto-confirmação.
+          </p>
+          {comprovantesLoading && comprovantes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Carregando…</p>
+          ) : comprovantes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">Nenhum comprovante pendente.</p>
+          ) : (
+            <div className="space-y-3 max-h-[28rem] overflow-y-auto">
+              {comprovantes.map((item) => {
+                const st = COMPROVANTE_STATUS[item.status] || COMPROVANTE_STATUS.awaiting_gestor;
+                const busy = comprovanteActionId === item.id;
+                const extraction = item.extraction || {};
+                const pending =
+                  item.status === 'awaiting_gestor' || item.status === 'awaiting_media';
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-lg border bg-white p-3 space-y-2 text-sm"
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-start gap-2">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`text-xs px-2 py-0.5 rounded border ${st.badge}`}>
+                            {st.label}
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            {formatDateTime(item.created_at)}
+                          </span>
+                        </div>
+                        <p className="font-medium truncate">
+                          {item.pushName || 'Cliente WhatsApp'}
+                        </p>
+                        <p className="text-xs text-muted-foreground break-all">
+                          {item.remoteJid}
+                        </p>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs pt-1">
+                          <div>
+                            Valor (IA):{' '}
+                            <span className="font-medium">{formatMoney(extraction.amount)}</span>
+                          </div>
+                          <div>
+                            Pagador (IA):{' '}
+                            <span className="font-medium">{extraction.payer_name || '—'}</span>
+                          </div>
+                          <div>
+                            Data/hora:{' '}
+                            <span className="font-medium">
+                              {[extraction.transaction_date, extraction.transaction_time]
+                                .filter(Boolean)
+                                .join(' ') || '—'}
+                            </span>
+                          </div>
+                          <div>
+                            Mídia:{' '}
+                            <span className="font-medium">
+                              {item.hasMediaBinary ? 'recebida' : item.mediaMime || 'pendente'}
+                            </span>
+                          </div>
+                        </div>
+                        {Array.isArray(item.matches) && item.matches.length > 0 && (
+                          <div className="text-xs text-muted-foreground pt-1">
+                            Sugestões:{' '}
+                            {item.matches
+                              .slice(0, 3)
+                              .map((m) => m.label)
+                              .join(' · ')}
+                          </div>
+                        )}
+                        {item.duplicateOf && (
+                          <p className="text-xs text-amber-700">Possível duplicata detectada.</p>
+                        )}
+                        {item.mediaUnsupportedReason && (
+                          <p className="text-xs text-amber-700">
+                            Tipo não suportado para OCR automático (apenas imagens jpeg/png/webp).
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    {pending && (
+                      <div className="flex flex-col gap-2 pt-1 border-t">
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            placeholder="Valor corrigido (opcional)"
+                            value={correctAmountById[item.id] || ''}
+                            onChange={(e) =>
+                              setCorrectAmountById((prev) => ({
+                                ...prev,
+                                [item.id]: e.target.value
+                              }))
+                            }
+                            className="sm:max-w-[11rem]"
+                          />
+                        </div>
+                        <div className="flex flex-col sm:flex-row gap-2">
+                          <Button
+                            size="sm"
+                            disabled={busy}
+                            className="bg-green-600 hover:bg-green-700 w-full sm:w-auto"
+                            onClick={() =>
+                              runComprovanteAction(item.id, 'confirm', {
+                                linkedOrderId: item.matches?.[0]?.ref_id || null
+                              })
+                            }
+                          >
+                            <Check className="h-3.5 w-3.5 mr-1.5" />
+                            Confirmar
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            className="w-full sm:w-auto"
+                            onClick={() => {
+                              const raw = correctAmountById[item.id];
+                              const amount =
+                                raw && String(raw).trim()
+                                  ? Number(String(raw).replace(',', '.'))
+                                  : null;
+                              runComprovanteAction(item.id, 'correct', {
+                                linkedOrderId: item.matches?.[0]?.ref_id || null,
+                                correctedAmount:
+                                  amount !== null && !Number.isNaN(amount) ? amount : null
+                              });
+                            }}
+                          >
+                            <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                            Corrigir
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={busy}
+                            className="w-full sm:w-auto text-red-700 border-red-200 hover:bg-red-50"
+                            onClick={() => runComprovanteAction(item.id, 'refuse', {})}
+                          >
+                            <XCircle className="h-3.5 w-3.5 mr-1.5" />
+                            Recusar
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Erros recentes (safe) */}

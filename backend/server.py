@@ -22,6 +22,7 @@ import resend
 
 import whatsapp_ai
 import whatsapp_finance
+import whatsapp_comprovantes
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -5595,6 +5596,38 @@ async def receive_whatsapp_inbound(event: WhatsAppInboundEvent):
         logging.exception("whatsapp inbound persist failed")
         raise HTTPException(status_code=500, detail="Failed to persist inbound event")
 
+    comprovante_result = None
+    stub = event.comprovanteStub if isinstance(event.comprovanteStub, dict) else None
+    is_comprovante_media = bool(stub) or (
+        bool(event.hasMedia)
+        and (event.messageType or "") in ("image", "document")
+    )
+    if is_comprovante_media and not event.isGroup:
+        try:
+            comprovante_result = await whatsapp_comprovantes.create_pending_from_inbound(
+                message_id=message_id,
+                remote_jid=remote_jid,
+                push_name=(event.pushName or "")[:120] or None,
+                media_mime=event.mediaMime,
+                media_caption=caption,
+                media_file_name=event.mediaFileName,
+                message_type=(event.messageType or "unknown"),
+                comprovante_stub=stub,
+            )
+            await db.whatsapp_inbound.update_one(
+                {"messageId": message_id},
+                {
+                    "$set": {
+                        "comprovanteId": (comprovante_result.get("record") or {}).get("id"),
+                        "comprovanteStatus": (comprovante_result.get("record") or {}).get("status"),
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                },
+            )
+        except Exception:
+            logging.warning("whatsapp comprovante pending create failed messageId=%s", message_id)
+            comprovante_result = {"created": False, "error": "create_failed"}
+
     ai_result = await _process_whatsapp_inbound_ai(
         message_id=message_id,
         remote_jid=remote_jid,
@@ -5608,6 +5641,15 @@ async def receive_whatsapp_inbound(event: WhatsAppInboundEvent):
         "messageId": message_id,
         "stored": True,
         "ai": ai_result,
+        "comprovante": (
+            {
+                "created": bool((comprovante_result or {}).get("created")),
+                "id": ((comprovante_result or {}).get("record") or {}).get("id"),
+                "status": ((comprovante_result or {}).get("record") or {}).get("status"),
+            }
+            if comprovante_result is not None
+            else None
+        ),
     }
 
 
@@ -5706,6 +5748,185 @@ async def _patch_inbound_ai(message_id: str, result: dict, reply: Optional[str] 
         await db.whatsapp_inbound.update_one({"messageId": message_id}, {"$set": patch})
     except Exception:
         logging.warning("whatsapp inbound ai patch failed messageId=%s", message_id)
+
+
+
+class WhatsAppComprovanteMediaIn(BaseModel):
+    """Baileys sidecar media upload (ETAPA 8). Base64 image only, size-capped in module."""
+    messageId: str
+    mediaBase64: str
+    mediaMime: Optional[str] = None
+
+
+class WhatsAppComprovanteAction(BaseModel):
+    note: Optional[str] = None
+    linkedOrderId: Optional[str] = None
+    correctedAmount: Optional[float] = None
+
+
+@api_router.post("/whatsapp/inbound/media", dependencies=[Depends(verify_baileys_internal_token)])
+async def receive_whatsapp_inbound_media(payload: WhatsAppComprovanteMediaIn):
+    """
+    Accept size-capped image bytes from Baileys for a comprovante candidate.
+    Never logs binary. Does not auto-confirm payment.
+    """
+    message_id = (payload.messageId or "").strip()
+    if not message_id:
+        raise HTTPException(status_code=400, detail="messageId required")
+
+    inbound = await db.whatsapp_inbound.find_one(
+        {"messageId": message_id},
+        {
+            "_id": 0,
+            "remoteJid": 1,
+            "pushName": 1,
+            "mediaMime": 1,
+            "mediaCaption": 1,
+            "mediaFileName": 1,
+            "messageType": 1,
+            "comprovanteStub": 1,
+        },
+    )
+    existing = await whatsapp_comprovantes.get_one_by_message_id(message_id)
+    if not existing:
+        if not inbound or not inbound.get("remoteJid"):
+            raise HTTPException(status_code=404, detail="inbound_not_found")
+        try:
+            await whatsapp_comprovantes.create_pending_from_inbound(
+                message_id=message_id,
+                remote_jid=inbound["remoteJid"],
+                push_name=inbound.get("pushName"),
+                media_mime=payload.mediaMime or inbound.get("mediaMime"),
+                media_caption=inbound.get("mediaCaption"),
+                media_file_name=inbound.get("mediaFileName"),
+                message_type=inbound.get("messageType") or "image",
+                comprovante_stub=inbound.get("comprovanteStub")
+                or {"awaitingDownload": False, "purpose": "comprovante_candidate"},
+            )
+        except Exception:
+            logging.warning("comprovante ensure pending failed messageId=%s", message_id)
+            raise HTTPException(status_code=500, detail="ensure_pending_failed")
+
+    result = await whatsapp_comprovantes.attach_media(
+        message_id=message_id,
+        media_base64=payload.mediaBase64,
+        media_mime=payload.mediaMime,
+    )
+    if not result.get("ok"):
+        err = result.get("error") or "attach_failed"
+        code = 404 if err == "comprovante_not_found" else 400
+        raise HTTPException(status_code=code, detail=err)
+
+    record = result.get("record") or {}
+    cid = record.get("id")
+    if cid:
+        try:
+            extracted = await whatsapp_comprovantes.run_extraction(comprovante_id=cid)
+            if extracted.get("ok") and extracted.get("record"):
+                record = extracted["record"]
+        except Exception:
+            logging.warning("comprovante extraction skipped messageId=%s", message_id)
+
+    send_enabled = (os.environ.get("WHATSAPP_SEND_ENABLED") or "").strip().lower() == "true"
+    ack = whatsapp_comprovantes.ack_message_for_inbound(send_enabled=send_enabled)
+    if send_enabled and ack.get("reply") and inbound and inbound.get("remoteJid"):
+        try:
+            await send_whatsapp_message(ack["reply"], group_id=inbound["remoteJid"])
+        except Exception:
+            logging.warning("comprovante ack send failed messageId=%s", message_id)
+            ack["status"] = "send_failed"
+
+    return {
+        "success": True,
+        "messageId": message_id,
+        "comprovanteId": cid,
+        "status": record.get("status"),
+        "ack": {
+            "status": ack.get("status"),
+            "reason": ack.get("reason"),
+            "sendAttempted": bool(ack.get("sendAttempted")),
+        },
+    }
+
+
+@api_router.get("/whatsapp/comprovantes", dependencies=[Depends(verify_whatsapp_manager)])
+async def list_whatsapp_comprovantes(status: Optional[str] = None, limit: int = 50):
+    """Gestor list of comprovante candidates (no media bytes)."""
+    items = await whatsapp_comprovantes.list_pending(status=status, limit=limit)
+    return {"count": len(items), "items": items}
+
+
+@api_router.get("/whatsapp/comprovantes/{comprovante_id}", dependencies=[Depends(verify_whatsapp_manager)])
+async def get_whatsapp_comprovante(comprovante_id: str):
+    row = await whatsapp_comprovantes.get_one(comprovante_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="not_found")
+    return row
+
+
+@api_router.post("/whatsapp/comprovantes/{comprovante_id}/confirm", dependencies=[Depends(verify_whatsapp_manager)])
+async def confirm_whatsapp_comprovante(comprovante_id: str, body: Optional[WhatsAppComprovanteAction] = None):
+    """
+    Gestor confirm — audit + review only; does NOT auto-apply money.
+    Use existing PIX/prazo UI to register the payment.
+    """
+    body = body or WhatsAppComprovanteAction()
+    result = await whatsapp_comprovantes.confirm(
+        comprovante_id=comprovante_id,
+        actor="gestor",
+        linked_order_id=body.linkedOrderId,
+        note=body.note,
+        as_corrected=False,
+    )
+    if not result.get("ok"):
+        err = result.get("error") or "confirm_failed"
+        code = 404 if err == "not_found" else 409
+        raise HTTPException(status_code=code, detail=err)
+    return result
+
+
+@api_router.post("/whatsapp/comprovantes/{comprovante_id}/correct", dependencies=[Depends(verify_whatsapp_manager)])
+async def correct_whatsapp_comprovante(comprovante_id: str, body: Optional[WhatsAppComprovanteAction] = None):
+    body = body or WhatsAppComprovanteAction()
+    result = await whatsapp_comprovantes.confirm(
+        comprovante_id=comprovante_id,
+        actor="gestor",
+        linked_order_id=body.linkedOrderId,
+        note=body.note,
+        corrected_amount=body.correctedAmount,
+        as_corrected=True,
+    )
+    if not result.get("ok"):
+        err = result.get("error") or "correct_failed"
+        code = 404 if err == "not_found" else 409
+        raise HTTPException(status_code=code, detail=err)
+    return result
+
+
+@api_router.post("/whatsapp/comprovantes/{comprovante_id}/refuse", dependencies=[Depends(verify_whatsapp_manager)])
+async def refuse_whatsapp_comprovante(comprovante_id: str, body: Optional[WhatsAppComprovanteAction] = None):
+    body = body or WhatsAppComprovanteAction()
+    result = await whatsapp_comprovantes.refuse(
+        comprovante_id=comprovante_id,
+        actor="gestor",
+        note=body.note,
+    )
+    if not result.get("ok"):
+        err = result.get("error") or "refuse_failed"
+        code = 404 if err == "not_found" else 409
+        raise HTTPException(status_code=code, detail=err)
+    return result
+
+
+@api_router.post("/whatsapp/comprovantes/{comprovante_id}/extract", dependencies=[Depends(verify_whatsapp_manager)])
+async def extract_whatsapp_comprovante(comprovante_id: str):
+    """Re-run AI extraction + Mongo match suggestions (no payment mutation)."""
+    result = await whatsapp_comprovantes.run_extraction(comprovante_id=comprovante_id)
+    if not result.get("ok"):
+        err = result.get("error") or "extract_failed"
+        code = 404 if err == "not_found" else 400
+        raise HTTPException(status_code=code, detail=err)
+    return result
 
 
 @api_router.get("/whatsapp/inbound", dependencies=[Depends(verify_whatsapp_manager)])
@@ -6736,6 +6957,7 @@ stock.set_dependencies(db, verify_gestor)
 cash.set_dependencies(db, BRAZIL_TZ)
 live.set_dependencies(db, BRAZIL_TZ)
 whatsapp_finance.set_db(db)  # ETAPA 7: read-only finance tools for WhatsApp AI
+whatsapp_comprovantes.set_db(db)  # ETAPA 8: comprovante review (no auto money)
 
 # Include routers - api_router must be LAST to ensure new routers take priority
 api_router.include_router(prazo.router)

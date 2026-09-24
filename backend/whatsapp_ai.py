@@ -45,6 +45,10 @@ MSG_FINANCIAL_UNAVAILABLE = (
 )
 # Kept for backward-compatible imports/tests naming
 MSG_FINANCIAL_STUB = MSG_FINANCIAL_UNAVAILABLE
+MSG_COMPROVANTE_PENDING = (
+    "Recebi um comprovante em mídia. Ele fica em análise do Gestor — "
+    "eu não confirmo pagamento automaticamente."
+)
 MSG_SENSITIVE_STUB = (
     "Essa ação é sensível e precisa da confirmação do Gestor. "
     "Eu preparei a intenção, mas não executo sozinho: apagar vendas, "
@@ -61,7 +65,7 @@ Regras obrigatórias:
 5. Você NÃO pode sozinho: apagar vendas, alterar valores, confirmar PIX, registrar saques, alterar dívidas, zerar dívidas, apagar clientes, alterar caixa/estoque, apagar histórico.
 6. Ações sensíveis: explique que precisa da confirmação do Gestor (não execute).
 7. Não peça nem revele chaves, tokens, senhas ou dados de autenticação.
-8. Não invente status de pedidos ou comprovantes; comprovantes são etapa futura.
+8. Não invente status de pedidos ou comprovantes. Comprovantes de mídia seguem fluxo separado de revisão do Gestor (nunca confirme pagamento sozinho).
 """
 
 _FINANCIAL_RE = re.compile(
@@ -324,6 +328,7 @@ __all__ = [
     "MSG_FINANCIAL_NO_DATA",
     "MSG_FINANCIAL_UNAVAILABLE",
     "MSG_SENSITIVE_STUB",
+    "MSG_COMPROVANTE_PENDING",
     "is_configured",
     "is_openai_ready",
     "get_ai_status",

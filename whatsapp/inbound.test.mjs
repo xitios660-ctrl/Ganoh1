@@ -7,7 +7,9 @@ import {
   handleInboundMessage,
   truncate,
   _resetInFlightForTests,
-  INBOUND_LIMITS
+  INBOUND_LIMITS,
+  notifyBackendMedia,
+  isAllowedComprovanteMime
 } from './inbound.mjs';
 
 function mockProcessed() {
@@ -206,4 +208,83 @@ test('concurrent handleInboundMessage shares one in-flight promise', async () =>
   assert.equal(a.messageId, 'race-1');
   assert.equal(b.messageId, 'race-1');
   assert.equal(processed.records.size, 1);
+});
+
+test('isAllowedComprovanteMime accepts images only', () => {
+  assert.equal(isAllowedComprovanteMime('image/jpeg'), true);
+  assert.equal(isAllowedComprovanteMime('image/png'), true);
+  assert.equal(isAllowedComprovanteMime('image/webp'), true);
+  assert.equal(isAllowedComprovanteMime('application/pdf'), false);
+});
+
+test('notifyBackendMedia posts size-capped base64 without logging binary', async () => {
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, status: 200 };
+  };
+  const buf = Buffer.from('fake-jpeg');
+  const result = await notifyBackendMedia('mid-1', buf, 'image/jpeg', {
+    fetchImpl,
+    backendUrl: 'http://127.0.0.1:10000',
+    token: 't'.repeat(32)
+  });
+  assert.equal(result.ok, true);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].url, /\/api\/whatsapp\/inbound\/media$/);
+  const body = JSON.parse(calls[0].options.body);
+  assert.equal(body.messageId, 'mid-1');
+  assert.equal(body.mediaMime, 'image/jpeg');
+  assert.equal(body.mediaBase64, buf.toString('base64'));
+  assert.ok(!JSON.stringify(calls[0].options.headers).includes('fake-jpeg'));
+});
+
+test('notifyBackendMedia rejects oversized and disallowed mime', async () => {
+  const fetchImpl = async () => ({ ok: true, status: 200 });
+  const huge = Buffer.alloc(INBOUND_LIMITS.MAX_MEDIA_BYTES + 1, 1);
+  const tooBig = await notifyBackendMedia('m', huge, 'image/png', {
+    fetchImpl,
+    token: 't'.repeat(32)
+  });
+  assert.equal(tooBig.ok, false);
+  assert.equal(tooBig.error, 'media_too_large');
+
+  const bad = await notifyBackendMedia('m', Buffer.from('x'), 'application/pdf', {
+    fetchImpl,
+    token: 't'.repeat(32)
+  });
+  assert.equal(bad.ok, false);
+  assert.equal(bad.error, 'mime_not_allowed');
+});
+
+test('handleInboundMessage uploads media when downloadMediaFn provided', async () => {
+  _resetInFlightForTests();
+  const processed = mockProcessed();
+  const inbound = mockInbound();
+  const calls = [];
+  const fetchImpl = async (url, options) => {
+    calls.push({ url, options });
+    return { ok: true, status: 200 };
+  };
+  const msg = {
+    key: { id: 'img-media', remoteJid: '5511@s.whatsapp.net', fromMe: false },
+    message: { imageMessage: { mimetype: 'image/jpeg', caption: 'pix' } },
+    messageTimestamp: 1700000002
+  };
+  const out = await handleInboundMessage(msg, {
+    processedCollection: processed,
+    inboundCollection: inbound,
+    fetchImpl,
+    backendUrl: 'http://127.0.0.1:10000',
+    token: 't'.repeat(32),
+    upsertType: 'notify',
+    downloadMediaFn: async () => Buffer.from('img-bytes')
+  });
+  assert.equal(out.skipped, false);
+  assert.equal(out.notified, true);
+  assert.equal(out.mediaUploaded, true);
+  assert.equal(calls.length, 2);
+  assert.match(calls[0].url, /\/api\/whatsapp\/inbound$/);
+  assert.match(calls[1].url, /\/api\/whatsapp\/inbound\/media$/);
+  assert.equal(inbound.records.get('img-media').mediaUploaded, true);
 });

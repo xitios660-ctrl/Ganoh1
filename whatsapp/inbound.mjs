@@ -1,12 +1,15 @@
 /**
  * Baileys inbound helpers (ETAPA 4).
- * Pure extraction + Mongo-backed dedup/persist/notify — no auto replies here; backend may AI-draft (ETAPA 6). No financial trust.
+ * Pure extraction + Mongo-backed dedup/persist/notify — no auto replies here; backend may AI-draft (ETAPA 6+).
+ * ETAPA 8: optional media download + POST to backend for comprovante candidates. No financial trust.
  */
 
 const TEXT_LIMIT = 4000;
 const CAPTION_LIMIT = 1000;
 const PUSH_NAME_LIMIT = 120;
 const DEDUP_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const MAX_MEDIA_BYTES = 2 * 1024 * 1024; // 2 MiB — keep in sync with backend
+const ALLOWED_MEDIA_PREFIXES = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp'];
 const DEFAULT_BACKEND_URL = () => `http://127.0.0.1:${process.env.PORT || '10000'}`;
 
 const inFlight = new Map();
@@ -165,6 +168,61 @@ export async function persistInbound(inboundCollection, event) {
   }
 }
 
+
+export function isAllowedComprovanteMime(mime) {
+  if (typeof mime !== 'string') return false;
+  const base = mime.split(';')[0].trim().toLowerCase();
+  return ALLOWED_MEDIA_PREFIXES.includes(base) || base === 'image/jpg';
+}
+
+/**
+ * POST size-capped media bytes to backend (ETAPA 8).
+ * Never logs binary. Uses WHATSAPP_INTERNAL_TOKEN.
+ */
+export async function notifyBackendMedia(messageId, mediaBuffer, mediaMime, {
+  fetchImpl = fetch,
+  backendUrl = process.env.BACKEND_INTERNAL_URL || DEFAULT_BACKEND_URL(),
+  token = process.env.WHATSAPP_INTERNAL_TOKEN
+} = {}) {
+  if (!token || token.length < 32) {
+    return { ok: false, status: 0, error: 'token_missing' };
+  }
+  if (!messageId || !mediaBuffer) {
+    return { ok: false, status: 0, error: 'missing_media' };
+  }
+  if (!Buffer.isBuffer(mediaBuffer) && !(mediaBuffer instanceof Uint8Array)) {
+    return { ok: false, status: 0, error: 'invalid_buffer' };
+  }
+  const buf = Buffer.isBuffer(mediaBuffer) ? mediaBuffer : Buffer.from(mediaBuffer);
+  if (buf.length === 0) return { ok: false, status: 0, error: 'empty_media' };
+  if (buf.length > MAX_MEDIA_BYTES) return { ok: false, status: 0, error: 'media_too_large' };
+  const mime = typeof mediaMime === 'string' ? mediaMime.split(';')[0].trim().toLowerCase() : 'image/jpeg';
+  if (!isAllowedComprovanteMime(mime)) {
+    return { ok: false, status: 0, error: 'mime_not_allowed' };
+  }
+  const url = `${String(backendUrl).replace(/\/$/, '')}/api/whatsapp/inbound/media`;
+  try {
+    const response = await fetchImpl(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-whatsapp-token': token
+      },
+      body: JSON.stringify({
+        messageId,
+        mediaMime: mime === 'image/jpg' ? 'image/jpeg' : mime,
+        mediaBase64: buf.toString('base64')
+      })
+    });
+    if (!response.ok) {
+      return { ok: false, status: response.status, error: `http_${response.status}` };
+    }
+    return { ok: true, status: response.status, error: null };
+  } catch (error) {
+    return { ok: false, status: 0, error: error?.code || error?.name || 'media_notify_failed' };
+  }
+}
+
 export async function notifyBackend(event, {
   fetchImpl = fetch,
   backendUrl = process.env.BACKEND_INTERNAL_URL || DEFAULT_BACKEND_URL(),
@@ -202,7 +260,8 @@ export function handleInboundMessage(message, {
   fetchImpl,
   backendUrl,
   token,
-  upsertType = 'notify'
+  upsertType = 'notify',
+  downloadMediaFn = null
 } = {}) {
   // Non-async so concurrent callers share the same Promise reference (loop/dedup safety).
   if (!shouldProcessUpsert(upsertType)) return Promise.resolve({ skipped: true, reason: 'upsert_type' });
@@ -222,15 +281,54 @@ export function handleInboundMessage(message, {
 
       const stored = await persistInbound(inboundCollection, event);
       const notify = await notifyBackend(event, { fetchImpl, backendUrl, token });
+      let mediaUploaded = false;
+      let mediaError = null;
+      // ETAPA 8: optional download + upload for image comprovante candidates
+      if (
+        notify.ok &&
+        event.comprovanteStub &&
+        typeof downloadMediaFn === 'function' &&
+        isAllowedComprovanteMime(event.mediaMime)
+      ) {
+        try {
+          const mediaBuffer = await downloadMediaFn(message);
+          if (mediaBuffer) {
+            const mediaNotify = await notifyBackendMedia(
+              event.messageId,
+              mediaBuffer,
+              event.mediaMime,
+              { fetchImpl, backendUrl, token }
+            );
+            mediaUploaded = Boolean(mediaNotify.ok);
+            mediaError = mediaNotify.ok ? null : mediaNotify.error;
+          } else {
+            mediaError = 'download_empty';
+          }
+        } catch (error) {
+          mediaError = error?.code || error?.name || 'download_failed';
+        }
+      } else if (event.comprovanteStub && event.messageType === 'document') {
+        // PDF/documents deferred — metadata already notified; awaiting Gestor without binary
+        mediaError = 'images_only_pdf_deferred';
+      }
       const patch = {
         backendNotified: notify.ok,
         backendStatus: notify.ok ? 'ok' : 'error',
         backendError: notify.ok ? null : notify.error,
         backendHttpStatus: notify.status,
-        notifiedAt: notify.ok ? new Date() : null
+        notifiedAt: notify.ok ? new Date() : null,
+        mediaUploaded,
+        mediaError
       };
       await inboundCollection.updateOne({ messageId: event.messageId }, { $set: patch });
-      return { skipped: false, messageId: event.messageId, notified: notify.ok, stored: Boolean(stored) };
+      return {
+        skipped: false,
+        messageId: event.messageId,
+        notified: notify.ok,
+        stored: Boolean(stored),
+        mediaUploaded,
+        mediaError
+      };
     } finally {
       inFlight.delete(event.messageId);
     }
@@ -245,4 +343,4 @@ export function _resetInFlightForTests() {
   inFlight.clear();
 }
 
-export const INBOUND_LIMITS = { TEXT_LIMIT, CAPTION_LIMIT, PUSH_NAME_LIMIT, DEDUP_TTL_MS };
+export const INBOUND_LIMITS = { TEXT_LIMIT, CAPTION_LIMIT, PUSH_NAME_LIMIT, DEDUP_TTL_MS, MAX_MEDIA_BYTES };
