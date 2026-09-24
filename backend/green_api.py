@@ -12,8 +12,8 @@ logger = logging.getLogger(__name__)
 
 # Green API Configuration
 GREEN_API_URL = os.environ.get("GREEN_API_URL", "https://7107.api.greenapi.com")
-GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE", "7107550497")
-GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "ddbec57064a544909aecfbebe1e4d95faa1677ff39b04f68b2")
+GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE", "")
+GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "")
 
 # Target group for notifications
 WHATSAPP_GROUP_ID = os.environ.get("WHATSAPP_GROUP_ID", "")  # Will be set after joining group
