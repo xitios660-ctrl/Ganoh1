@@ -3,12 +3,33 @@ import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
-import { MessageCircle, Users, RefreshCw } from 'lucide-react';
+import {
+  Bot,
+  CheckCircle2,
+  Clock3,
+  MessageCircle,
+  QrCode,
+  RefreshCw,
+  ShieldCheck,
+  Users,
+  WifiOff
+} from 'lucide-react';
 import { toast } from 'sonner';
 
-export function WhatsAppTab({ 
-  whatsappStatus, 
-  whatsappQR, 
+const STATUS_COPY = {
+  connected: { label: 'Conectado', hint: 'Sessão ativa e persistente', dot: 'bg-green-500' },
+  waiting_qr: { label: 'Aguardando QR Code', hint: 'Escaneie o código abaixo', dot: 'bg-yellow-500 animate-pulse' },
+  connecting: { label: 'Conectando', hint: 'Preparando a sessão do WhatsApp', dot: 'bg-blue-500 animate-pulse' },
+  reconnecting: { label: 'Reconectando', hint: 'Tentando recuperar a sessão automaticamente', dot: 'bg-blue-500 animate-pulse' },
+  logged_out: { label: 'Sessão encerrada', hint: 'Será necessário conectar novamente', dot: 'bg-orange-500' },
+  connection_conflict: { label: 'Conflito de sessão', hint: 'A sessão pode estar aberta em outro serviço', dot: 'bg-orange-500' },
+  offline: { label: 'Serviço indisponível', hint: 'O serviço do bot não respondeu', dot: 'bg-red-500' },
+  disconnected: { label: 'Desconectado', hint: 'Conecte o WhatsApp para iniciar', dot: 'bg-red-500' },
+};
+
+export function WhatsAppTab({
+  whatsappStatus,
+  whatsappQR,
   whatsappGroups,
   whatsappTarget,
   whatsappTargetInput,
@@ -17,155 +38,224 @@ export function WhatsAppTab({
   onConnect,
   onSaveTarget,
   sendingEnabled,
+  aiConfigured,
+  aiModel,
   onRefreshStatus
 }) {
+  const status = STATUS_COPY[whatsappStatus] || STATUS_COPY.disconnected;
+  const isBusy = whatsappStatus === 'connecting' || whatsappStatus === 'reconnecting';
+  const canConnect = whatsappStatus !== 'connected' && !isBusy;
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <MessageCircle className="h-5 w-5 text-green-600" />
-          WhatsApp Bot - Notificações PIX
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="text-sm text-muted-foreground mb-4">
-          Conecte o WhatsApp para receber notificações automáticas quando um PIX for aprovado.
-        </div>
-        
-        {/* Status */}
-        <div className="flex items-center gap-3 p-4 bg-secondary/30 rounded-lg">
-          <div className={`w-3 h-3 rounded-full ${
-            whatsappStatus === 'connected' ? 'bg-green-500' :
-            whatsappStatus === 'waiting_qr' ? 'bg-yellow-500 animate-pulse' :
-            whatsappStatus === 'reconnecting' ? 'bg-blue-500 animate-pulse' :
-            'bg-red-500'
-          }`} />
-          <span className="font-medium">
-            {whatsappStatus === 'connected' ? '✅ Conectado' :
-             whatsappStatus === 'waiting_qr' ? '📱 Aguardando QR Code...' :
-             whatsappStatus === 'connecting' ? '🔄 Conectando...' :
-             whatsappStatus === 'logged_out' ? '📱 Conecte novamente pelo QR Code' :
-             whatsappStatus === 'connection_conflict' ? '⚠️ Conexão usada em outro serviço' :
-             whatsappStatus === 'reconnecting' ? '🔄 Reconectando...' :
-             whatsappStatus === 'offline' ? '⚠️ Bot offline (inicie o serviço)' :
-             '❌ Desconectado'}
-          </span>
-        </div>
-
-        {/* QR Code */}
-        {whatsappQR && whatsappStatus !== 'connected' && (
-          <div className="bg-white p-6 rounded-lg border text-center">
-            <p className="text-sm font-medium mb-4">Escaneie o QR Code com seu WhatsApp:</p>
-            <div className="inline-block p-4 bg-white border rounded-lg">
-              <img 
-                src={`data:image/png;base64,${whatsappQR}`}
-                alt="WhatsApp QR Code"
-                className="w-48 h-48"
-              />
+    <div className="space-y-4">
+      <Card className="overflow-hidden">
+        <CardHeader className="pb-3">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <MessageCircle className="h-5 w-5 text-green-600" />
+                WhatsApp & IA
+              </CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Conexão Baileys, assistente financeiro e relatórios do Ganoh.
+              </p>
             </div>
-            <p className="text-xs text-muted-foreground mt-4">
-              1. Abra o WhatsApp no celular<br/>
-              2. Vá em Configurações → Aparelhos Conectados<br/>
-              3. Escaneie o código acima
-            </p>
-          </div>
-        )}
-
-        {/* Show "Get QR Code" button when not connected and no QR */}
-        {!whatsappQR && whatsappStatus !== 'connected' && whatsappStatus !== 'offline' && (
-          <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200 text-center">
-            <p className="text-yellow-700 font-medium mb-3">📱 WhatsApp não conectado</p>
-            <p className="text-sm text-yellow-600 mb-4">
-              Clique no botão abaixo para gerar o QR Code e reconectar.
-            </p>
-            <Button 
-              onClick={onConnect || onRefreshStatus}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              <RefreshCw className="h-4 w-4 mr-2" /> Gerar QR Code
+            <Button variant="outline" size="sm" onClick={onRefreshStatus}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Atualizar
             </Button>
           </div>
-        )}
+        </CardHeader>
 
-        {whatsappStatus === 'connected' && (
-          <div className="space-y-4">
-            <div className="bg-green-50 p-4 rounded-lg border border-green-200">
-              <p className="text-green-700 font-medium">🎉 WhatsApp conectado com sucesso!</p>
-              <p className="text-sm text-green-600 mt-2">
-                {sendingEnabled ? 'Notificações automáticas habilitadas.' : 'Conexão pronta. O envio de mensagens aguarda a conclusão da migração.'}
-              </p>
-            </div>
-            
-            {/* Configurar destino das notificações */}
-            <div className="bg-secondary/30 p-4 rounded-lg border">
-              <Label className="font-medium flex items-center gap-2 mb-2">
-                <Users className="h-4 w-4" /> Destino das Notificações
-              </Label>
-              <p className="text-xs text-muted-foreground mb-3">
-                Cole o link do grupo WhatsApp para entrar e receber notificações
-              </p>
-              <div className="flex gap-2">
-                <Input 
-                  value={whatsappTargetInput}
-                  onChange={(e) => setWhatsappTargetInput(e.target.value)}
-                  placeholder="https://chat.whatsapp.com/xxx"
-                  className="flex-1"
-                />
-                <Button onClick={whatsappTargetInput.includes('chat.whatsapp.com') ? onJoinGroup : onSaveTarget} className="bg-green-600 hover:bg-green-700">
-                  {whatsappTargetInput.includes('chat.whatsapp.com') ? 'Entrar no Grupo' : 'Salvar destino'}
-                </Button>
+        <CardContent className="space-y-5">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="rounded-xl border bg-secondary/20 p-4">
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <MessageCircle className="h-4 w-4" />
+                WhatsApp
               </div>
-              {whatsappTarget && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  ✅ Destino atual: <code className="bg-secondary px-1 rounded">{whatsappTarget}</code>
-                </p>
-              )}
+              <div className="flex items-center gap-2">
+                <span className={`h-2.5 w-2.5 rounded-full ${status.dot}`} />
+                <span className="font-semibold">{status.label}</span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">{status.hint}</p>
             </div>
-            
-            {/* Grupos disponíveis */}
-            {whatsappGroups.length > 0 && (
-              <div className="bg-secondary/30 p-4 rounded-lg border">
-                <Label className="font-medium flex items-center gap-2 mb-2">
-                  <MessageCircle className="h-4 w-4" /> Grupos Disponíveis
-                </Label>
-                <div className="space-y-1 max-h-40 overflow-y-auto">
-                  {whatsappGroups.map((group) => (
-                    <div 
-                      key={group.id} 
-                      className="flex items-center justify-between p-2 bg-white rounded border text-sm hover:bg-secondary/50 cursor-pointer"
-                      onClick={() => {
-                        setWhatsappTargetInput(group.id);
-                        toast.info(`Grupo "${group.name}" selecionado. Clique em Salvar.`);
-                      }}
-                    >
-                      <span>{group.name}</span>
-                      <span className="text-xs text-muted-foreground">{group.participants} membros</span>
-                    </div>
-                  ))}
+
+            <div className="rounded-xl border bg-secondary/20 p-4">
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <Bot className="h-4 w-4" />
+                IA
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`h-2.5 w-2.5 rounded-full ${aiConfigured ? 'bg-green-500' : 'bg-yellow-500'}`} />
+                <span className="font-semibold">{aiConfigured ? 'Configurada' : 'Configuração pendente'}</span>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {aiConfigured ? `${aiModel || 'OpenAI'} · somente leitura financeira` : 'Aguardando chave segura no servidor'}
+              </p>
+            </div>
+
+            <div className="rounded-xl border bg-secondary/20 p-4">
+              <div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                <Clock3 className="h-4 w-4" />
+                Relatórios
+              </div>
+              <div className="font-semibold">14:00 · 22:00</div>
+              <p className="mt-1 text-xs text-muted-foreground">Horário de São Paulo</p>
+            </div>
+          </div>
+
+          {!sendingEnabled && (
+            <div className="flex gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-900">
+              <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" />
+              <div>
+                <p className="font-medium">Envio protegido durante a migração</p>
+                <p className="mt-1 text-sm text-amber-800">
+                  O WhatsApp pode ser preparado e testado, mas mensagens automáticas continuam bloqueadas até a validação final dos dados.
+                </p>
+              </div>
+            </div>
+          )}
+
+          {whatsappQR && whatsappStatus !== 'connected' && (
+            <div className="rounded-2xl border bg-gradient-to-b from-white to-slate-50 p-5 text-center shadow-sm">
+              <div className="mx-auto mb-3 flex h-10 w-10 items-center justify-center rounded-full bg-green-100 text-green-700">
+                <QrCode className="h-5 w-5" />
+              </div>
+              <h3 className="font-semibold text-slate-900">Conectar WhatsApp</h3>
+              <p className="mx-auto mt-1 max-w-sm text-sm text-slate-500">
+                No celular, abra WhatsApp → Configurações → Aparelhos conectados e escaneie o código.
+              </p>
+              <div className="mx-auto mt-5 w-fit rounded-2xl border bg-white p-3 shadow-sm">
+                <img
+                  src={`data:image/png;base64,${whatsappQR}`}
+                  alt="QR Code para conectar o WhatsApp ao Ganoh"
+                  className="h-56 w-56 max-w-[70vw]"
+                />
+              </div>
+              <p className="mt-3 text-xs text-slate-400">
+                A sessão será armazenada de forma persistente para evitar novo QR a cada reinício.
+              </p>
+            </div>
+          )}
+
+          {!whatsappQR && canConnect && (
+            <div className="rounded-xl border bg-secondary/20 p-5 text-center">
+              <QrCode className="mx-auto h-8 w-8 text-muted-foreground" />
+              <p className="mt-3 font-medium">
+                {whatsappStatus === 'offline' ? 'Serviço do WhatsApp não respondeu' : 'WhatsApp ainda não conectado'}
+              </p>
+              <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
+                {whatsappStatus === 'offline'
+                  ? 'Atualize o status. Quando o serviço estiver disponível, gere um novo QR Code.'
+                  : 'Gere o QR Code para vincular o aparelho ao Ganoh.'}
+              </p>
+              <Button
+                onClick={whatsappStatus === 'offline' ? onRefreshStatus : onConnect}
+                className="mt-4 bg-green-600 hover:bg-green-700"
+              >
+                {whatsappStatus === 'offline' ? (
+                  <><RefreshCw className="mr-2 h-4 w-4" /> Verificar serviço</>
+                ) : (
+                  <><QrCode className="mr-2 h-4 w-4" /> Gerar QR Code</>
+                )}
+              </Button>
+            </div>
+          )}
+
+          {isBusy && (
+            <div className="rounded-xl border bg-blue-50 p-4 text-center text-sm text-blue-800">
+              <RefreshCw className="mr-2 inline h-4 w-4 animate-spin" />
+              {status.hint}
+            </div>
+          )}
+
+          {whatsappStatus === 'connected' && (
+            <div className="space-y-4">
+              <div className="flex gap-3 rounded-xl border border-green-200 bg-green-50 p-4 text-green-900">
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0" />
+                <div>
+                  <p className="font-medium">WhatsApp conectado</p>
+                  <p className="mt-1 text-sm text-green-800">
+                    Sessão protegida, persistente e com reconexão automática.
+                  </p>
                 </div>
               </div>
-            )}
-          </div>
-        )}
 
-        {whatsappStatus === 'offline' && (
-          <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-            <p className="text-yellow-700 font-medium">⚠️ Serviço do bot não está rodando</p>
-            <p className="text-sm text-yellow-600 mt-2">
-              O bot do WhatsApp precisa ser iniciado no servidor.
-            </p>
-          </div>
-        )}
+              <div className="rounded-xl border bg-secondary/20 p-4">
+                <Label className="mb-2 flex items-center gap-2 font-medium">
+                  <Users className="h-4 w-4" />
+                  Grupo oficial do Ganoh
+                </Label>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  Selecione um grupo listado abaixo ou cole um link de convite.
+                </p>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    value={whatsappTargetInput}
+                    onChange={(e) => setWhatsappTargetInput(e.target.value)}
+                    placeholder="Grupo selecionado ou link chat.whatsapp.com/..."
+                    className="flex-1"
+                  />
+                  <Button
+                    onClick={whatsappTargetInput.includes('chat.whatsapp.com') ? onJoinGroup : onSaveTarget}
+                    className="bg-green-600 hover:bg-green-700"
+                    disabled={!whatsappTargetInput.trim()}
+                  >
+                    {whatsappTargetInput.includes('chat.whatsapp.com') ? 'Entrar no grupo' : 'Salvar grupo'}
+                  </Button>
+                </div>
+                {whatsappTarget && (
+                  <p className="mt-2 break-all text-xs text-muted-foreground">
+                    <ShieldCheck className="mr-1 inline h-3.5 w-3.5" />
+                    Destino salvo: <code>{whatsappTarget}</code>
+                  </p>
+                )}
+              </div>
 
-        <Button 
-          variant="outline" 
-          onClick={onRefreshStatus}
-          className="w-full"
-        >
-          <RefreshCw className="h-4 w-4 mr-2" /> Atualizar Status
-        </Button>
-      </CardContent>
-    </Card>
+              {whatsappGroups.length > 0 && (
+                <div className="rounded-xl border bg-secondary/20 p-4">
+                  <Label className="mb-3 flex items-center gap-2 font-medium">
+                    <MessageCircle className="h-4 w-4" />
+                    Grupos disponíveis
+                  </Label>
+                  <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
+                    {whatsappGroups.map((group) => (
+                      <button
+                        type="button"
+                        key={group.id}
+                        className="flex w-full items-center justify-between gap-3 rounded-lg border bg-background p-3 text-left text-sm transition hover:bg-secondary/50"
+                        onClick={() => {
+                          setWhatsappTargetInput(group.id);
+                          toast.info(`Grupo "${group.name}" selecionado. Clique em Salvar grupo.`);
+                        }}
+                      >
+                        <span className="font-medium">{group.name}</span>
+                        <span className="shrink-0 text-xs text-muted-foreground">
+                          {group.participants} membros
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {whatsappStatus === 'offline' && (
+            <div className="flex gap-3 rounded-xl border border-red-200 bg-red-50 p-4 text-red-900">
+              <WifiOff className="mt-0.5 h-5 w-5 shrink-0" />
+              <div>
+                <p className="font-medium">Bot indisponível</p>
+                <p className="mt-1 text-sm text-red-800">
+                  Nenhuma sessão ou dado financeiro será apagado. Verifique o serviço antes de tentar conectar novamente.
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
