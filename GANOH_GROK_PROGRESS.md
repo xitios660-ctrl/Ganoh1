@@ -86,7 +86,7 @@ Credenciais que **já estiveram hardcoded** no repo devem ser consideradas **exp
 | --- | --- |
 | `39d3a13` | docs: add GANOH_GROK_PROGRESS.md (etapa 1 audit) |
 | `c6bc3cb` | security: remove hard-coded WhatsApp/gestor/prazo defaults |
-| `cd20459` | docs: ETAPA 3 security hardening progress |
+| tip docs | `GANOH_GROK_PROGRESS.md` atualizado (ETAPA 3) — ver `git log -1` na branch |
 
 ## Próxima etapa
 **ETAPA 4 — Baileys inbound** (`messages.upsert` + fila/outbox), sem ligar `WHATSAPP_SEND_ENABLED` / sem deploy. Continuar só em `ganoh/grok-whatsapp-ai`.
