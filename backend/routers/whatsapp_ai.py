@@ -12,7 +12,7 @@ import json
 import os
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, Optional
 
 import httpx
@@ -144,6 +144,39 @@ async def _is_authorized_source(message: IncomingWhatsAppMessage) -> bool:
     if setting and setting.get("value"):
         allowed.add(setting["value"])
     return message.chatId in allowed or message.sender in allowed
+
+
+def _jid_phone(jid: str) -> str:
+    local = (jid or "").split("@", 1)[0]
+    return "".join(ch for ch in local if ch.isdigit())
+
+
+async def _is_known_customer_sender(message: IncomingWhatsAppMessage) -> bool:
+    sender_digits = _jid_phone(message.sender)
+    if len(sender_digits) < 10:
+        return False
+    customers = await db.prazo_customers.find(
+        {"phone": {"$nin": [None, ""]}},
+        {"_id": 0, "phone": 1},
+    ).to_list(1500)
+    for customer in customers:
+        phone_digits = "".join(ch for ch in str(customer.get("phone", "")) if ch.isdigit())
+        if not phone_digits:
+            continue
+        if len(phone_digits) in (10, 11):
+            phone_digits = "55" + phone_digits
+        if sender_digits == phone_digits or sender_digits.endswith(phone_digits) or phone_digits.endswith(sender_digits):
+            return True
+    return False
+
+
+async def _receipt_rate_limited(message: IncomingWhatsAppMessage) -> bool:
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+    count = await db.whatsapp_receipts.count_documents({
+        "sender": message.sender,
+        "created_at": {"$gte": cutoff},
+    })
+    return count >= 10
 
 
 def _local_url(path: str) -> str:
@@ -331,6 +364,38 @@ def _decode_media(message: IncomingWhatsAppMessage) -> bytes:
     return data
 
 
+async def _fetch_receipt_media(receipt_id: str) -> dict[str, Any]:
+    token = os.environ.get("WHATSAPP_INTERNAL_TOKEN", "")
+    if not token:
+        raise HTTPException(status_code=503, detail="WhatsApp internal token unavailable")
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        response = await client.get(
+            f"http://127.0.0.1:8002/media/{receipt_id}",
+            headers={"x-whatsapp-token": token},
+        )
+    if response.status_code == 404:
+        raise HTTPException(status_code=404, detail="Receipt media expired or unavailable")
+    if response.status_code != 200:
+        raise HTTPException(status_code=503, detail="Receipt media service unavailable")
+    data = response.json()
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=503, detail="Invalid receipt media response")
+    return data
+
+
+def _pending_receipt_analysis() -> dict[str, Any]:
+    return {
+        "amount": None,
+        "payer_name": None,
+        "transaction_date": None,
+        "transaction_time": None,
+        "reference": None,
+        "bank": None,
+        "confidence": 0,
+        "analysis_status": "pending_manager_analysis",
+    }
+
+
 async def _analyze_receipt(message: IncomingWhatsAppMessage) -> tuple[dict[str, Any], str]:
     raw = _decode_media(message)
     media_hash = hashlib.sha256(raw).hexdigest()
@@ -485,19 +550,62 @@ async def list_whatsapp_receipts(limit: int = 50):
 
 @router.get("/receipts/{receipt_id}/media", dependencies=[Depends(require_manager)])
 async def get_whatsapp_receipt_media(receipt_id: str):
-    token = os.environ.get("WHATSAPP_INTERNAL_TOKEN", "")
-    if not token:
-        raise HTTPException(status_code=503, detail="WhatsApp internal token unavailable")
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.get(
-            f"http://127.0.0.1:8002/media/{receipt_id}",
-            headers={"x-whatsapp-token": token},
+    return await _fetch_receipt_media(receipt_id)
+
+
+@router.post("/receipts/{receipt_id}/analyze", dependencies=[Depends(require_manager)])
+async def analyze_whatsapp_receipt(receipt_id: str):
+    receipt = await db.whatsapp_receipts.find_one({"_id": receipt_id})
+    if not receipt:
+        raise HTTPException(status_code=404, detail="Receipt not found")
+    if not os.environ.get("OPENAI_API_KEY"):
+        raise HTTPException(status_code=503, detail="OpenAI is not configured")
+
+    media = await _fetch_receipt_media(receipt_id)
+    message = IncomingWhatsAppMessage(
+        messageId=receipt_id,
+        chatId=receipt.get("chat_id", ""),
+        sender=receipt.get("sender", ""),
+        fromGroup=bool(receipt.get("from_group")),
+        kind="document" if media.get("mimeType") == "application/pdf" else "image",
+        text="",
+        mimeType=media.get("mimeType", ""),
+        fileName=media.get("fileName", ""),
+        mediaBase64=media.get("data", ""),
+        receivedAt=receipt.get("received_at"),
+    )
+    try:
+        analysis, media_hash = await _analyze_receipt(message)
+    except Exception as exc:
+        await db.whatsapp_receipts.update_one(
+            {"_id": receipt_id},
+            {"$set": {
+                "analysis.analysis_status": "analysis_failed",
+                "analysis_error": type(exc).__name__,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
         )
-    if response.status_code == 404:
-        raise HTTPException(status_code=404, detail="Receipt media expired or unavailable")
-    if response.status_code != 200:
-        raise HTTPException(status_code=503, detail="Receipt media service unavailable")
-    return response.json()
+        raise HTTPException(status_code=503, detail="Receipt analysis unavailable")
+
+    candidates = await _find_candidate_orders(analysis.get("amount"))
+    duplicate = await db.whatsapp_receipts.find_one({
+        "media_hash": media_hash,
+        "_id": {"$ne": receipt_id},
+        "status": {"$ne": "rejected"},
+    }, {"_id": 1})
+    status = "duplicate_suspected" if duplicate else "pending_review"
+    await db.whatsapp_receipts.update_one(
+        {"_id": receipt_id},
+        {"$set": {
+            "analysis": analysis,
+            "media_hash": media_hash,
+            "candidate_orders": candidates,
+            "status": status,
+            "duplicate_of": duplicate.get("_id") if duplicate else None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }},
+    )
+    return {"success": True, "status": status, "candidate_count": len(candidates)}
 
 
 @router.post("/receipts/{receipt_id}/review", dependencies=[Depends(require_manager)])
@@ -615,23 +723,45 @@ async def incoming_whatsapp(
     if existing and existing.get("status") in FINAL_EVENT_STATUSES:
         return {"success": True, "duplicate": True, "status": existing.get("status")}
 
-    if not await _is_authorized_source(message):
-        await _record_event(message, "unauthorized_source")
-        return {"success": True, "status": "unauthorized_source"}
+    authorized_source = await _is_authorized_source(message)
 
     if message.kind in {"image", "document"}:
+        # Private senders may submit receipts, but financial Q&A remains manager-only.
+        # Untrusted groups are ignored to avoid turning group spam into receipt processing.
+        if message.fromGroup and not authorized_source:
+            await _record_event(message, "unauthorized_source")
+            return {"success": True, "status": "unauthorized_source"}
+        if await _receipt_rate_limited(message):
+            await _record_event(message, "rate_limited")
+            return {"success": True, "status": "rate_limited"}
         if not message.mediaBase64:
             await _record_event(message, "receipt_media_missing")
             return {"success": True, "status": "receipt_media_missing"}
+
         try:
-            analysis, media_hash = await _analyze_receipt(message)
-            candidates = await _find_candidate_orders(analysis.get("amount"))
+            raw = _decode_media(message)
+            media_hash = hashlib.sha256(raw).hexdigest()
+            should_auto_analyze = authorized_source or await _is_known_customer_sender(message)
+            if should_auto_analyze and os.environ.get("OPENAI_API_KEY"):
+                analysis, media_hash = await _analyze_receipt(message)
+                candidates = await _find_candidate_orders(analysis.get("amount"))
+            else:
+                analysis = _pending_receipt_analysis()
+                candidates = []
             status = await _store_receipt(message, analysis, media_hash, candidates)
         except Exception as exc:
             await _record_event(message, "error", error=type(exc).__name__)
-            raise HTTPException(status_code=503, detail="Receipt analysis unavailable")
+            raise HTTPException(status_code=503, detail="Receipt processing unavailable")
 
         event_status = "receipt_duplicate_suspected" if status == "duplicate_suspected" else "receipt_pending_review"
+        await db.whatsapp_receipts.update_one(
+            {"_id": message.messageId},
+            {"$set": {
+                "from_group": message.fromGroup,
+                "received_at": message.receivedAt,
+                "auto_analyzed": analysis.get("analysis_status") == "analyzed",
+            }},
+        )
         await _record_event(message, event_status, candidate_count=len(candidates))
         if os.environ.get("WHATSAPP_SEND_ENABLED", "false").lower() == "true":
             notice = (
@@ -640,6 +770,10 @@ async def incoming_whatsapp(
             )
             await send_whatsapp_message(notice, message.chatId)
         return {"success": True, "status": event_status, "candidate_count": len(candidates)}
+
+    if not authorized_source:
+        await _record_event(message, "unauthorized_source")
+        return {"success": True, "status": "unauthorized_source"}
 
     if message.kind != "text" or not message.text.strip():
         await _record_event(message, "ignored_media")
