@@ -1,20 +1,30 @@
-import React from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
+import axios from 'axios';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import {
+  AlertTriangle,
   Bot,
+  Check,
   CheckCircle2,
   Clock3,
+  Eye,
+  Loader2,
   MessageCircle,
+  Pencil,
   QrCode,
+  Receipt,
   RefreshCw,
   ShieldCheck,
   Users,
-  WifiOff
+  WifiOff,
+  XCircle
 } from 'lucide-react';
 import { toast } from 'sonner';
+
+const API = `${process.env.REACT_APP_BACKEND_URL || ''}/api`;
 
 const STATUS_COPY = {
   connected: { label: 'Conectado', hint: 'Sessão ativa e persistente', dot: 'bg-green-500' },
@@ -26,6 +36,26 @@ const STATUS_COPY = {
   offline: { label: 'Serviço indisponível', hint: 'O serviço do bot não respondeu', dot: 'bg-red-500' },
   disconnected: { label: 'Desconectado', hint: 'Conecte o WhatsApp para iniciar', dot: 'bg-red-500' },
 };
+
+const authConfig = () => {
+  const value = localStorage.getItem('gestor_auth');
+  return { headers: value ? { Authorization: `Basic ${value}` } : {}, timeout: 20000 };
+};
+
+const money = (value) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 'Valor não identificado';
+  return parsed.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+};
+
+const receiptDraft = (receipt) => ({
+  amount: receipt?.analysis?.amount ?? '',
+  payer_name: receipt?.analysis?.payer_name ?? '',
+  order_id:
+    receipt?.selected_order_id ||
+    (receipt?.candidate_orders?.length === 1 ? receipt.candidate_orders[0].id : ''),
+  notes: receipt?.notes || ''
+});
 
 export function WhatsAppTab({
   whatsappStatus,
@@ -45,6 +75,109 @@ export function WhatsAppTab({
   const status = STATUS_COPY[whatsappStatus] || STATUS_COPY.disconnected;
   const isBusy = whatsappStatus === 'connecting' || whatsappStatus === 'reconnecting';
   const canConnect = whatsappStatus !== 'connected' && !isBusy;
+
+  const [receipts, setReceipts] = useState([]);
+  const [receiptDrafts, setReceiptDrafts] = useState({});
+  const [receiptMedia, setReceiptMedia] = useState({});
+  const [receiptsLoading, setReceiptsLoading] = useState(false);
+  const [receiptActionId, setReceiptActionId] = useState('');
+
+  const refreshReceipts = useCallback(async (silent = false) => {
+    if (!silent) setReceiptsLoading(true);
+    try {
+      const response = await axios.get(`${API}/whatsapp/receipts?limit=50`, authConfig());
+      const items = response.data.receipts || [];
+      setReceipts(items);
+      setReceiptDrafts((current) => {
+        const next = { ...current };
+        items.forEach((item) => {
+          if (!next[item.id]) next[item.id] = receiptDraft(item);
+        });
+        return next;
+      });
+    } catch (error) {
+      if (!silent && error?.response?.status !== 404) {
+        toast.error('Não foi possível carregar os comprovantes do WhatsApp.');
+      }
+    } finally {
+      if (!silent) setReceiptsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshReceipts(true);
+    const timer = setInterval(() => refreshReceipts(true), 15000);
+    return () => clearInterval(timer);
+  }, [refreshReceipts]);
+
+  const updateReceiptDraft = (id, field, value) => {
+    setReceiptDrafts((current) => ({
+      ...current,
+      [id]: { ...(current[id] || {}), [field]: value }
+    }));
+  };
+
+  const loadReceiptMedia = async (receipt) => {
+    if (receiptMedia[receipt.id]) {
+      setReceiptMedia((current) => {
+        const next = { ...current };
+        delete next[receipt.id];
+        return next;
+      });
+      return;
+    }
+    setReceiptActionId(`media:${receipt.id}`);
+    try {
+      const response = await axios.get(`${API}/whatsapp/receipts/${receipt.id}/media`, authConfig());
+      setReceiptMedia((current) => ({ ...current, [receipt.id]: response.data }));
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'A mídia do comprovante não está mais disponível.');
+    } finally {
+      setReceiptActionId('');
+    }
+  };
+
+  const reviewReceipt = async (receipt, action) => {
+    const draft = receiptDrafts[receipt.id] || receiptDraft(receipt);
+    if (action === 'confirm' && !draft.order_id) {
+      toast.error('Selecione o pedido PIX antes de confirmar.');
+      return;
+    }
+    if ((action === 'confirm' || action === 'correct') && draft.amount === '') {
+      toast.error('Confira o valor do comprovante.');
+      return;
+    }
+
+    setReceiptActionId(`${action}:${receipt.id}`);
+    try {
+      await axios.post(
+        `${API}/whatsapp/receipts/${receipt.id}/review`,
+        {
+          action,
+          order_id: draft.order_id || null,
+          amount: draft.amount === '' ? null : Number(draft.amount),
+          payer_name: draft.payer_name || null,
+          notes: draft.notes || null
+        },
+        authConfig()
+      );
+
+      if (action === 'confirm') toast.success('Comprovante confirmado pelo Gestor.');
+      if (action === 'reject') toast.success('Comprovante recusado.');
+      if (action === 'correct') toast.success('Correção salva e pedidos compatíveis recalculados.');
+
+      setReceiptDrafts((current) => {
+        const next = { ...current };
+        delete next[receipt.id];
+        return next;
+      });
+      await refreshReceipts(true);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'Não foi possível concluir a revisão.');
+    } finally {
+      setReceiptActionId('');
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -251,6 +384,185 @@ export function WhatsAppTab({
                   Nenhuma sessão ou dado financeiro será apagado. Verifique o serviço antes de tentar conectar novamente.
                 </p>
               </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Receipt className="h-5 w-5" />
+                Comprovantes aguardando revisão
+              </CardTitle>
+              <p className="mt-1 text-sm text-muted-foreground">
+                A IA extrai os dados, mas somente o Gestor pode confirmar o pagamento.
+              </p>
+            </div>
+            <Button variant="outline" size="sm" onClick={() => refreshReceipts(false)} disabled={receiptsLoading}>
+              {receiptsLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+              Revisar
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {receipts.length === 0 ? (
+            <div className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+              Nenhum comprovante pendente no momento.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {receipts.map((receipt) => {
+                const draft = receiptDrafts[receipt.id] || receiptDraft(receipt);
+                const media = receiptMedia[receipt.id];
+                const candidates = receipt.candidate_orders || [];
+                const duplicate = receipt.status === 'duplicate_suspected';
+                const busy = receiptActionId.endsWith(`:${receipt.id}`);
+
+                return (
+                  <div key={receipt.id} className="rounded-2xl border bg-background p-4 shadow-sm">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-semibold">{money(receipt.analysis?.amount)}</span>
+                          <span className="rounded-full bg-secondary px-2 py-0.5 text-xs">
+                            {receipt.analysis?.analysis_status === 'ai_not_configured' ? 'Aguardando IA' : 'Analisado pela IA'}
+                          </span>
+                          {duplicate && (
+                            <span className="flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">
+                              <AlertTriangle className="h-3 w-3" />
+                              Possível duplicado
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-1 text-sm text-muted-foreground">
+                          Pagador: {receipt.analysis?.payer_name || 'não identificado'}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Confiança: {Math.round(Number(receipt.analysis?.confidence || 0) * 100)}%
+                          {receipt.analysis?.transaction_date ? ` · ${receipt.analysis.transaction_date}` : ''}
+                          {receipt.analysis?.transaction_time ? ` ${receipt.analysis.transaction_time}` : ''}
+                        </p>
+                      </div>
+                      <Button variant="outline" size="sm" onClick={() => loadReceiptMedia(receipt)}>
+                        {receiptActionId === `media:${receipt.id}`
+                          ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          : <Eye className="mr-2 h-4 w-4" />}
+                        {media ? 'Ocultar' : 'Ver comprovante'}
+                      </Button>
+                    </div>
+
+                    {media && (
+                      <div className="mt-4 rounded-xl border bg-secondary/10 p-3">
+                        {media.mimeType?.startsWith('image/') ? (
+                          <img
+                            src={`data:${media.mimeType};base64,${media.data}`}
+                            alt="Comprovante recebido pelo WhatsApp"
+                            className="mx-auto max-h-96 max-w-full rounded-lg object-contain"
+                          />
+                        ) : (
+                          <a
+                            href={`data:${media.mimeType || 'application/pdf'};base64,${media.data}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-sm font-medium underline"
+                          >
+                            Abrir documento {media.fileName || 'comprovante'}
+                          </a>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div>
+                        <Label className="text-xs">Valor conferido</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={draft.amount}
+                          onChange={(e) => updateReceiptDraft(receipt.id, 'amount', e.target.value)}
+                          placeholder="0,00"
+                        />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Nome do pagador</Label>
+                        <Input
+                          value={draft.payer_name}
+                          onChange={(e) => updateReceiptDraft(receipt.id, 'payer_name', e.target.value)}
+                          placeholder="Pagador"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <Label className="text-xs">Pedido PIX correspondente</Label>
+                      <select
+                        className="mt-1 h-10 w-full rounded-md border border-input bg-background px-3 text-sm"
+                        value={draft.order_id}
+                        onChange={(e) => updateReceiptDraft(receipt.id, 'order_id', e.target.value)}
+                      >
+                        <option value="">Selecione o pedido</option>
+                        {candidates.map((order) => (
+                          <option key={order.id} value={order.id}>
+                            {order.customer_name || 'Cliente'} · {money(order.total)} · {order.store}
+                          </option>
+                        ))}
+                      </select>
+                      {candidates.length === 0 && (
+                        <p className="mt-1 text-xs text-amber-700">
+                          Nenhum pedido PIX pendente bateu com esse valor. Corrija o valor e salve antes de confirmar.
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="mt-3">
+                      <Label className="text-xs">Observação do Gestor</Label>
+                      <Input
+                        value={draft.notes}
+                        onChange={(e) => updateReceiptDraft(receipt.id, 'notes', e.target.value)}
+                        placeholder="Opcional"
+                      />
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                      <Button
+                        variant="outline"
+                        onClick={() => reviewReceipt(receipt, 'correct')}
+                        disabled={busy}
+                      >
+                        {receiptActionId === `correct:${receipt.id}`
+                          ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          : <Pencil className="mr-2 h-4 w-4" />}
+                        Corrigir
+                      </Button>
+                      <Button
+                        variant="outline"
+                        className="border-red-200 text-red-700 hover:bg-red-50"
+                        onClick={() => reviewReceipt(receipt, 'reject')}
+                        disabled={busy}
+                      >
+                        {receiptActionId === `reject:${receipt.id}`
+                          ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          : <XCircle className="mr-2 h-4 w-4" />}
+                        Recusar
+                      </Button>
+                      <Button
+                        className="bg-green-600 hover:bg-green-700"
+                        onClick={() => reviewReceipt(receipt, 'confirm')}
+                        disabled={busy || !draft.order_id}
+                      >
+                        {receiptActionId === `confirm:${receipt.id}`
+                          ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          : <Check className="mr-2 h-4 w-4" />}
+                        Confirmar pagamento
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </CardContent>
