@@ -1,4 +1,15 @@
-from routers.whatsapp_ai import classify_intent, extract_response_text, requests_mutation
+import importlib.util
+from pathlib import Path
+
+MODULE_PATH = Path(__file__).resolve().parents[1] / "routers" / "whatsapp_ai.py"
+spec = importlib.util.spec_from_file_location("ganoh_whatsapp_ai", MODULE_PATH)
+whatsapp_ai = importlib.util.module_from_spec(spec)
+assert spec and spec.loader
+spec.loader.exec_module(whatsapp_ai)
+
+classify_intent = whatsapp_ai.classify_intent
+extract_response_text = whatsapp_ai.extract_response_text
+requests_mutation = whatsapp_ai.requests_mutation
 
 
 def test_classify_financial_intents():
