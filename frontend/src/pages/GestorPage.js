@@ -145,6 +145,8 @@ export const GestorPage = () => {
   const [whatsappStatus, setWhatsappStatus] = useState('disconnected');
   const [whatsappQR, setWhatsappQR] = useState(null);
   const [whatsappSendingEnabled, setWhatsappSendingEnabled] = useState(false);
+  const [whatsappAIConfigured, setWhatsappAIConfigured] = useState(false);
+  const [whatsappAIModel, setWhatsappAIModel] = useState('');
   const [whatsappGroups, setWhatsappGroups] = useState([]);
   const [whatsappTarget, setWhatsappTarget] = useState('');
   const [whatsappTargetInput, setWhatsappTargetInput] = useState('');
@@ -501,6 +503,8 @@ export const GestorPage = () => {
       const response = await axios.get(`${API}/whatsapp/status`, whatsappAuthConfig());
       setWhatsappStatus(response.data.status);
       setWhatsappSendingEnabled(response.data.sendingEnabled === true);
+      setWhatsappAIConfigured(response.data.aiConfigured === true);
+      setWhatsappAIModel(response.data.aiModel || '');
       
       // If not connected, fetch QR code
       if (response.data.status !== 'connected' && response.data.status !== 'offline') {
@@ -2270,6 +2274,8 @@ export const GestorPage = () => {
               onConnect={connectWhatsApp}
               onSaveTarget={saveWhatsAppTarget}
               sendingEnabled={whatsappSendingEnabled}
+              aiConfigured={whatsappAIConfigured}
+              aiModel={whatsappAIModel}
               onRefreshStatus={fetchWhatsAppStatus}
             />
           </TabsContent>
