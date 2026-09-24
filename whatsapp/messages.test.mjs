@@ -22,12 +22,14 @@ test('normalizes a group image caption without exposing binary media', () => {
       participant: '5511888888888@s.whatsapp.net',
       fromMe: false
     },
-    message: { imageMessage: { caption: 'Comprovante PIX' } }
+    message: { imageMessage: { caption: 'Comprovante PIX', mimetype: 'image/png' } }
   });
   assert.equal(result.kind, 'image');
   assert.equal(result.text, 'Comprovante PIX');
   assert.equal(result.fromGroup, true);
   assert.equal(result.sender, '5511888888888@s.whatsapp.net');
+  assert.equal(result.mimeType, 'image/png');
+  assert.equal(result.fileName, 'comprovante.jpg');
 });
 
 test('ignores own messages and status broadcasts', () => {
