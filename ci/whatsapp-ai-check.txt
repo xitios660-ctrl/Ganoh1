@@ -1,0 +1,2 @@
+CI trigger for ganoh/whatsapp-ai validation.
+No production changes.
