@@ -523,17 +523,22 @@ async def review_whatsapp_receipt(receipt_id: str, review: ReceiptReview):
         return {"success": True, "status": "rejected"}
 
     if review.action == "correct":
+        candidates = await _find_candidate_orders(analysis.get("amount"))
+        selected_order_id = review.order_id
+        if selected_order_id and not any(item.get("id") == selected_order_id for item in candidates):
+            selected_order_id = None
         await db.whatsapp_receipts.update_one(
             {"_id": receipt_id},
             {"$set": {
                 "status": "pending_review",
                 "analysis": analysis,
-                "selected_order_id": review.order_id,
+                "candidate_orders": candidates,
+                "selected_order_id": selected_order_id,
                 "notes": review.notes or "",
                 "updated_at": now,
             }},
         )
-        return {"success": True, "status": "pending_review"}
+        return {"success": True, "status": "pending_review", "candidate_count": len(candidates)}
 
     order_id = review.order_id or receipt.get("selected_order_id")
     if not order_id:
