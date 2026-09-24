@@ -35,10 +35,10 @@ BAILEYS_TOKEN = os.environ.get("WHATSAPP_INTERNAL_TOKEN", "")
 
 # Green API Configuration (Cloud WhatsApp)
 GREEN_API_URL = os.environ.get("GREEN_API_URL", "https://7107.api.greenapi.com")
-GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE", "7107550497")
-GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "ddbec57064a544909aecfbebe1e4d95faa1677ff39b04f68b2")
-WHATSAPP_GROUP_ID = os.environ.get("WHATSAPP_GROUP_ID", "120363424613813278@g.us")  # GYM Londres
-WHATSAPP_GROUP_RUNNER = os.environ.get("WHATSAPP_GROUP_RUNNER", "5511974449533-1572969909@g.us")  # Runner
+GREEN_API_INSTANCE = os.environ.get("GREEN_API_INSTANCE", "")
+GREEN_API_TOKEN = os.environ.get("GREEN_API_TOKEN", "")
+WHATSAPP_GROUP_ID = os.environ.get("WHATSAPP_GROUP_ID", "")
+WHATSAPP_GROUP_RUNNER = os.environ.get("WHATSAPP_GROUP_RUNNER", "")
 
 # Map stores to their WhatsApp groups
 STORE_WHATSAPP_GROUPS = {
@@ -6424,7 +6424,7 @@ async def shutdown_db_client():
     client.close()
 
 # Import and configure new routers
-from routers import prazo, menu, stock, cash, live
+from routers import prazo, menu, stock, cash, live, whatsapp_ai
 
 # Initialize dependencies for new routers
 prazo.set_dependencies(db, PRAZO_PASSWORD, send_whatsapp_message)
@@ -6432,6 +6432,7 @@ menu.set_dependencies(db, verify_gestor)
 stock.set_dependencies(db, verify_gestor)
 cash.set_dependencies(db, BRAZIL_TZ)
 live.set_dependencies(db, BRAZIL_TZ)
+whatsapp_ai.set_dependencies(db, send_whatsapp_message, BRAZIL_TZ)
 
 # Include routers - api_router must be LAST to ensure new routers take priority
 api_router.include_router(prazo.router)
@@ -6439,5 +6440,6 @@ api_router.include_router(menu.router)
 api_router.include_router(stock.router)
 api_router.include_router(cash.router)
 api_router.include_router(live.router)
+api_router.include_router(whatsapp_ai.router)
 
 app.include_router(api_router)
