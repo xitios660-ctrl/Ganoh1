@@ -19,6 +19,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
 import resend
+from pymongo.errors import DuplicateKeyError
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -5518,7 +5519,11 @@ async def get_whatsapp_status():
                 "qrCode": None,
                 "greenApi": WHATSAPP_PROVIDER == "greenapi",
                 "provider": WHATSAPP_PROVIDER,
-                "sendingEnabled": data.get("sendingEnabled", True)
+                "sendingEnabled": data.get("sendingEnabled", True),
+                "aiConfigured": bool(os.environ.get("OPENAI_API_KEY")),
+                "aiModel": os.environ.get("OPENAI_MODEL", "gpt-5.6-luna"),
+                "aiMode": "read_only",
+                "reportTimes": ["14:00", "22:00"],
             }
     except Exception as e:
         return {"status": "offline", "connected": False, "qrCode": None, "error": str(e)}
@@ -5726,6 +5731,71 @@ async def check_and_save_low_stock_items():
     except Exception as e:
         logger.error(f"Error checking low stock: {e}")
 
+async def _claim_whatsapp_report(report_type: str, store: str, now_brazil: datetime) -> Optional[str]:
+    """Atomically claim one scheduled report per store/day to prevent duplicates."""
+    report_id = f"{now_brazil.strftime('%Y-%m-%d')}:{report_type}:{store}"
+    record = {
+        "_id": report_id,
+        "report_type": report_type,
+        "store": store,
+        "report_date": now_brazil.strftime("%Y-%m-%d"),
+        "status": "sending",
+        "attempted_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        await db.whatsapp_report_runs.insert_one(record)
+        return report_id
+    except DuplicateKeyError:
+        existing = await db.whatsapp_report_runs.find_one({"_id": report_id}, {"_id": 0, "status": 1})
+        if not existing or existing.get("status") in {"sent", "sending"}:
+            return None
+        result = await db.whatsapp_report_runs.update_one(
+            {"_id": report_id, "status": "failed"},
+            {"$set": {
+                "status": "sending",
+                "attempted_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        return report_id if result.modified_count == 1 else None
+
+
+async def _finish_whatsapp_report(report_id: str, status: str, error: str = "") -> None:
+    update = {
+        "status": status,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if status == "sent":
+        update["sent_at"] = datetime.now(timezone.utc).isoformat()
+        update["error"] = ""
+    elif error:
+        update["error"] = error[:120]
+    await db.whatsapp_report_runs.update_one({"_id": report_id}, {"$set": update})
+
+
+async def _send_whatsapp_report_once(
+    report_type: str,
+    store: str,
+    group_id: str,
+    message: str,
+    now_brazil: datetime,
+) -> dict:
+    if not group_id:
+        return {"success": False, "reason": "no_target"}
+    report_id = await _claim_whatsapp_report(report_type, store, now_brazil)
+    if not report_id:
+        return {"success": False, "reason": "already_sent_or_sending"}
+    try:
+        result = await send_whatsapp_message(message, group_id)
+        if result.get("success"):
+            await _finish_whatsapp_report(report_id, "sent")
+        else:
+            await _finish_whatsapp_report(report_id, "failed", "send_failed")
+        return result
+    except Exception as exc:
+        await _finish_whatsapp_report(report_id, "failed", type(exc).__name__)
+        raise
+
+
 async def send_morning_shift_report():
     """Send morning shift sales report to WhatsApp groups at 14:00"""
     try:
@@ -5820,10 +5890,12 @@ async def send_morning_shift_report():
                 ])
                 
                 message = "\n".join(message_lines)
-                result = await send_whatsapp_message(message, group_id)
+                result = await _send_whatsapp_report_once("morning_14", store, group_id, message, now)
                 
                 if result.get("success"):
                     logger.info(f"Morning shift report sent to {store_name}! Total: R$ {morning_total:.2f}")
+                elif result.get("reason") == "already_sent_or_sending":
+                    logger.info(f"Morning shift report already handled for {store_name}; skipping duplicate")
                 else:
                     logger.error(f"Failed to send morning report to {store_name}: {result}")
                     
@@ -5941,10 +6013,12 @@ async def send_daily_sales_report():
             ])
             
             message = "\n".join(message_lines)
-            result = await send_whatsapp_message(message, group_id)
+            result = await _send_whatsapp_report_once("daily_22", store, group_id, message, now)
             
             if result.get("success"):
                 logger.info(f"Daily sales report sent to {store_name}! Total: R$ {day_total:.2f}")
+            elif result.get("reason") == "already_sent_or_sending":
+                logger.info(f"Daily sales report already handled for {store_name}; skipping duplicate")
         
     except Exception as e:
         logger.error(f"Error sending daily sales report: {e}")
@@ -6424,7 +6498,7 @@ async def shutdown_db_client():
     client.close()
 
 # Import and configure new routers
-from routers import prazo, menu, stock, cash, live
+from routers import prazo, menu, stock, cash, live, whatsapp_ai
 
 # Initialize dependencies for new routers
 prazo.set_dependencies(db, PRAZO_PASSWORD, send_whatsapp_message)
@@ -6432,6 +6506,7 @@ menu.set_dependencies(db, verify_gestor)
 stock.set_dependencies(db, verify_gestor)
 cash.set_dependencies(db, BRAZIL_TZ)
 live.set_dependencies(db, BRAZIL_TZ)
+whatsapp_ai.set_dependencies(db, send_whatsapp_message, BRAZIL_TZ)
 
 # Include routers - api_router must be LAST to ensure new routers take priority
 api_router.include_router(prazo.router)
@@ -6439,5 +6514,6 @@ api_router.include_router(menu.router)
 api_router.include_router(stock.router)
 api_router.include_router(cash.router)
 api_router.include_router(live.router)
+api_router.include_router(whatsapp_ai.router)
 
 app.include_router(api_router)
