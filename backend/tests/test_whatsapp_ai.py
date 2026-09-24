@@ -11,6 +11,7 @@ classify_intent = whatsapp_ai.classify_intent
 extract_response_text = whatsapp_ai.extract_response_text
 requests_mutation = whatsapp_ai.requests_mutation
 parse_json_object = whatsapp_ai.parse_json_object
+jid_phone = whatsapp_ai._jid_phone
 
 
 def test_classify_financial_intents():
@@ -57,3 +58,8 @@ def test_parse_json_object_rejects_non_json():
         pass
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_extracts_brazilian_phone_from_whatsapp_jid():
+    assert jid_phone("5511999999999@s.whatsapp.net") == "5511999999999"
+    assert jid_phone("120000000000000000@g.us") == "120000000000000000"
