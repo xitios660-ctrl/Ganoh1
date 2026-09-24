@@ -1,10 +1,11 @@
 # GANOH — Progresso Grok (WhatsApp AI)
 
 ## Etapa atual
-**ETAPA 3 — Security hardening (defaults removidos): CONCLUÍDA** em 24/09/2026 ~00:20 BRT (America/Sao_Paulo), branch local `ganoh/grok-whatsapp-ai` only.  
-**ETAPA 2 — Branch remota:** ainda BLOQUEADA — MCP GitHub write **403** (Contents:write). Sem push / sem criar branch remota. Sem merge / sem deploy.
+**ETAPA 4 — Baileys inbound (`messages.upsert` + persist + webhook): CONCLUÍDA** em 24/09/2026 ~00:50 BRT (America/Sao_Paulo), branch local `ganoh/grok-whatsapp-ai` only.  
+**ETAPA 2 — Branch remota:** ainda BLOQUEADA — MCP GitHub write **403** (Contents:write). Sem push / sem criar branch remota. Sem merge / sem deploy.  
+**ETAPA 3 — Security hardening:** concluída (commits anteriores nesta branch).
 
-Regras respeitadas: sem push/deploy/merge em produção; sem alterar branches reservadas (`main`, `ganoh/continuity-sync`, `ganoh/staged-audit`, `ganoh/whatsapp-ai`); flags `MIGRATION_PENDING` / `SCHEDULER_ENABLED` / `WHATSAPP_SEND_ENABLED` intactas em `render.yaml`.
+Regras respeitadas: sem push/deploy/merge em produção; sem alterar branches reservadas (`main`, `ganoh/continuity-sync`, `ganoh/staged-audit`, `ganoh/whatsapp-ai`); flags `MIGRATION_PENDING` / `SCHEDULER_ENABLED` / `WHATSAPP_SEND_ENABLED` intactas em `render.yaml`. Sem auto-reply / sem AI (ETAPA 6/7). Sem download de comprovante (ETAPA 8).
 
 ## Referências
 | Item | Valor |
@@ -23,73 +24,69 @@ Regras respeitadas: sem push/deploy/merge em produção; sem alterar branches re
 | ganoh/whatsapp-ai | intocado |
 | ganoh/continuity-sync | intocado |
 | ganoh/staged-audit | intocado |
-| ganoh/grok-whatsapp-ai | **local** — commits de progresso + security; **remoto inexistente** (403) |
+| ganoh/grok-whatsapp-ai | **local** — ETAPA 1/3/4; **remoto inexistente** (403) |
 
-## ETAPA 1 — Auditoria (resumo)
-Ver seções anteriores / histórico: Baileys sem inbound; Green API legado; flags de manutenção; gaps AI. Auditoria concluída em 23/09/2026.
+## ETAPA 4 — Baileys inbound (esta sessão)
 
-## ETAPA 3 — Security hardening (esta sessão)
+### Comportamento
+1. `whatsapp/server.mjs` escuta `messages.upsert` (somente `type === 'notify'` — ignora flood de histórico `append`).
+2. Ignora `fromMe`, `status@broadcast`, mensagens sem id/jid.
+3. Dedup atômico em Mongo `baileys_processed_messages` (`_id` = messageId) com TTL ~7 dias (`expiresAt` + índice TTL).
+4. Concorrência: mapa in-flight por messageId (mesma Promise) + claim unique no Mongo.
+5. Persiste evento seguro em `baileys_inbound` (texto truncado, metadados de mídia; **sem** baixar mídia / sem confiar conteúdo financeiro).
+6. Notifica backend via HTTP loopback `POST /api/whatsapp/inbound` com header `x-whatsapp-token` (`WHATSAPP_INTERNAL_TOKEN`). Se backend cair, outbound fica com `backendNotified=false` (reprocessável depois).
+7. Backend grava idempotente em `whatsapp_inbound` (`$setOnInsert` por messageId). **Sem** mutações financeiras, sem AI, sem auto-reply.
+8. `WHATSAPP_SEND_ENABLED` continua gating só de envio; inbound funciona com send desligado.
+9. Em `loggedOut`/`badSession`: continua apagando **apenas** `baileys_auth` (nunca dados financeiros / inbound).
+10. Logger Baileys permanece `silent`; erros só com `code`/`name` seguros.
 
-### O que foi neutralizado (caminhos / nomes de variável — SEM valores)
-1. `backend/server.py`: `GREEN_API_URL`, `GREEN_API_INSTANCE`, `GREEN_API_TOKEN` — sem default literal; `get_green_api_url` falha fechado se incompleto.
-2. `backend/server.py`: `WHATSAPP_GROUP_ID`, `WHATSAPP_GROUP_RUNNER` — default vazio (sem JID hardcoded); `send_whatsapp_message` recusa target vazio.
-3. `backend/server.py`: `GESTOR_PASSWORD` — sem default; `verify_gestor` → 503 se ausente; `ensure_default_tenant` não cria/sync sem env.
-4. `backend/server.py`: `PRAZO_PASSWORD`, `CLEAR_DATA_PASSWORD` — sem default; helpers `_require_*` falham fechado se env vazio.
-5. `backend/green_api.py`: mesmos `GREEN_API_*` + fail-closed em `get_api_url`.
-6. `backend/routers/whatsapp.py`: `GREEN_API_URL` sem default de host; fail-closed URL builder.
-7. `backend/routers/auth.py`: `GESTOR_PASSWORD` sem default (`admin123` removido); 503 se ausente.
-8. `backend/routers/prazo.py`: default módulo `PRAZO_PASSWORD` vazio + `_require_prazo_password`.
-9. `backend/sync_from_reference.py`: `GESTOR_PASSWORD` sem default.
-10. `frontend/src/pages/StaffAccessPage.js`: `STAFF_PASSWORD` via `REACT_APP_STAFF_PASSWORD` (vazio = acesso bloqueado).
-11. `memory/PRD.md`: redação de menções históricas de senha.
-12. `backend/tests/*`: literais de senha/JID de produção substituídos por placeholder de teste / mensagens sem JID.
+### Arquivos
+| Arquivo | Mudança |
+| --- | --- |
+| `whatsapp/inbound.mjs` | **novo** — normalize / dedup / persist / notify |
+| `whatsapp/inbound.test.mjs` | **novo** — unit tests sem Mongo/WhatsApp live |
+| `whatsapp/server.mjs` | wire `messages.upsert` + indexes + `GET /inbound/recent` |
+| `backend/server.py` | `verify_baileys_internal_token`, `POST/GET /api/whatsapp/inbound`, indexes |
 
-### Rotação obrigatória (valores NÃO repetidos aqui)
-Credenciais que **já estiveram hardcoded** no repo devem ser consideradas **expostas** e rotacionadas no provedor / Render / Mongo tenants, incluindo:
-- Green API token + instance (se ainda existirem em algum painel)
-- `GESTOR_PASSWORD` / hash do tenant gestor
-- Senha staff (`REACT_APP_STAFF_PASSWORD`)
-- `PRAZO_PASSWORD`, `CLEAR_DATA_PASSWORD`
-- JIDs de grupo (reconfigurar via env / UI set-target; não reintroduzir no código)
+### Endpoints novos
+| Método | Path | Auth | Função |
+| --- | --- | --- | --- |
+| POST | `/api/whatsapp/inbound` | `x-whatsapp-token` | webhook Baileys → Mongo `whatsapp_inbound` |
+| GET | `/api/whatsapp/inbound` | gestor/manager basic | listagem metadados (sem bodies) |
+| GET | Baileys `/inbound/recent` | `x-whatsapp-token` | peek sidecar (sem bodies) |
 
-### Arquivos alterados (commit security)
-- `backend/server.py`, `backend/green_api.py`
-- `backend/routers/auth.py`, `backend/routers/prazo.py`, `backend/routers/whatsapp.py`
-- `backend/sync_from_reference.py`
-- `frontend/src/pages/StaffAccessPage.js`
-- `memory/PRD.md`
-- vários `backend/tests/test_*.py` (redação de fixtures)
+### Testes
+- `node --check` em `whatsapp/inbound.mjs`, `whatsapp/server.mjs`: OK
+- `node --test whatsapp/inbound.test.mjs whatsapp/auth.test.mjs`: **9/9 pass**
+- `python3 -m py_compile backend/server.py` + AST parse: OK
+- Import completo FastAPI/pytest / Mongo live / WhatsApp live: **não** executados (sem deps de produção no box)
+
+### Riscos / limitações
+- Notificação backend é best-effort (1 tentativa); sem worker de retry ainda — docs/outbox flag `backendNotified` cobre recuperação futura.
+- Texto inbound é persistido (truncado) para ETAPA 6/7; listagens HTTP omitem bodies, mas a collection contém texto — acesso Mongo = dados sensíveis de cliente.
+- Stub `comprovanteStub` só marca candidato; download/OCR/aprovação = ETAPA 8.
+- Push remoto ainda 403; trabalho só local.
+- Credenciais historicamente hardcoded (ETAPA 3) ainda precisam rotação no provedor.
 
 ### Não alterado (de propósito)
 - `render.yaml` flags de manutenção
 - Branches reservadas / main
-- Sem push remoto
-- Módulos Green API mantidos (referenciados) mas defaults neutralizados
-- Sem implementação de inbound Baileys (ETAPA 4)
+- Sem push / merge / deploy
+- Sem ligar `WHATSAPP_SEND_ENABLED` / scheduler / migration
+- Sem Meta Cloud API; Baileys only
+- Sem auto AI replies
 
-### Testes
-- `python3 -m py_compile` / AST parse nos módulos Python alterados: OK
-- `node --check frontend/src/pages/StaffAccessPage.js`: OK
-- Asserts locais fail-closed (Green API URL builder + empty password reject): OK
-- Import completo `server.py` / pytest: **não** executados (deps httpx/fastapi ausentes no box; sem Mongo de produção)
-- `backend/tests/test_render_deployment.py` ainda define env de teste antes do import — compatível com fail-closed
-
-### Riscos remanescentes
-- Frontend staff gate ainda é client-side (mesmo com env): não é auth de API.
-- Produção Render precisa ter `GESTOR_PASSWORD`, `PRAZO_PASSWORD`, `CLEAR_DATA_PASSWORD`, groups JIDs e (se greenapi) credenciais **já** no painel; senão login/prazo quebram ao sair de `MIGRATION_PENDING` — esperado (fail closed).
-- `REACT_APP_STAFF_PASSWORD` entra no bundle no build; preferir gate server-side depois.
-- Histórico git ainda contém literais antigos → rotação continua necessária.
-- Push remoto bloqueado (403) → trabalho só local até Contents:write.
-
-### Commits locais nesta branch
+### Commits locais nesta branch (ETAPA 4)
 | SHA | Mensagem |
 | --- | --- |
-| `39d3a13` | docs: add GANOH_GROK_PROGRESS.md (etapa 1 audit) |
-| `c6bc3cb` | security: remove hard-coded WhatsApp/gestor/prazo defaults |
-| tip docs | `GANOH_GROK_PROGRESS.md` atualizado (ETAPA 3) — ver `git log -1` na branch |
+| (prévio) `39d3a13` | docs: add GANOH_GROK_PROGRESS.md (etapa 1 audit) |
+| (prévio) `c6bc3cb` | security: remove hard-coded WhatsApp/gestor/prazo defaults |
+| (prévio) `b79f251` / `e01d5da` | docs ETAPA 3 |
+| `7d4b481` | feat: Baileys inbound reception + backend webhook |
+| tip docs | `GANOH_GROK_PROGRESS.md` ETAPA 4 — ver `git log -1` na branch |
 
 ## Próxima etapa
-**ETAPA 4 — Baileys inbound** (`messages.upsert` + fila/outbox), sem ligar `WHATSAPP_SEND_ENABLED` / sem deploy. Continuar só em `ganoh/grok-whatsapp-ai`.
+**ETAPA 5 — Gestor QR/status UI** (painel gestor para QR/conexão/status Baileys), sem ligar send / sem deploy. Continuar só em `ganoh/grok-whatsapp-ai`.
 
 ## Bloqueio operacional persistente
 MCP `user-GitHub-xai` / Contents:write → **403**. Não tentar push/create remote branch até o usuário conceder permissão. Artefatos ficam locais em `/workspace/Ganoh1`.
