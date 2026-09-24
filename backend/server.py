@@ -5627,25 +5627,75 @@ async def connect_whatsapp():
         raise HTTPException(status_code=503, detail="Serviço do WhatsApp indisponível")
 
 
+def _safe_whatsapp_error_message(raw: Optional[str]) -> Optional[str]:
+    """UI-safe error text: short, no secrets/URLs with credentials."""
+    if not raw:
+        return None
+    text = str(raw).strip().replace("\n", " ").replace("\r", " ")[:160]
+    lowered = text.lower()
+    if any(token in lowered for token in ("mongo", "password", "token", "secret", "bearer", "authorization", "api_key", "apikey")):
+        return "Falha interna do serviço WhatsApp"
+    return text or None
+
+
 @api_router.get("/whatsapp/status", dependencies=[Depends(verify_whatsapp_manager)])
 async def get_whatsapp_status():
-    """Get WhatsApp status via Green API"""
+    """Get WhatsApp connection status (Baileys or Green API) for Gestor UI."""
+    ai_configured = bool((os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY") or "").strip())
+    report_schedule = ["14:00", "22:00"]
+    last_report_at = None
+    try:
+        report_setting = await db.settings.find_one({"key": "whatsapp_last_report_at"}, {"_id": 0, "value": 1})
+        if report_setting and isinstance(report_setting.get("value"), str):
+            last_report_at = report_setting["value"]
+    except Exception:
+        last_report_at = None
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client_http:
             response = await client_http.get(get_green_api_url("getStateInstance"), headers=get_whatsapp_headers())
             response.raise_for_status()
             data = response.json()
             state = data.get("stateInstance", "unknown")
+            recent_errors = []
+            for item in (data.get("recentErrors") or [])[-5:]:
+                if isinstance(item, dict):
+                    msg = _safe_whatsapp_error_message(item.get("message"))
+                    if msg:
+                        recent_errors.append({"at": item.get("at"), "message": msg})
+                elif isinstance(item, str):
+                    msg = _safe_whatsapp_error_message(item)
+                    if msg:
+                        recent_errors.append({"at": None, "message": msg})
             return {
                 "status": "connected" if state == "authorized" else state,
                 "connected": state == "authorized",
                 "qrCode": None,
                 "greenApi": WHATSAPP_PROVIDER == "greenapi",
                 "provider": WHATSAPP_PROVIDER,
-                "sendingEnabled": data.get("sendingEnabled", True)
+                "sendingEnabled": data.get("sendingEnabled", False) is True,
+                "lastConnectedAt": data.get("lastConnectedAt"),
+                "lastReportAt": last_report_at,
+                "recentErrors": recent_errors,
+                "aiConfigured": ai_configured,
+                "reportSchedule": report_schedule,
+                "currentTarget": WHATSAPP_GROUP_ID or None,
             }
-    except Exception as e:
-        return {"status": "offline", "connected": False, "qrCode": None, "error": str(e)}
+    except Exception:
+        return {
+            "status": "offline",
+            "connected": False,
+            "qrCode": None,
+            "error": "Serviço do WhatsApp indisponível",
+            "sendingEnabled": False,
+            "lastConnectedAt": None,
+            "lastReportAt": last_report_at,
+            "recentErrors": [{"at": None, "message": "Serviço do WhatsApp indisponível"}],
+            "aiConfigured": ai_configured,
+            "reportSchedule": report_schedule,
+            "currentTarget": WHATSAPP_GROUP_ID or None,
+            "provider": WHATSAPP_PROVIDER,
+        }
 
 @api_router.get("/whatsapp/qr", dependencies=[Depends(verify_whatsapp_manager)])
 async def get_whatsapp_qr():
@@ -5656,8 +5706,8 @@ async def get_whatsapp_qr():
             response.raise_for_status()
             data = response.json()
             return {"qrCode": data.get("message"), "connected": False}
-    except Exception as e:
-        return {"qrCode": None, "connected": False, "error": str(e)}
+    except Exception:
+        return {"qrCode": None, "connected": False, "error": "Não foi possível obter o QR Code"}
 
 @api_router.get("/whatsapp/groups", dependencies=[Depends(verify_whatsapp_manager)])
 async def get_whatsapp_groups():
@@ -5672,8 +5722,8 @@ async def get_whatsapp_groups():
                 for chat in data if "@g.us" in chat.get("id", "")
             ]
             return {"success": True, "groups": groups, "currentTarget": WHATSAPP_GROUP_ID}
-    except Exception as e:
-        return {"success": False, "groups": [], "error": str(e)}
+    except Exception:
+        return {"success": False, "groups": [], "error": "Não foi possível listar grupos"}
 
 class WhatsAppTargetUpdate(BaseModel):
     target: str

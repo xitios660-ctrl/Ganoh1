@@ -21,6 +21,17 @@ const owner = randomUUID();
 const logger = pino({ level: 'silent' }); // Never log QR codes, session keys or customer messages.
 let socket, reconnectTimer, leaseTimer, connecting = false, stopping = false;
 let status = 'disconnected', qrCode = null, attempts = 0;
+let lastConnectedAt = null;
+const recentErrors = [];
+const MAX_RECENT_ERRORS = 5;
+
+function pushSafeError(message) {
+  const safe = String(message || 'erro').slice(0, 120).replace(/[\r\n\t]+/g, ' ');
+  // Never store tokens, URLs with credentials, or raw payloads.
+  if (/token|secret|mongo|password|bearer|authorization/i.test(safe)) return;
+  recentErrors.push({ at: new Date().toISOString(), message: safe });
+  if (recentErrors.length > MAX_RECENT_ERRORS) recentErrors.shift();
+}
 let groupsCache = { until: 0, value: [] };
 let writeQueue = Promise.resolve();
 let indexesReady = Promise.resolve();
@@ -71,7 +82,9 @@ function attachInboundHandler(current) {
         upsertType: type
       }).catch(error => {
         // Safe codes/names only — never log QR, credentials, or message bodies.
-        console.error('Inbound handling failed:', error?.code || error?.name || 'unknown');
+        const code = error?.code || error?.name || 'unknown';
+        console.error('Inbound handling failed:', code);
+        pushSafeError(`Inbound: ${code}`);
       });
     }
   });
@@ -112,17 +125,19 @@ async function connect() {
         if (socket === current && status !== 'connected') { qrCode = encoded; status = 'waiting_qr'; }
       }
       if (update.connection === 'open') {
-        status = 'connected'; qrCode = null; attempts = 0; groupsCache.until = 0;
+        status = 'connected'; qrCode = null; attempts = 0; groupsCache.until = 0; lastConnectedAt = new Date().toISOString();
       }
       if (update.connection === 'close') {
         socket = null; qrCode = null;
         const code = update.lastDisconnect?.error?.output?.statusCode;
         if (code === DisconnectReason.loggedOut || code === DisconnectReason.badSession) {
           status = 'logged_out';
+          pushSafeError('Sessão encerrada (logged_out/badSession)');
           await writeQueue;
           await authCollection.deleteMany({}); // Only expired WhatsApp credentials, never business data.
         } else if (code === DisconnectReason.connectionReplaced || code === DisconnectReason.forbidden) {
           status = 'connection_conflict';
+          pushSafeError('Conflito de conexão (outro cliente)');
         } else {
           scheduleReconnect();
         }
@@ -133,7 +148,10 @@ async function connect() {
 
 app.get('/getStateInstance', (req, res) => res.json({
   stateInstance: status === 'connected' ? 'authorized' : status,
-  provider: 'baileys', sendingEnabled: process.env.WHATSAPP_SEND_ENABLED === 'true'
+  provider: 'baileys',
+  sendingEnabled: process.env.WHATSAPP_SEND_ENABLED === 'true',
+  lastConnectedAt,
+  recentErrors: recentErrors.slice(-MAX_RECENT_ERRORS)
 }));
 app.get('/qr', (req, res) => res.json({ message: qrCode, state: status }));
 app.post('/connect', async (req, res) => {
