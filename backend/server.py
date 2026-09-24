@@ -2334,7 +2334,20 @@ async def get_gestor_dashboard(username: str = Depends(verify_gestor)):
     # Convert to UTC for database query
     today_utc = today_brazil.astimezone(pytz.UTC)
     month_start_utc = month_start_brazil.astimezone(pytz.UTC)
-    
+
+    # Cash-basis revenue (align with /gestor/chart/monthly and Gastos):
+    # exclude prazo orders; include ready/delivered/received; add PIX adj + prazo payments.
+    REVENUE_STATUSES = ("ready", "delivered", "received")
+
+    def _is_revenue_order(order):
+        return (
+            order.get("status") in REVENUE_STATUSES
+            and order.get("payment_method") != "prazo"
+        )
+
+    def _sum_amounts(docs, key="amount"):
+        return sum(float(d.get(key, 0) or 0) for d in docs)
+
     result = {"stores": {}}
     
     for store_key in STORES.keys():
@@ -2349,22 +2362,61 @@ async def get_gestor_dashboard(username: str = Depends(verify_gestor)):
             "store": store_key,
             "created_at": {"$gte": month_start_utc.isoformat()}
         }, {"_id": 0}).to_list(10000)
+
+        # PIX manual adjustments + prazo cash received (same sources as chart endpoints)
+        pix_query_base = {"removed": {"$ne": True}, "store": store_key}
+        prazo_query_base = {"store": store_key}
+        pix_today = await db.pix_adjustments.find(
+            {**pix_query_base, "created_at": {"$gte": today_utc.isoformat()}}, {"_id": 0}
+        ).to_list(10000)
+        pix_month = await db.pix_adjustments.find(
+            {**pix_query_base, "created_at": {"$gte": month_start_utc.isoformat()}}, {"_id": 0}
+        ).to_list(10000)
+        prazo_today_full = await db.prazo_payments.find(
+            {**prazo_query_base, "created_at": {"$gte": today_utc.isoformat()}}, {"_id": 0}
+        ).to_list(10000)
+        prazo_today_partial = await db.prazo_partial_payments.find(
+            {**prazo_query_base, "created_at": {"$gte": today_utc.isoformat()}}, {"_id": 0}
+        ).to_list(10000)
+        prazo_month_full = await db.prazo_payments.find(
+            {**prazo_query_base, "created_at": {"$gte": month_start_utc.isoformat()}}, {"_id": 0}
+        ).to_list(10000)
+        prazo_month_partial = await db.prazo_partial_payments.find(
+            {**prazo_query_base, "created_at": {"$gte": month_start_utc.isoformat()}}, {"_id": 0}
+        ).to_list(10000)
+
+        today_order_revenue = sum(o.get("total", 0) for o in today_orders if _is_revenue_order(o))
+        month_order_revenue = sum(o.get("total", 0) for o in month_orders if _is_revenue_order(o))
+        today_total = (
+            today_order_revenue
+            + _sum_amounts(pix_today)
+            + _sum_amounts(prazo_today_full)
+            + _sum_amounts(prazo_today_partial)
+        )
+        month_total = (
+            month_order_revenue
+            + _sum_amounts(pix_month)
+            + _sum_amounts(prazo_month_full)
+            + _sum_amounts(prazo_month_partial)
+        )
+        today_order_count = len([o for o in today_orders if _is_revenue_order(o)])
+        month_order_count = len([o for o in month_orders if _is_revenue_order(o)])
         
-        # Calculate totals - inclui pedidos prontos e entregues
-        today_total = sum(o.get("total", 0) for o in today_orders if o.get("status") in ["ready", "delivered"])
-        month_total = sum(o.get("total", 0) for o in month_orders if o.get("status") in ["ready", "delivered"])
-        
-        # By payment method (today)
+        # By payment method (today) — cash-basis (excl. unpaid prazo orders)
         today_by_payment = {"pix": 0, "debit": 0, "credit": 0, "cash": 0, "prazo": 0, "voucher": 0}
         for order in today_orders:
-            if order.get("status") in ["ready", "delivered"]:
+            if _is_revenue_order(order):
                 pm = order.get("payment_method", "cash")
                 today_by_payment[pm] = today_by_payment.get(pm, 0) + order.get("total", 0)
+        today_by_payment["pix"] = today_by_payment.get("pix", 0) + _sum_amounts(pix_today)
+        for payment in prazo_today_full + prazo_today_partial:
+            pm = payment.get("payment_method", "cash")
+            today_by_payment[pm] = today_by_payment.get(pm, 0) + payment.get("amount", 0)
         
-        # Product sales count
+        # Product sales count (same revenue statuses; prazo excluded from revenue products)
         product_sales = {}
         for order in month_orders:
-            if order.get("status") in ["ready", "delivered"]:
+            if order.get("status") in REVENUE_STATUSES:
                 for item in order.get("items", []):
                     name = item.get("name", "").split(" + ")[0]  # Remove adicionais from name
                     if name not in product_sales:
@@ -2387,12 +2439,12 @@ async def get_gestor_dashboard(username: str = Depends(verify_gestor)):
             "name": STORES[store_key]["name"],
             "today": {
                 "total": today_total,
-                "order_count": len([o for o in today_orders if o.get("status") in ["ready", "delivered"]]),
+                "order_count": today_order_count,
                 "by_payment_method": today_by_payment
             },
             "month": {
                 "total": month_total,
-                "order_count": len([o for o in month_orders if o.get("status") in ["ready", "delivered"]])
+                "order_count": month_order_count
             },
             "top_products": top_products,
             "low_products": low_products,
@@ -5119,32 +5171,35 @@ Obrigado! ☕"""
 async def get_monthly_chart_with_expenses(month: int = None, year: int = None, store: str = None, username: str = Depends(verify_gestor)):
     """Get daily sales AND expenses data for a specific month, optionally filtered by store.
     Revenue = order totals (excl. prazo) + PIX manual adjustments + prazo payments received.
+    Month bounds and day buckets use America/Sao_Paulo (aligned with /gestor/chart/monthly).
     """
-    now = datetime.now(timezone.utc)
-    
-    target_month = month if month else now.month
-    target_year = year if year else now.year
-    
-    month_start = datetime(target_year, target_month, 1, tzinfo=timezone.utc)
-    
+    brazil_tz = pytz.timezone('America/Sao_Paulo')
+    now_brazil = datetime.now(brazil_tz)
+
+    target_month = month if month else now_brazil.month
+    target_year = year if year else now_brazil.year
+
+    month_start_brazil = brazil_tz.localize(datetime(target_year, target_month, 1))
     if target_month == 12:
-        month_end = datetime(target_year + 1, 1, 1, tzinfo=timezone.utc)
+        month_end_brazil = brazil_tz.localize(datetime(target_year + 1, 1, 1))
     else:
-        month_end = datetime(target_year, target_month + 1, 1, tzinfo=timezone.utc)
-    
+        month_end_brazil = brazil_tz.localize(datetime(target_year, target_month + 1, 1))
+
+    month_start = month_start_brazil.astimezone(pytz.UTC)
+    month_end = month_end_brazil.astimezone(pytz.UTC)
+
     import calendar
     days_in_month = calendar.monthrange(target_year, target_month)[1]
-    
-    # Get all completed orders this month (filter by store if provided)
+
+    # Align status with /gestor/chart/monthly (no preparing — kitchen WIP is not closed revenue)
     orders_query = {
-        "status": {"$in": ["ready", "delivered", "received", "preparing"]},
+        "status": {"$in": ["ready", "delivered", "received"]},
         "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
     }
     if store and store != "all":
         orders_query["store"] = store
     orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "store": 1, "payment_method": 1}).to_list(10000)
-    
-    # Get all expenses this month (filter by store if provided)
+
     expenses_query = {
         "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
     }
@@ -5152,7 +5207,6 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
         expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
     expenses = await db.expenses.find(expenses_query, {"_id": 0}).to_list(1000)
 
-    # PIX manual adjustments (real revenue not represented as orders)
     pix_query = {
         "removed": {"$ne": True},
         "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
@@ -5161,7 +5215,6 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
         pix_query["store"] = store
     pix_adjustments = await db.pix_adjustments.find(pix_query, {"_id": 0}).to_list(10000)
 
-    # Prazo payments (cash actually received from customers paying their debt)
     prazo_query = {
         "created_at": {"$gte": month_start.isoformat(), "$lt": month_end.isoformat()}
     }
@@ -5170,43 +5223,49 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
     prazo_payments = await db.prazo_payments.find(prazo_query, {"_id": 0}).to_list(10000)
     prazo_partial_payments = await db.prazo_partial_payments.find(prazo_query, {"_id": 0}).to_list(10000)
     all_prazo_payments = prazo_payments + prazo_partial_payments
-    
-    # Group by day
+
     daily_data = {}
     for i in range(days_in_month):
-        day_date = month_start + timedelta(days=i)
+        day_date = month_start_brazil + timedelta(days=i)
         day_str = day_date.strftime("%Y-%m-%d")
         daily_data[day_str] = {
-            "date": day_str, 
-            "day": i + 1, 
-            "revenue": 0, 
+            "date": day_str,
+            "day": i + 1,
+            "revenue": 0,
             "expenses": 0,
             "profit": 0,
             "order_count": 0,
             "expenses_by_category": {}
         }
-    
+
+    def _brazil_day(iso_str):
+        try:
+            dt = datetime.fromisoformat((iso_str or "").replace("Z", "+00:00"))
+            return dt.astimezone(brazil_tz).strftime("%Y-%m-%d")
+        except Exception:
+            return (iso_str or "")[:10]
+
     for order in orders:
         # Skip prazo orders - they're not real revenue until paid
         if order.get("payment_method") == "prazo":
             continue
-        date = order.get("created_at", "")[:10]
+        date = _brazil_day(order.get("created_at", ""))
         if date in daily_data:
             daily_data[date]["revenue"] += order.get("total", 0)
             daily_data[date]["order_count"] += 1
 
     for adj in pix_adjustments:
-        date = adj.get("created_at", "")[:10]
+        date = _brazil_day(adj.get("created_at", ""))
         if date in daily_data:
             daily_data[date]["revenue"] += adj.get("amount", 0)
 
     for payment in all_prazo_payments:
-        date = payment.get("created_at", "")[:10]
+        date = _brazil_day(payment.get("created_at", ""))
         if date in daily_data:
             daily_data[date]["revenue"] += payment.get("amount", 0)
-    
+
     for exp in expenses:
-        date = exp.get("created_at", "")[:10]
+        date = _brazil_day(exp.get("created_at", ""))
         if date in daily_data:
             daily_data[date]["expenses"] += exp.get("amount", 0)
             cat = exp.get("category", "outros")
