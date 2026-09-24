@@ -6506,7 +6506,7 @@ menu.set_dependencies(db, verify_gestor)
 stock.set_dependencies(db, verify_gestor)
 cash.set_dependencies(db, BRAZIL_TZ)
 live.set_dependencies(db, BRAZIL_TZ)
-whatsapp_ai.set_dependencies(db, send_whatsapp_message, BRAZIL_TZ)
+whatsapp_ai.set_dependencies(db, send_whatsapp_message, BRAZIL_TZ, verify_whatsapp_manager)
 
 # Include routers - api_router must be LAST to ensure new routers take priority
 api_router.include_router(prazo.router)
