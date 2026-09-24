@@ -5746,14 +5746,37 @@ async def _claim_whatsapp_report(report_type: str, store: str, now_brazil: datet
         await db.whatsapp_report_runs.insert_one(record)
         return report_id
     except DuplicateKeyError:
-        existing = await db.whatsapp_report_runs.find_one({"_id": report_id}, {"_id": 0, "status": 1})
-        if not existing or existing.get("status") in {"sent", "sending"}:
+        existing = await db.whatsapp_report_runs.find_one(
+            {"_id": report_id},
+            {"_id": 0, "status": 1, "attempted_at": 1},
+        )
+        if not existing or existing.get("status") == "sent":
             return None
+
+        current_status = existing.get("status")
+        current_attempt = existing.get("attempted_at")
+        if current_status == "sending":
+            try:
+                attempted = datetime.fromisoformat(str(current_attempt).replace("Z", "+00:00"))
+                if attempted.tzinfo is None:
+                    attempted = attempted.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) - attempted < timedelta(minutes=15):
+                    return None
+            except (TypeError, ValueError):
+                pass
+
+        if current_status not in {"failed", "sending"}:
+            return None
+
+        claim_filter = {"_id": report_id, "status": current_status}
+        if current_attempt:
+            claim_filter["attempted_at"] = current_attempt
         result = await db.whatsapp_report_runs.update_one(
-            {"_id": report_id, "status": "failed"},
+            claim_filter,
             {"$set": {
                 "status": "sending",
                 "attempted_at": datetime.now(timezone.utc).isoformat(),
+                "error": "",
             }},
         )
         return report_id if result.modified_count == 1 else None
