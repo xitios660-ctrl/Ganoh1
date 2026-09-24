@@ -6,6 +6,7 @@ import makeWASocket, { DisconnectReason, makeCacheableSignalKeyStore, Browsers }
 import QRCode from 'qrcode';
 import pino from 'pino';
 import { mongoAuth } from './auth.mjs';
+import { normalizeIncomingMessage } from './messages.mjs';
 
 const token = process.env.WHATSAPP_INTERNAL_TOKEN;
 if (!token || token.length < 32) throw new Error('WHATSAPP_INTERNAL_TOKEN must contain at least 32 characters');
@@ -14,9 +15,12 @@ await mongo.connect();
 const db = mongo.db(process.env.DB_NAME);
 const authCollection = db.collection('baileys_auth');
 const locks = db.collection('baileys_locks');
+const inbox = db.collection('whatsapp_inbox');
+await inbox.createIndex({ processed: 1, receivedAt: 1 });
+const backendPort = process.env.PORT || '10000';
 const owner = randomUUID();
 const logger = pino({ level: 'silent' }); // Never log QR codes, session keys or customer messages.
-let socket, reconnectTimer, leaseTimer, connecting = false, stopping = false;
+let socket, reconnectTimer, leaseTimer, inboxRetryTimer, connecting = false, stopping = false;
 let status = 'disconnected', qrCode = null, attempts = 0;
 let groupsCache = { until: 0, value: [] };
 let writeQueue = Promise.resolve();
@@ -31,6 +35,68 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '1mb' }));
+
+function backendPayload(record) {
+  return {
+    messageId: record.messageId || record._id,
+    chatId: record.chatId,
+    sender: record.sender,
+    fromGroup: Boolean(record.fromGroup),
+    kind: record.kind || 'unsupported',
+    text: record.text || '',
+    receivedAt: record.receivedAt instanceof Date ? record.receivedAt.toISOString() : record.receivedAt
+  };
+}
+
+async function deliverIncoming(record) {
+  const payload = backendPayload(record);
+  const response = await fetch(`http://127.0.0.1:${backendPort}/api/whatsapp/internal/incoming`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-whatsapp-token': token
+    },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(15000)
+  });
+  if (!response.ok) throw new Error(`backend_${response.status}`);
+  await inbox.updateOne(
+    { _id: payload.messageId },
+    { $set: { processed: true, processedAt: new Date(), lastError: null } }
+  );
+}
+
+async function markIncomingFailure(messageId, error) {
+  await inbox.updateOne(
+    { _id: messageId },
+    {
+      $inc: { attempts: 1 },
+      $set: {
+        lastAttemptAt: new Date(),
+        lastError: String(error?.message || error?.name || 'delivery_failed').slice(0, 120)
+      }
+    }
+  );
+}
+
+async function retryInbox() {
+  if (stopping) return;
+  const pending = await inbox.find({ processed: { $ne: true } }).sort({ receivedAt: 1 }).limit(20).toArray();
+  for (const record of pending) {
+    try {
+      await deliverIncoming(record);
+    } catch (error) {
+      await markIncomingFailure(record._id, error);
+    }
+  }
+}
+
+function ensureInboxRetry() {
+  if (inboxRetryTimer) return;
+  inboxRetryTimer = setInterval(() => {
+    retryInbox().catch(() => {});
+  }, 10000);
+}
 
 async function acquireLease() {
   const now = new Date();
@@ -82,6 +148,31 @@ async function connect() {
     current.ev.on('creds.update', () => {
       writeQueue = writeQueue.then(() => auth.saveCreds()).catch(() => { stop(1); });
     });
+    current.ev.on('messages.upsert', async event => {
+      try {
+        for (const raw of event.messages || []) {
+          const message = normalizeIncomingMessage(raw);
+          if (!message) continue;
+          const record = {
+            _id: message.messageId,
+            ...message,
+            receivedAt: new Date(message.receivedAt),
+            processed: false,
+            attempts: 0
+          };
+          const result = await inbox.updateOne(
+            { _id: message.messageId },
+            { $setOnInsert: record },
+            { upsert: true }
+          );
+          if (result.upsertedCount === 1) {
+            deliverIncoming(record).catch(error => markIncomingFailure(message.messageId, error));
+          }
+        }
+      } catch (error) {
+        console.error('WhatsApp inbound processing failed:', error.code || error.name || 'unknown');
+      }
+    });
     current.ev.on('connection.update', async update => {
       if (socket !== current || stopping) return;
       if (update.qr) {
@@ -89,7 +180,7 @@ async function connect() {
         if (socket === current && status !== 'connected') { qrCode = encoded; status = 'waiting_qr'; }
       }
       if (update.connection === 'open') {
-        status = 'connected'; qrCode = null; attempts = 0; groupsCache.until = 0;
+        status = 'connected'; qrCode = null; attempts = 0; groupsCache.until = 0; ensureInboxRetry();
       }
       if (update.connection === 'close') {
         socket = null; qrCode = null;
@@ -162,12 +253,13 @@ app.use((error, req, res, next) => {
 });
 
 const httpServer = app.listen(8002, '127.0.0.1');
+ensureInboxRetry();
 const savedAuth = await mongoAuth(authCollection, process.env.WHATSAPP_SESSION_KEY);
 if (savedAuth.registered) connect().catch(() => scheduleReconnect());
 async function stop(code = 0) {
   if (stopping) return;
   stopping = true;
-  clearTimeout(reconnectTimer); clearInterval(leaseTimer);
+  clearTimeout(reconnectTimer); clearInterval(leaseTimer); clearInterval(inboxRetryTimer);
   socket?.end(new Error('Service stopping'));
   httpServer.close();
   try { await writeQueue; await locks.deleteOne({ _id: 'ganoh', owner }); } finally { await mongo.close(); }
