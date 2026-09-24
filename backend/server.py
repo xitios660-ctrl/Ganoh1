@@ -5518,7 +5518,11 @@ async def get_whatsapp_status():
                 "qrCode": None,
                 "greenApi": WHATSAPP_PROVIDER == "greenapi",
                 "provider": WHATSAPP_PROVIDER,
-                "sendingEnabled": data.get("sendingEnabled", True)
+                "sendingEnabled": data.get("sendingEnabled", True),
+                "aiConfigured": bool(os.environ.get("OPENAI_API_KEY")),
+                "aiModel": os.environ.get("OPENAI_MODEL", "gpt-5.6-luna"),
+                "aiMode": "read_only",
+                "reportTimes": ["14:00", "22:00"],
             }
     except Exception as e:
         return {"status": "offline", "connected": False, "qrCode": None, "error": str(e)}
