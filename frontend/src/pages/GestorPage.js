@@ -152,6 +152,7 @@ export const GestorPage = () => {
   const [whatsappLastReportAt, setWhatsappLastReportAt] = useState(null);
   const [whatsappRecentErrors, setWhatsappRecentErrors] = useState([]);
   const [whatsappAiConfigured, setWhatsappAiConfigured] = useState(false);
+  const [whatsappAiStatus, setWhatsappAiStatus] = useState(null);
   const [whatsappReportSchedule, setWhatsappReportSchedule] = useState(['14:00', '22:00']);
   
   // Adicionais states
@@ -511,6 +512,7 @@ export const GestorPage = () => {
       setWhatsappLastReportAt(data.lastReportAt || null);
       setWhatsappRecentErrors(Array.isArray(data.recentErrors) ? data.recentErrors : []);
       setWhatsappAiConfigured(data.aiConfigured === true);
+      setWhatsappAiStatus(typeof data.aiStatus === 'string' ? data.aiStatus : null);
       if (Array.isArray(data.reportSchedule) && data.reportSchedule.length) {
         setWhatsappReportSchedule(data.reportSchedule);
       }
@@ -2292,6 +2294,7 @@ export const GestorPage = () => {
               lastReportAt={whatsappLastReportAt}
               recentErrors={whatsappRecentErrors}
               aiConfigured={whatsappAiConfigured}
+              aiStatus={whatsappAiStatus}
               reportSchedule={whatsappReportSchedule}
             />
           </TabsContent>

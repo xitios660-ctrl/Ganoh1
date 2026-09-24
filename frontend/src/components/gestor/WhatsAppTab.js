@@ -94,6 +94,7 @@ export function WhatsAppTab({
   lastReportAt = null,
   recentErrors = [],
   aiConfigured = false,
+  aiStatus = null,
   reportSchedule = ['14:00', '22:00']
 }) {
   const meta = STATUS_META[whatsappStatus] || STATUS_META.disconnected;
@@ -300,22 +301,26 @@ export function WhatsAppTab({
           </div>
         )}
 
-        {/* IA placeholder (ETAPA 6) */}
+        {/* IA (ETAPA 6) */}
         <div className="bg-secondary/30 p-4 rounded-lg border">
           <Label className="font-medium flex items-center gap-2 mb-2">
             <Bot className="h-4 w-4" /> IA
           </Label>
           <div className="flex items-center gap-2 text-sm">
             <span
-              className={`w-2.5 h-2.5 rounded-full ${aiConfigured ? 'bg-green-500' : 'bg-amber-400'}`}
+              className={`w-2.5 h-2.5 rounded-full ${
+                aiStatus === 'active' ? 'bg-green-500' : 'bg-amber-400'
+              }`}
               aria-hidden
             />
             <span>
-              {aiConfigured ? 'Chave detectada — configuração pendente (ETAPA 6)' : 'Configuração pendente'}
+              {aiStatus === 'active' ? 'IA ativa' : 'Configuração pendente'}
             </span>
           </div>
           <p className="text-xs text-muted-foreground mt-2">
-            Respostas automáticas e consultas financeiras ainda não estão ativas.
+            {aiStatus === 'active'
+              ? 'Respostas de texto via OpenAI ativas no fluxo WhatsApp. Consultas financeiras aguardam ETAPA 7. Envio respeita WHATSAPP_SEND_ENABLED.'
+              : 'Defina OPENAI_API_KEY no ambiente para ativar respostas da IA no WhatsApp.'}
           </p>
         </div>
 

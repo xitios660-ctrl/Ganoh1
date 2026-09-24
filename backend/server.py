@@ -20,6 +20,8 @@ from apscheduler.triggers.cron import CronTrigger
 import pytz
 import resend
 
+import whatsapp_ai
+
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
 
@@ -5542,7 +5544,8 @@ class WhatsAppInboundEvent(BaseModel):
 async def receive_whatsapp_inbound(event: WhatsAppInboundEvent):
     """
     Accept inbound WhatsApp events from the Baileys sidecar.
-    Persist only — no auto-reply, no AI, no financial writes (ETAPA 4).
+    Persist + optional AI reply draft (ETAPA 6). No financial writes.
+    Respects WHATSAPP_SEND_ENABLED (default off — compute/would_reply only).
     """
     message_id = (event.messageId or "").strip()
     remote_jid = (event.remoteJid or "").strip()
@@ -5575,6 +5578,11 @@ async def receive_whatsapp_inbound(event: WhatsAppInboundEvent):
         "processed": False,
         "created_at": now_iso,
         "updated_at": now_iso,
+        "aiProcessed": False,
+        "aiStatus": None,
+        "aiSendAttempted": False,
+        "aiSendSkippedReason": None,
+        "aiReplyLen": None,
     }
     try:
         await db.whatsapp_inbound.update_one(
@@ -5585,7 +5593,117 @@ async def receive_whatsapp_inbound(event: WhatsAppInboundEvent):
     except Exception:
         logging.exception("whatsapp inbound persist failed")
         raise HTTPException(status_code=500, detail="Failed to persist inbound event")
-    return {"success": True, "messageId": message_id, "stored": True}
+
+    ai_result = await _process_whatsapp_inbound_ai(
+        message_id=message_id,
+        remote_jid=remote_jid,
+        text=text,
+        message_type=(event.messageType or "unknown"),
+        is_group=bool(event.isGroup),
+        push_name=(event.pushName or "")[:120] or None,
+    )
+    return {
+        "success": True,
+        "messageId": message_id,
+        "stored": True,
+        "ai": ai_result,
+    }
+
+
+async def _process_whatsapp_inbound_ai(
+    *,
+    message_id: str,
+    remote_jid: str,
+    text: Optional[str],
+    message_type: str,
+    is_group: bool,
+    push_name: Optional[str],
+) -> dict:
+    """
+    ETAPA 6: draft AI reply for 1:1 text. Never logs message bodies or keys.
+    Does not send unless WHATSAPP_SEND_ENABLED=true.
+    """
+    result = {
+        "processed": False,
+        "status": "skipped",
+        "reason": None,
+        "sendAttempted": False,
+    }
+    if is_group:
+        result["reason"] = "group_skip"
+        await _patch_inbound_ai(message_id, result)
+        return result
+    if message_type != "text" or not text:
+        result["reason"] = "non_text"
+        await _patch_inbound_ai(message_id, result)
+        return result
+    if not whatsapp_ai.is_openai_ready():
+        result["status"] = "unavailable"
+        result["reason"] = "openai_not_configured"
+        await _patch_inbound_ai(message_id, result)
+        return result
+
+    try:
+        reply = await whatsapp_ai.achat_reply(
+            text,
+            context={"isGroup": False, "pushName": push_name, "remoteJid": remote_jid},
+        )
+    except Exception:
+        logging.warning("whatsapp ai reply failed messageId=%s", message_id)
+        result["status"] = "error"
+        result["reason"] = "ai_error"
+        await _patch_inbound_ai(message_id, result)
+        return result
+
+    reply = (reply or "")[:2000]
+    result["processed"] = True
+    result["replyLen"] = len(reply)
+    send_enabled = (os.environ.get("WHATSAPP_SEND_ENABLED") or "").strip().lower() == "true"
+    if not send_enabled:
+        result["status"] = "would_reply"
+        result["reason"] = "WHATSAPP_SEND_ENABLED_off"
+        await _patch_inbound_ai(message_id, result, reply=reply)
+        logging.info(
+            "whatsapp ai would_reply messageId=%s replyLen=%s send=off",
+            message_id,
+            len(reply),
+        )
+        return result
+
+    result["sendAttempted"] = True
+    try:
+        send_result = await send_whatsapp_message(reply, group_id=remote_jid)
+        if send_result.get("success"):
+            result["status"] = "replied"
+            result["reason"] = None
+        else:
+            result["status"] = "send_failed"
+            result["reason"] = "send_failed"
+    except Exception:
+        logging.warning("whatsapp ai send failed messageId=%s", message_id)
+        result["status"] = "send_failed"
+        result["reason"] = "send_exception"
+    await _patch_inbound_ai(message_id, result, reply=reply)
+    return result
+
+
+async def _patch_inbound_ai(message_id: str, result: dict, reply: Optional[str] = None) -> None:
+    patch = {
+        "aiProcessed": bool(result.get("processed")),
+        "aiStatus": result.get("status"),
+        "aiSendAttempted": bool(result.get("sendAttempted")),
+        "aiSendSkippedReason": result.get("reason"),
+        "aiReplyLen": result.get("replyLen"),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "processed": bool(result.get("processed")),
+    }
+    # Store draft reply only when computed; list endpoints must not project this field.
+    if reply is not None:
+        patch["aiReplyDraft"] = reply
+    try:
+        await db.whatsapp_inbound.update_one({"messageId": message_id}, {"$set": patch})
+    except Exception:
+        logging.warning("whatsapp inbound ai patch failed messageId=%s", message_id)
 
 
 @api_router.get("/whatsapp/inbound", dependencies=[Depends(verify_whatsapp_manager)])
@@ -5607,6 +5725,9 @@ async def list_whatsapp_inbound(limit: int = 20):
             "messageTimestamp": 1,
             "receivedAt": 1,
             "processed": 1,
+            "aiProcessed": 1,
+            "aiStatus": 1,
+            "aiReplyLen": 1,
             "comprovanteStub": 1,
             "provider": 1,
         },
@@ -5641,7 +5762,8 @@ def _safe_whatsapp_error_message(raw: Optional[str]) -> Optional[str]:
 @api_router.get("/whatsapp/status", dependencies=[Depends(verify_whatsapp_manager)])
 async def get_whatsapp_status():
     """Get WhatsApp connection status (Baileys or Green API) for Gestor UI."""
-    ai_configured = bool((os.environ.get("EMERGENT_LLM_KEY") or os.environ.get("OPENAI_API_KEY") or "").strip())
+    ai_configured = whatsapp_ai.is_configured()
+    ai_status = whatsapp_ai.get_ai_status()
     report_schedule = ["14:00", "22:00"]
     last_report_at = None
     try:
@@ -5678,6 +5800,7 @@ async def get_whatsapp_status():
                 "lastReportAt": last_report_at,
                 "recentErrors": recent_errors,
                 "aiConfigured": ai_configured,
+                "aiStatus": ai_status,
                 "reportSchedule": report_schedule,
                 "currentTarget": WHATSAPP_GROUP_ID or None,
             }
@@ -5692,6 +5815,7 @@ async def get_whatsapp_status():
             "lastReportAt": last_report_at,
             "recentErrors": [{"at": None, "message": "Serviço do WhatsApp indisponível"}],
             "aiConfigured": ai_configured,
+            "aiStatus": ai_status,
             "reportSchedule": report_schedule,
             "currentTarget": WHATSAPP_GROUP_ID or None,
             "provider": WHATSAPP_PROVIDER,

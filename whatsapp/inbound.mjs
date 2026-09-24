@@ -1,6 +1,6 @@
 /**
  * Baileys inbound helpers (ETAPA 4).
- * Pure extraction + Mongo-backed dedup/persist/notify — no auto replies, no financial trust.
+ * Pure extraction + Mongo-backed dedup/persist/notify — no auto replies here; backend may AI-draft (ETAPA 6). No financial trust.
  */
 
 const TEXT_LIMIT = 4000;
@@ -194,7 +194,7 @@ export async function notifyBackend(event, {
 
 /**
  * Full inbound pipeline for one WAMessage. Serializes per messageId to avoid double-replies/loops.
- * No auto-send / no AI replies (ETAPA 6/7).
+ * No auto-send here — AI replies handled by backend webhook (ETAPA 6+).
  */
 export function handleInboundMessage(message, {
   processedCollection,
