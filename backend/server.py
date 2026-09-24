@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Depends
+from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
@@ -64,6 +64,17 @@ def get_green_api_url(method: str) -> str:
 
 def get_whatsapp_headers() -> dict:
     return {"x-whatsapp-token": BAILEYS_TOKEN} if WHATSAPP_PROVIDER == "baileys" else {}
+
+def verify_baileys_internal_token(x_whatsapp_token: Optional[str] = Header(default=None, alias="x-whatsapp-token")):
+    """Loopback Baileys sidecar auth — shared WHATSAPP_INTERNAL_TOKEN, timing-safe."""
+    expected = BAILEYS_TOKEN or ""
+    if len(expected) < 32:
+        raise HTTPException(status_code=503, detail="WhatsApp internal token not configured")
+    incoming = x_whatsapp_token or ""
+    if len(incoming) != len(expected) or not secrets.compare_digest(incoming, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    return True
+
 
 async def verify_whatsapp_manager(credentials: HTTPBasicCredentials = Depends(security)):
     user = (credentials.username or "").strip().lower()
@@ -5507,6 +5518,102 @@ async def clear_store_data(
 
 # ==================== WHATSAPP PROVIDER PROXY ====================
 
+class WhatsAppInboundEvent(BaseModel):
+    """Safe inbound payload from Baileys sidecar (ETAPA 4). No financial mutations."""
+    messageId: str
+    remoteJid: str
+    participant: Optional[str] = None
+    isGroup: bool = False
+    fromMe: bool = False
+    pushName: Optional[str] = None
+    messageType: str = "unknown"
+    text: Optional[str] = None
+    hasMedia: bool = False
+    mediaMime: Optional[str] = None
+    mediaCaption: Optional[str] = None
+    mediaFileName: Optional[str] = None
+    comprovanteStub: Optional[dict] = None
+    messageTimestamp: Optional[str] = None
+    receivedAt: Optional[str] = None
+    provider: str = "baileys"
+
+
+@api_router.post("/whatsapp/inbound", dependencies=[Depends(verify_baileys_internal_token)])
+async def receive_whatsapp_inbound(event: WhatsAppInboundEvent):
+    """
+    Accept inbound WhatsApp events from the Baileys sidecar.
+    Persist only — no auto-reply, no AI, no financial writes (ETAPA 4).
+    """
+    message_id = (event.messageId or "").strip()
+    remote_jid = (event.remoteJid or "").strip()
+    if not message_id or not remote_jid:
+        raise HTTPException(status_code=400, detail="messageId and remoteJid required")
+    if event.fromMe:
+        return {"success": True, "skipped": True, "reason": "fromMe"}
+
+    # Bound retention fields; never trust text/media for money movement here.
+    text = event.text[:4000] if isinstance(event.text, str) else None
+    caption = event.mediaCaption[:1000] if isinstance(event.mediaCaption, str) else None
+    now_iso = datetime.now(timezone.utc).isoformat()
+    doc = {
+        "messageId": message_id,
+        "remoteJid": remote_jid,
+        "participant": event.participant,
+        "isGroup": bool(event.isGroup),
+        "pushName": (event.pushName or "")[:120] or None,
+        "messageType": (event.messageType or "unknown")[:40],
+        "text": text,
+        "hasMedia": bool(event.hasMedia),
+        "mediaMime": (event.mediaMime or None),
+        "mediaCaption": caption,
+        "mediaFileName": (event.mediaFileName or None),
+        "comprovanteStub": event.comprovanteStub if isinstance(event.comprovanteStub, dict) else None,
+        "messageTimestamp": event.messageTimestamp,
+        "receivedAt": event.receivedAt or now_iso,
+        "provider": "baileys",
+        "source": "baileys_webhook",
+        "processed": False,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+    }
+    try:
+        await db.whatsapp_inbound.update_one(
+            {"messageId": message_id},
+            {"$setOnInsert": doc},
+            upsert=True,
+        )
+    except Exception:
+        logging.exception("whatsapp inbound persist failed")
+        raise HTTPException(status_code=500, detail="Failed to persist inbound event")
+    return {"success": True, "messageId": message_id, "stored": True}
+
+
+@api_router.get("/whatsapp/inbound", dependencies=[Depends(verify_whatsapp_manager)])
+async def list_whatsapp_inbound(limit: int = 20):
+    """Gestor peek at recent inbound events (metadata; bodies omitted from list)."""
+    limit = max(1, min(100, int(limit or 20)))
+    rows = await db.whatsapp_inbound.find(
+        {},
+        {
+            "_id": 0,
+            "messageId": 1,
+            "remoteJid": 1,
+            "participant": 1,
+            "isGroup": 1,
+            "messageType": 1,
+            "hasMedia": 1,
+            "mediaMime": 1,
+            "pushName": 1,
+            "messageTimestamp": 1,
+            "receivedAt": 1,
+            "processed": 1,
+            "comprovanteStub": 1,
+            "provider": 1,
+        },
+    ).sort("receivedAt", -1).to_list(limit)
+    return {"count": len(rows), "items": rows}
+
+
 @api_router.post("/whatsapp/connect", dependencies=[Depends(verify_whatsapp_manager)])
 async def connect_whatsapp():
     if WHATSAPP_PROVIDER != "baileys":
@@ -6408,6 +6515,9 @@ async def startup_db_client():
         await db.prazo_partial_payments.create_index([("store", 1), ("created_at", -1)])
         await db.cash_withdrawals.create_index([("store", 1), ("created_at", -1)])
         await db.tenants.create_index("username", unique=True)
+        await db.whatsapp_inbound.create_index("messageId", unique=True)
+        await db.whatsapp_inbound.create_index([("receivedAt", -1)])
+        await db.whatsapp_inbound.create_index([("processed", 1), ("receivedAt", -1)])
         logger.info("MongoDB indexes ensured (performance optimization)")
     except Exception as e:
         logger.warning(f"Could not ensure all indexes (non-fatal): {e}")

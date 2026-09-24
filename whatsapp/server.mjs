@@ -6,6 +6,7 @@ import makeWASocket, { DisconnectReason, makeCacheableSignalKeyStore, Browsers }
 import QRCode from 'qrcode';
 import pino from 'pino';
 import { mongoAuth } from './auth.mjs';
+import { ensureInboundIndexes, handleInboundMessage } from './inbound.mjs';
 
 const token = process.env.WHATSAPP_INTERNAL_TOKEN;
 if (!token || token.length < 32) throw new Error('WHATSAPP_INTERNAL_TOKEN must contain at least 32 characters');
@@ -14,12 +15,15 @@ await mongo.connect();
 const db = mongo.db(process.env.DB_NAME);
 const authCollection = db.collection('baileys_auth');
 const locks = db.collection('baileys_locks');
+const processedMessages = db.collection('baileys_processed_messages');
+const inboundCollection = db.collection('baileys_inbound');
 const owner = randomUUID();
 const logger = pino({ level: 'silent' }); // Never log QR codes, session keys or customer messages.
 let socket, reconnectTimer, leaseTimer, connecting = false, stopping = false;
 let status = 'disconnected', qrCode = null, attempts = 0;
 let groupsCache = { until: 0, value: [] };
 let writeQueue = Promise.resolve();
+let indexesReady = Promise.resolve();
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024, files: 1 } });
 
@@ -56,6 +60,23 @@ function scheduleReconnect() {
   }, Math.min(60000, 2000 * 2 ** Math.min(attempts++, 5)) + Math.random() * 1000);
 }
 
+function attachInboundHandler(current) {
+  current.ev.on('messages.upsert', ({ type, messages }) => {
+    if (socket !== current || stopping || !Array.isArray(messages)) return;
+    for (const message of messages) {
+      handleInboundMessage(message, {
+        processedCollection: processedMessages,
+        inboundCollection,
+        token,
+        upsertType: type
+      }).catch(error => {
+        // Safe codes/names only — never log QR, credentials, or message bodies.
+        console.error('Inbound handling failed:', error?.code || error?.name || 'unknown');
+      });
+    }
+  });
+}
+
 async function connect() {
   if (stopping || connecting || socket) return;
   connecting = true;
@@ -70,6 +91,7 @@ async function connect() {
       }
     }, 15000);
     await writeQueue;
+    await indexesReady;
     const auth = await mongoAuth(authCollection, process.env.WHATSAPP_SESSION_KEY);
     status = 'connecting';
     const current = makeWASocket({
@@ -82,6 +104,7 @@ async function connect() {
     current.ev.on('creds.update', () => {
       writeQueue = writeQueue.then(() => auth.saveCreds()).catch(() => { stop(1); });
     });
+    attachInboundHandler(current);
     current.ev.on('connection.update', async update => {
       if (socket !== current || stopping) return;
       if (update.qr) {
@@ -137,6 +160,35 @@ app.post('/getGroupDataByInviteLink', async (req, res) => {
   res.json({ groupJid, groupName: 'Grupo WhatsApp' });
 });
 
+// Token-protected peek for gestor tooling (ETAPA 5+). Never returns secrets.
+app.get('/inbound/recent', async (req, res) => {
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+  const rows = await inboundCollection
+    .find({}, {
+      projection: {
+        _id: 0,
+        messageId: 1,
+        remoteJid: 1,
+        participant: 1,
+        isGroup: 1,
+        messageType: 1,
+        hasMedia: 1,
+        mediaMime: 1,
+        pushName: 1,
+        messageTimestamp: 1,
+        receivedAt: 1,
+        backendNotified: 1,
+        backendStatus: 1,
+        // Intentionally omit text/mediaCaption bodies from list peek.
+        comprovanteStub: 1
+      }
+    })
+    .sort({ receivedAt: -1 })
+    .limit(limit)
+    .toArray();
+  res.json({ count: rows.length, items: rows });
+});
+
 function canSend(req, res, next) {
   if (process.env.WHATSAPP_SEND_ENABLED !== 'true') return res.status(403).json({ error: 'Envio desativado até concluir a migração' });
   if (status !== 'connected') return res.status(409).json({ error: 'WhatsApp desconectado' });
@@ -159,6 +211,10 @@ app.post('/sendFileByUpload', canSend, upload.single('file'), async (req, res) =
 app.use((error, req, res, next) => {
   console.error('WhatsApp operation failed:', error.code || error.name || 'unknown');
   res.status(502).json({ error: 'Falha na operação do WhatsApp; tente novamente após conferir a conexão.' });
+});
+
+indexesReady = ensureInboundIndexes(processedMessages, inboundCollection).catch(error => {
+  console.error('Inbound index setup failed:', error?.code || error?.name || 'unknown');
 });
 
 const httpServer = app.listen(8002, '127.0.0.1');
