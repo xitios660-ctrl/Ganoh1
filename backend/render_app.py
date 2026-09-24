@@ -6,6 +6,13 @@ from fastapi.responses import FileResponse, HTMLResponse
 from starlette.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+def _frontend_build() -> Path:
+    override = os.environ.get('FRONTEND_BUILD_DIR')
+    if override:
+        return Path(override)
+    return Path(__file__).resolve().parent.parent / 'frontend' / 'build'
+
+
 if os.environ.get('MIGRATION_PENDING', 'true').lower() == 'true':
     app = FastAPI()
 
@@ -36,17 +43,24 @@ else:
             raise HTTPException(status_code=503, detail='Database unavailable')
         return {'status': 'ok', 'migration_pending': False}
 
-    build = Path(__file__).resolve().parent.parent / 'frontend' / 'build'
+    build = _frontend_build()
 
     class SPAFiles(StaticFiles):
+        """Serve CRA assets; unknown extension-less paths fall back to index.html (SPA deep links)."""
+
         async def get_response(self, path, scope):
-            if path == 'api' or path.startswith('api/'):
-                raise HTTPException(status_code=404)
+            # Never treat API as static / SPA — leave a real 404 for unmatched /api/*.
+            if path == 'api' or path.startswith('api/') or path == 'healthz':
+                raise StarletteHTTPException(status_code=404)
             try:
                 return await super().get_response(path, scope)
             except StarletteHTTPException as exc:
                 if exc.status_code != 404 or '.' in Path(path).name:
                     raise
-                return FileResponse(build / 'index.html', headers={'Cache-Control': 'no-cache'})
+                index = build / 'index.html'
+                if not index.is_file():
+                    raise
+                return FileResponse(index, headers={'Cache-Control': 'no-cache'})
 
+    # Mount last so /api/* and /healthz registered above win.
     app.mount('/', SPAFiles(directory=build, html=True), name='frontend')

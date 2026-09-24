@@ -2,6 +2,7 @@
 
 ## Etapa atual
 **ETAPA 8 — Comprovantes via WhatsApp Baileys: CONCLUÍDA** em 24/09/2026 ~05:10 BRT (America/Sao_Paulo), branch local `ganoh/grok-whatsapp-ai` only.  
+**SPA deep-link 404 (produção estática):** diagnóstico + hardening local em 24/09/2026 ~05:55 BRT — sem push/deploy.  
 **ETAPA 7 — Consultas financeiras Mongo:** concluída.  
 **ETAPA 6 — AI WhatsApp (OpenAI seguro):** concluída.  
 **ETAPA 5 — Gestor QR/status UI:** concluída.  
@@ -104,3 +105,34 @@ No confirm: grava revisão + audit (`origin=WhatsApp / comprovante`); **não** c
 
 ## Próxima
 **ETAPA 9** — relatórios / agendamento (respeitando `SCHEDULER_ENABLED=false` até liberação).
+
+## SPA deep links / produção 404 (24/09/2026 ~05:55 BRT)
+
+### Diagnóstico live `https://ganoh.onrender.com`
+- `/` → 200 HTML CRA (CDN: `s-maxage=300`, etag, last-modified).
+- `/auth`, `/equipe`, `/healthz`, `/api/categories` → plain text `Not Found` (HTTP 404, `text/plain`).
+- **Conclusão:** o host atual **não** é o stack Docker/FastAPI de `render.yaml` (`render_app` + `/healthz` JSON). Parece **Static Site** (export Emergent/CRA) **sem** rewrite SPA `/* → /index.html`.
+- Navegação client-side a partir de `/` funciona; reload/deep link falha (esperado sem catch-all).
+
+### Código neste repo (Docker web service)
+- `scripts/start_render.py` → uvicorn `render_app:app`.
+- `backend/render_app.py`: `/healthz`; com `MIGRATION_PENDING=false`, `SPAFiles` serve `frontend/build` e faz fallback `index.html` para rotas sem extensão (exceto `/api/*`).
+- Teste local (stub build): `/auth`, `/equipe`, `/gestor/dashboard`, `/:store` → 200 HTML; `/api/*` e assets em falta → 404 sem HTML; `/healthz` → 200 JSON.
+
+### Mudança desta sessão (local only)
+| Arquivo | Mudança |
+| --- | --- |
+| `backend/render_app.py` | `FRONTEND_BUILD_DIR` override; `StarletteHTTPException` em `/api`/`healthz` no static; fallback só se `index.html` existir |
+| `backend/tests/test_render_deployment.py` | cobertura `/auth` `/equipe` `/gestor/dashboard` `/runner`; build via `tmp_path` (sem skip) |
+| `GANOH_GROK_PROGRESS.md` | esta nota |
+
+### Como verificar após deploy Docker (quando aprovado)
+1. `MIGRATION_PENDING=false` + secrets preenchidos (senão só manutenção 503).
+2. `GET /healthz` → JSON `status=ok`.
+3. `GET /auth`, `/equipe`, `/runner` → 200 HTML (`index.html`).
+4. `GET /api/categories` → JSON API (não plain Not Found).
+5. Asset real `/static/js/...` → 200; asset inexistente → 404.
+
+### Riscos
+- Live UI continua estática até apontar o domínio ao serviço Docker `ganoh1` (ou adicionar rewrite no Static Site — só deep links; API/`/healthz` ainda ausentes).
+- Sem push / merge / deploy nesta sessão. `render.yaml` flags intactas.
