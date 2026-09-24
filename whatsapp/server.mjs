@@ -2,10 +2,10 @@ import express from 'express';
 import multer from 'multer';
 import { MongoClient } from 'mongodb';
 import { randomUUID, timingSafeEqual } from 'node:crypto';
-import makeWASocket, { DisconnectReason, makeCacheableSignalKeyStore, Browsers } from '@whiskeysockets/baileys';
+import makeWASocket, { DisconnectReason, makeCacheableSignalKeyStore, Browsers, downloadMediaMessage } from '@whiskeysockets/baileys';
 import QRCode from 'qrcode';
 import pino from 'pino';
-import { mongoAuth } from './auth.mjs';
+import { mongoAuth, codec } from './auth.mjs';
 import { normalizeIncomingMessage } from './messages.mjs';
 
 const token = process.env.WHATSAPP_INTERNAL_TOKEN;
@@ -16,7 +16,10 @@ const db = mongo.db(process.env.DB_NAME);
 const authCollection = db.collection('baileys_auth');
 const locks = db.collection('baileys_locks');
 const inbox = db.collection('whatsapp_inbox');
+const mediaPending = db.collection('whatsapp_media_pending');
 await inbox.createIndex({ processed: 1, receivedAt: 1 });
+await mediaPending.createIndex({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+const mediaCrypto = codec(process.env.WHATSAPP_SESSION_KEY);
 const backendPort = process.env.PORT || '10000';
 const owner = randomUUID();
 const logger = pino({ level: 'silent' }); // Never log QR codes, session keys or customer messages.
@@ -36,20 +39,64 @@ app.use((req, res, next) => {
 });
 app.use(express.json({ limit: '1mb' }));
 
-function backendPayload(record) {
-  return {
+async function backendPayload(record) {
+  const payload = {
     messageId: record.messageId || record._id,
     chatId: record.chatId,
     sender: record.sender,
     fromGroup: Boolean(record.fromGroup),
     kind: record.kind || 'unsupported',
     text: record.text || '',
+    mimeType: record.mimeType || '',
+    fileName: record.fileName || '',
     receivedAt: record.receivedAt instanceof Date ? record.receivedAt.toISOString() : record.receivedAt
   };
+  if (record.kind === 'image' || record.kind === 'document') {
+    const media = await mediaPending.findOne({ _id: payload.messageId });
+    if (media?.payload) {
+      const opened = mediaCrypto.open(media.payload);
+      payload.mediaBase64 = opened.base64 || '';
+      payload.mimeType = opened.mimeType || payload.mimeType;
+      payload.fileName = opened.fileName || payload.fileName;
+    }
+  }
+  return payload;
+}
+
+async function persistIncomingMedia(raw, normalized, currentSocket) {
+  const allowed = new Set(['image/jpeg', 'image/png', 'image/webp', 'application/pdf']);
+  if (!allowed.has(normalized.mimeType)) return false;
+  const buffer = await downloadMediaMessage(
+    raw,
+    'buffer',
+    {},
+    { logger, reuploadRequest: currentSocket.updateMediaMessage }
+  );
+  if (!Buffer.isBuffer(buffer) || buffer.length === 0 || buffer.length > 8 * 1024 * 1024) return false;
+  const encrypted = mediaCrypto.seal({
+    mimeType: normalized.mimeType,
+    fileName: normalized.fileName,
+    base64: buffer.toString('base64')
+  });
+  await mediaPending.updateOne(
+    { _id: normalized.messageId },
+    {
+      $set: {
+        payload: encrypted,
+        mimeType: normalized.mimeType,
+        fileName: normalized.fileName,
+        size: buffer.length,
+        createdAt: new Date(),
+        expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+      }
+    },
+    { upsert: true }
+  );
+  return true;
 }
 
 async function deliverIncoming(record) {
-  const payload = backendPayload(record);
+  const payload = await backendPayload(record);
   const response = await fetch(`http://127.0.0.1:${backendPort}/api/whatsapp/internal/incoming`, {
     method: 'POST',
     headers: {
@@ -158,7 +205,8 @@ async function connect() {
             ...message,
             receivedAt: new Date(message.receivedAt),
             processed: false,
-            attempts: 0
+            attempts: 0,
+            mediaPresent: false
           };
           const result = await inbox.updateOne(
             { _id: message.messageId },
@@ -166,6 +214,20 @@ async function connect() {
             { upsert: true }
           );
           if (result.upsertedCount === 1) {
+            if (message.kind === 'image' || message.kind === 'document') {
+              try {
+                record.mediaPresent = await persistIncomingMedia(raw, message, current);
+                await inbox.updateOne(
+                  { _id: message.messageId },
+                  { $set: { mediaPresent: record.mediaPresent } }
+                );
+              } catch (error) {
+                await inbox.updateOne(
+                  { _id: message.messageId },
+                  { $set: { mediaPresent: false, mediaError: String(error?.name || 'download_failed').slice(0, 80) } }
+                );
+              }
+            }
             deliverIncoming(record).catch(error => markIncomingFailure(message.messageId, error));
           }
         }
@@ -209,6 +271,17 @@ app.post('/connect', async (req, res) => {
   await connect();
   res.json({ success: true, status });
 });
+app.get('/media/:messageId', async (req, res) => {
+  const media = await mediaPending.findOne({ _id: req.params.messageId });
+  if (!media?.payload) return res.sendStatus(404);
+  const opened = mediaCrypto.open(media.payload);
+  res.json({
+    mimeType: opened.mimeType || media.mimeType || '',
+    fileName: opened.fileName || media.fileName || '',
+    data: opened.base64 || ''
+  });
+});
+
 app.get('/getChats', async (req, res) => {
   if (status !== 'connected') return res.status(409).json({ error: 'WhatsApp desconectado' });
   if (Date.now() > groupsCache.until) {
