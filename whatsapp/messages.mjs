@@ -31,6 +31,9 @@ export function normalizeIncomingMessage(raw) {
   let kind = 'unsupported';
   let text = '';
 
+  let mimeType = '';
+  let fileName = '';
+
   if (typeof message.conversation === 'string') {
     kind = 'text';
     text = message.conversation;
@@ -40,9 +43,13 @@ export function normalizeIncomingMessage(raw) {
   } else if (message.imageMessage) {
     kind = 'image';
     text = message.imageMessage.caption || '';
+    mimeType = message.imageMessage.mimetype || 'image/jpeg';
+    fileName = 'comprovante.jpg';
   } else if (message.documentMessage) {
     kind = 'document';
     text = message.documentMessage.caption || message.documentMessage.fileName || '';
+    mimeType = message.documentMessage.mimetype || '';
+    fileName = message.documentMessage.fileName || 'documento';
   }
 
   const epoch = asEpochSeconds(raw.messageTimestamp);
@@ -57,6 +64,8 @@ export function normalizeIncomingMessage(raw) {
     fromGroup: chatId.endsWith('@g.us'),
     kind,
     text: String(text || '').trim().slice(0, 4000),
+    mimeType: String(mimeType || '').slice(0, 120),
+    fileName: String(fileName || '').slice(0, 180),
     receivedAt
   };
 }
