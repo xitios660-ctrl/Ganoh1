@@ -137,6 +137,24 @@ export function WhatsAppTab({
     }
   };
 
+  const analyzeReceipt = async (receipt) => {
+    setReceiptActionId(`analyze:${receipt.id}`);
+    try {
+      await axios.post(`${API}/whatsapp/receipts/${receipt.id}/analyze`, {}, authConfig());
+      toast.success('Comprovante analisado. Confira os dados antes de confirmar.');
+      setReceiptDrafts((current) => {
+        const next = { ...current };
+        delete next[receipt.id];
+        return next;
+      });
+      await refreshReceipts(true);
+    } catch (error) {
+      toast.error(error?.response?.data?.detail || 'Não foi possível analisar o comprovante.');
+    } finally {
+      setReceiptActionId('');
+    }
+  };
+
   const reviewReceipt = async (receipt, action) => {
     const draft = receiptDrafts[receipt.id] || receiptDraft(receipt);
     if (action === 'confirm' && !draft.order_id) {
@@ -428,7 +446,11 @@ export function WhatsAppTab({
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-semibold">{money(receipt.analysis?.amount)}</span>
                           <span className="rounded-full bg-secondary px-2 py-0.5 text-xs">
-                            {receipt.analysis?.analysis_status === 'ai_not_configured' ? 'Aguardando IA' : 'Analisado pela IA'}
+                            {receipt.analysis?.analysis_status === 'analyzed'
+                              ? 'Analisado pela IA'
+                              : receipt.analysis?.analysis_status === 'analysis_failed'
+                                ? 'Falha na análise'
+                                : 'Aguardando análise'}
                           </span>
                           {duplicate && (
                             <span className="flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-xs text-red-700">
@@ -446,12 +468,27 @@ export function WhatsAppTab({
                           {receipt.analysis?.transaction_time ? ` ${receipt.analysis.transaction_time}` : ''}
                         </p>
                       </div>
-                      <Button variant="outline" size="sm" onClick={() => loadReceiptMedia(receipt)}>
-                        {receiptActionId === `media:${receipt.id}`
-                          ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          : <Eye className="mr-2 h-4 w-4" />}
-                        {media ? 'Ocultar' : 'Ver comprovante'}
-                      </Button>
+                      <div className="flex flex-wrap gap-2">
+                        {receipt.analysis?.analysis_status !== 'analyzed' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => analyzeReceipt(receipt)}
+                            disabled={!aiConfigured || busy}
+                          >
+                            {receiptActionId === `analyze:${receipt.id}`
+                              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                              : <Bot className="mr-2 h-4 w-4" />}
+                            {aiConfigured ? 'Analisar com IA' : 'IA não configurada'}
+                          </Button>
+                        )}
+                        <Button variant="outline" size="sm" onClick={() => loadReceiptMedia(receipt)}>
+                          {receiptActionId === `media:${receipt.id}`
+                            ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            : <Eye className="mr-2 h-4 w-4" />}
+                          {media ? 'Ocultar' : 'Ver comprovante'}
+                        </Button>
+                      </div>
                     </div>
 
                     {media && (
