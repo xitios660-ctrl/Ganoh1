@@ -1981,6 +1981,20 @@ def _filter_since(items, since_dt, field="created_at"):
         return items
     return [i for i in items if (_parse_iso_utc(i.get(field)) or datetime.min.replace(tzinfo=timezone.utc)) >= since_dt]
 
+def _filter_cash_orders_since(items, since_dt):
+    """Manual sales use their real cash entry time, not the selected reporting shift."""
+    if not since_dt:
+        return items
+    def recorded_at(item):
+        # Old manual sales have no cash_recorded_at. Mongo ObjectId records the
+        # insertion time, while created_at was backdated to the selected shift.
+        legacy_inserted_at = getattr(item.get("_id"), "generation_time", None) if item.get("manual_sale") else None
+        return (_parse_iso_utc(item.get("cash_recorded_at"))
+                or legacy_inserted_at
+                or _parse_iso_utc(item.get("created_at"))
+                or datetime.min.replace(tzinfo=timezone.utc))
+    return [item for item in items if recorded_at(item) >= since_dt]
+
 @api_router.get("/cash/{store}/drawer")
 async def get_cash_drawer(store: StoreLocation):
     """Get current cash drawer status - persistent balance that only resets manually"""
@@ -2002,8 +2016,8 @@ async def get_cash_drawer(store: StoreLocation):
         "payment_method": "cash",
         "synthetic": {"$ne": True},
     }
-    cash_orders = await db.orders.find(cash_query, {"_id": 0, "total": 1, "created_at": 1}).to_list(100000)
-    cash_orders = _filter_since(cash_orders, last_reset_dt)
+    cash_orders = await db.orders.find(cash_query, {"total": 1, "created_at": 1, "cash_recorded_at": 1, "manual_sale": 1}).to_list(100000)
+    cash_orders = _filter_cash_orders_since(cash_orders, last_reset_dt)
     total_cash_sales = sum(o.get("total", 0) for o in cash_orders)
     
     # Prazo payments made in CASH since last reset
@@ -2032,7 +2046,7 @@ async def get_cash_drawer(store: StoreLocation):
     total_withdrawn = sum(w.get("amount", 0) for w in all_withdrawals)
     
     # Today's data for display only (timezone-safe)
-    today_cash_orders = _filter_since(cash_orders, today_utc)
+    today_cash_orders = _filter_cash_orders_since(cash_orders, today_utc)
     today_cash_in = sum(o.get("total", 0) for o in today_cash_orders)
     
     today_prazo_cash = (sum(p.get("amount", 0) for p in _filter_since(prazo_full_payments, today_utc))
@@ -2085,8 +2099,10 @@ async def get_cash_drawer_debug(
         "payment_method": "cash",
         "synthetic": {"$ne": True},
     }
-    cash_orders = await db.orders.find(cash_query, {"_id": 0, "id": 1, "customer_name": 1, "total": 1, "created_at": 1, "status": 1, "manual_sale": 1}).sort("created_at", 1).to_list(5000)
-    cash_orders = _filter_since(cash_orders, last_reset_dt)
+    cash_orders = await db.orders.find(cash_query, {"id": 1, "customer_name": 1, "total": 1, "created_at": 1, "cash_recorded_at": 1, "status": 1, "manual_sale": 1}).sort("created_at", 1).to_list(5000)
+    cash_orders = _filter_cash_orders_since(cash_orders, last_reset_dt)
+    for order in cash_orders:
+        order.pop("_id", None)
     total_cash_sales = sum(o.get("total", 0) for o in cash_orders)
     
     # Get prazo payments made in CASH
@@ -3136,6 +3152,7 @@ async def create_manual_sale(payload: ManualSalePayload, username: str = Depends
         "pickup_time": payload.period,
         "status": "delivered",
         "created_at": created_utc.isoformat(),
+        "cash_recorded_at": datetime.now(timezone.utc).isoformat(),
         "delivered_at": created_utc.isoformat(),
         "manual_sale": True,
         "created_by_gestor": username,
