@@ -45,7 +45,9 @@ export const ThemeProvider = ({ children }) => {
   // React to in-app navigation is no longer needed: light theme is the global
   // default and only the user's explicit toggle changes it.
 
-  // Triggered by click on toggle button — origin is { x, y } of the click
+  // Triggered by click on toggle button — origin is { x, y } of the click.
+  // Important: iOS Safari can occasionally skip transitionend for clip-path.
+  // The fallback timer below guarantees the UI is never left locked.
   const toggleTheme = useCallback((origin) => {
     if (transitioning) return;
     setTransitioning(true);
@@ -53,8 +55,15 @@ export const ThemeProvider = ({ children }) => {
 
     const nextTheme = theme === 'dark' ? 'light' : 'dark';
     const targetColor = nextTheme === 'dark' ? '#0a0a0a' : '#fafaf7';
+    const prefersReducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
 
-    // Build overlay if not present
+    // Reduced motion and browsers without clip-path get an immediate, safe swap.
+    if (prefersReducedMotion || !window.CSS?.supports?.('clip-path', 'circle(10px at 10px 10px)')) {
+      setTheme(nextTheme);
+      setTransitioning(false);
+      return;
+    }
+
     let overlay = overlayRef.current;
     if (!overlay) {
       overlay = document.createElement('div');
@@ -62,46 +71,65 @@ export const ThemeProvider = ({ children }) => {
       overlay.style.inset = '0';
       overlay.style.zIndex = '99999';
       overlay.style.pointerEvents = 'none';
-      overlay.style.willChange = 'clip-path';
+      overlay.style.willChange = 'clip-path, opacity';
       document.body.appendChild(overlay);
       overlayRef.current = overlay;
     }
 
-    const { x = window.innerWidth / 2, y = 0 } = origin || {};
+    const { x = window.innerWidth / 2, y = window.innerHeight / 2 } = origin || {};
     const maxRadius = Math.hypot(
       Math.max(x, window.innerWidth - x),
       Math.max(y, window.innerHeight - y)
     );
 
-    // Stage 1: water drop falling - tiny circle at top expands gently
+    overlay.style.opacity = '1';
     overlay.style.background = `radial-gradient(circle at center, ${targetColor} 70%, ${targetColor}cc 100%)`;
     overlay.style.transition = 'none';
     overlay.style.clipPath = `circle(0px at ${x}px ${y}px)`;
-    // Force reflow
     // eslint-disable-next-line no-unused-expressions
     overlay.offsetHeight;
 
-    // Stage 2: ripple expands across the screen
-    overlay.style.transition = 'clip-path 850ms cubic-bezier(0.65, 0, 0.35, 1)';
-    overlay.style.clipPath = `circle(${maxRadius}px at ${x}px ${y}px)`;
+    let finished = false;
+    let fallbackTimer = null;
 
-    // After ripple completes, swap theme and fade out overlay
-    const onEnd = () => {
-      overlay.removeEventListener('transitionend', onEnd);
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+      overlay.removeEventListener('transitionend', onTransitionEnd);
+
+      // Apply the actual theme before uncovering the page.
       setTheme(nextTheme);
-      // Tiny delay so React applies the theme class before fade-out
       requestAnimationFrame(() => {
-        overlay.style.transition = 'opacity 250ms ease-out';
+        overlay.style.transition = 'opacity 160ms ease-out';
         overlay.style.opacity = '0';
         setTimeout(() => {
+          overlay.style.transition = 'none';
           overlay.style.opacity = '1';
           overlay.style.clipPath = `circle(0px at ${x}px ${y}px)`;
           setTransitioning(false);
-        }, 280);
+        }, 190);
       });
     };
-    overlay.addEventListener('transitionend', onEnd);
+
+    const onTransitionEnd = (event) => {
+      if (event.target === overlay && event.propertyName === 'clip-path') finish();
+    };
+
+    overlay.addEventListener('transitionend', onTransitionEnd);
+    overlay.style.transition = 'clip-path 420ms cubic-bezier(0.65, 0, 0.35, 1)';
+    overlay.style.clipPath = `circle(${maxRadius}px at ${x}px ${y}px)`;
+
+    // Hard safety net for Safari: even if transitionend never fires,
+    // theme switching completes and the button is unlocked.
+    fallbackTimer = setTimeout(finish, 560);
   }, [theme, transitioning]);
+
+  useEffect(() => () => {
+    const overlay = overlayRef.current;
+    if (overlay?.parentNode) overlay.parentNode.removeChild(overlay);
+    overlayRef.current = null;
+  }, []);
 
   return (
     <ThemeContext.Provider value={{ theme, toggleTheme, transitioning }}>
