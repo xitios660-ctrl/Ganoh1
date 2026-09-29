@@ -663,14 +663,33 @@ class StaffUnlockRequest(BaseModel):
 
 @api_router.post("/staff/unlock")
 async def unlock_staff(payload: StaffUnlockRequest):
-    """Validate staff gate password server-side so the secret is never bundled into the frontend."""
-    expected = (os.environ.get("STAFF_PASSWORD") or os.environ.get("PRAZO_PASSWORD") or os.environ.get("GESTOR_PASSWORD") or "").strip()
-    if not expected:
-        raise HTTPException(status_code=503, detail="Acesso da equipe não configurado")
+    """Validate the staff gate without exposing or requiring a frontend secret.
+
+    Priority:
+    1) dedicated STAFF_PASSWORD when configured;
+    2) current default gestor account password stored in MongoDB.
+    """
     incoming = (payload.password or "").strip()
-    if len(incoming) != len(expected) or not secrets.compare_digest(incoming, expected):
+    if not incoming:
         raise HTTPException(status_code=401, detail="Senha incorreta")
-    return {"success": True}
+
+    expected = (os.environ.get("STAFF_PASSWORD") or "").strip()
+    if expected:
+        if len(incoming) == len(expected) and secrets.compare_digest(incoming, expected):
+            return {"success": True}
+        raise HTTPException(status_code=401, detail="Senha incorreta")
+
+    tenant = await get_tenant_by_credentials("gestor", incoming)
+    if tenant:
+        return {"success": True}
+
+    # Final compatibility fallback for deployments where the default tenant
+    # has not yet been synchronized but GESTOR_PASSWORD is present.
+    gestor_password = (os.environ.get("GESTOR_PASSWORD") or "").strip()
+    if gestor_password and len(incoming) == len(gestor_password) and secrets.compare_digest(incoming, gestor_password):
+        return {"success": True}
+
+    raise HTTPException(status_code=401, detail="Senha incorreta")
 
 @api_router.get("/stores")
 async def get_stores():
