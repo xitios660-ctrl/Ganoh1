@@ -20,19 +20,26 @@ def stop(*_):
 signal.signal(signal.SIGTERM, stop)
 signal.signal(signal.SIGINT, stop)
 try:
-    if any(name.startswith('GANOH_RECOVERY_') and value for name, value in os.environ.items()):
-        completed = subprocess.run([sys.executable, 'scripts/recover_pdf.py'], cwd=ROOT, check=False)
-        if completed.returncode:
-            sys.exit(completed.returncode)
+    recovery = None
+    if os.environ.get('MIGRATION_PENDING', 'true').lower() == 'true' and \
+       os.environ.get('GANOH_RECOVERY_CUSTOMERS'):
+        # Keep the maintenance page healthy during a slow Atlas import.
+        recovery = subprocess.Popen([sys.executable, 'scripts/recover_pdf.py'], cwd=ROOT)
     if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and os.environ.get('WHATSAPP_PROVIDER') == 'baileys':
         children.append(subprocess.Popen(['node', 'server.mjs'], cwd=ROOT / 'whatsapp'))
     children.append(subprocess.Popen([sys.executable, '-m', 'uvicorn', 'render_app:app',
                                      '--host', '0.0.0.0', '--port', os.environ.get('PORT', '10000'),
                                      '--no-access-log'], cwd=ROOT / 'backend'))
     while not stopping and all(child.poll() is None for child in children):
+        if recovery and recovery.poll() is not None:
+            print('GANOH recovery process finished' if recovery.returncode == 0 else
+                  'GANOH recovery process failed; maintenance remains active', flush=True)
+            recovery = None
         time.sleep(0.5)
     failed = any(child.poll() not in (None, 0) for child in children)
 finally:
+    if 'recovery' in locals() and recovery and recovery.poll() is None:
+        recovery.terminate()
     stop()
     for child in children:
         try:
