@@ -658,6 +658,20 @@ async def check_tenant(tenant_id: str):
         "display_name": tenant.get("display_name", tenant["username"])
     }
 
+class StaffUnlockRequest(BaseModel):
+    password: str
+
+@api_router.post("/staff/unlock")
+async def unlock_staff(payload: StaffUnlockRequest):
+    """Validate staff gate password server-side so the secret is never bundled into the frontend."""
+    expected = (os.environ.get("STAFF_PASSWORD") or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="Acesso da equipe não configurado")
+    incoming = (payload.password or "").strip()
+    if len(incoming) != len(expected) or not secrets.compare_digest(incoming, expected):
+        raise HTTPException(status_code=401, detail="Senha incorreta")
+    return {"success": True}
+
 @api_router.get("/stores")
 async def get_stores():
     return {"stores": STORES}
