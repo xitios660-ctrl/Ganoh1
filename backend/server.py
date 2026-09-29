@@ -664,7 +664,7 @@ class StaffUnlockRequest(BaseModel):
 @api_router.post("/staff/unlock")
 async def unlock_staff(payload: StaffUnlockRequest):
     """Validate staff gate password server-side so the secret is never bundled into the frontend."""
-    expected = (os.environ.get("STAFF_PASSWORD") or "").strip()
+    expected = (os.environ.get("STAFF_PASSWORD") or os.environ.get("PRAZO_PASSWORD") or os.environ.get("GESTOR_PASSWORD") or "").strip()
     if not expected:
         raise HTTPException(status_code=503, detail="Acesso da equipe não configurado")
     incoming = (payload.password or "").strip()
