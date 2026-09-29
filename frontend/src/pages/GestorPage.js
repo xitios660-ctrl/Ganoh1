@@ -15,7 +15,7 @@ import {
   ChevronRight, Trash2, Plus, Pencil, UtensilsCrossed, CalendarClock, UserPlus, Receipt, Camera, Upload, Loader2, MessageCircle, QrCode, Users, PlusCircle
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
-import { AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, ComposedChart, Bar, Line, Legend, ReferenceLine } from 'recharts';
+import { AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, ComposedChart, Bar, Line, Legend, ReferenceLine, LabelList } from 'recharts';
 import { AdicionaisTab, WhatsAppTab, PrazoTab } from '../components/gestor';
 import { ThemeToggle } from '../components/ThemeToggle';
 import '../styles/gestor-cinematic.css';
@@ -1857,7 +1857,7 @@ export const GestorPage = () => {
                         <ResponsiveContainer width="100%" height="100%">
                           <AreaChart
                             data={chartData.data.map(item => ({ ...item, chart_label: chartLabel(item, chartPeriod) }))}
-                            margin={{ top: 16, right: 18, left: 4, bottom: 4 }}
+                            margin={{ top: chartPeriod === 'week' ? 34 : 16, right: 18, left: 4, bottom: 4 }}
                           >
                             <defs>
                               <linearGradient id="ganohSalesFill" x1="0" y1="0" x2="0" y2="1">
@@ -1890,7 +1890,17 @@ export const GestorPage = () => {
                               fill="url(#ganohSalesFill)"
                               dot={chartPeriod === 'week' || chartPeriod === 'year' ? { r: 3, fill: 'var(--gx-green)' } : false}
                               activeDot={{ r: 5 }}
-                            />
+                            >
+                              {chartPeriod === 'week' && (
+                                <LabelList
+                                  dataKey="total"
+                                  position="top"
+                                  offset={10}
+                                  formatter={(value) => compactMoney(value)}
+                                  style={{ fill: 'var(--gx-ink)', fontSize: 11, fontWeight: 700 }}
+                                />
+                              )}
+                            </Area>
                           </AreaChart>
                         </ResponsiveContainer>
                       </div>
@@ -2223,7 +2233,7 @@ export const GestorPage = () => {
                         <ResponsiveContainer width="100%" height="100%">
                           <ComposedChart
                             data={expensesChartData.data.map(item => ({ ...item, chart_label: chartLabel(item, expensesPeriod) }))}
-                            margin={{ top: 18, right: 20, left: 6, bottom: 6 }}
+                            margin={{ top: expensesPeriod === 'week' ? 38 : 18, right: 20, left: 6, bottom: expensesPeriod === 'week' ? 20 : 6 }}
                           >
                             <CartesianGrid stroke="var(--gx-line)" strokeDasharray="3 6" vertical={false} />
                             <ReferenceLine y={0} stroke="var(--gx-line-strong)" />
@@ -2247,8 +2257,28 @@ export const GestorPage = () => {
                               height={34}
                               wrapperStyle={{ fontSize: 11, color: 'var(--gx-ink-soft)' }}
                             />
-                            <Bar dataKey="revenue" name="Receita" fill="var(--gx-green)" radius={[5, 5, 0, 0]} maxBarSize={22} />
-                            <Bar dataKey="expenses" name="Gastos" fill="var(--gx-rose)" radius={[5, 5, 0, 0]} maxBarSize={22} />
+                            <Bar dataKey="revenue" name="Receita" fill="var(--gx-green)" radius={[5, 5, 0, 0]} maxBarSize={22}>
+                              {expensesPeriod === 'week' && (
+                                <LabelList
+                                  dataKey="revenue"
+                                  position="top"
+                                  offset={6}
+                                  formatter={(value) => compactMoney(value)}
+                                  style={{ fill: 'var(--gx-green)', fontSize: 9, fontWeight: 700 }}
+                                />
+                              )}
+                            </Bar>
+                            <Bar dataKey="expenses" name="Gastos" fill="var(--gx-rose)" radius={[5, 5, 0, 0]} maxBarSize={22}>
+                              {expensesPeriod === 'week' && (
+                                <LabelList
+                                  dataKey="expenses"
+                                  position="insideTop"
+                                  offset={4}
+                                  formatter={(value) => compactMoney(value)}
+                                  style={{ fill: '#ffffff', fontSize: 9, fontWeight: 700 }}
+                                />
+                              )}
+                            </Bar>
                             <Line
                               type="monotone"
                               dataKey="profit"
@@ -2257,7 +2287,17 @@ export const GestorPage = () => {
                               strokeWidth={3}
                               dot={expensesPeriod === 'week' || expensesPeriod === 'year' ? { r: 3 } : false}
                               activeDot={{ r: 5 }}
-                            />
+                            >
+                              {expensesPeriod === 'week' && (
+                                <LabelList
+                                  dataKey="profit"
+                                  position="bottom"
+                                  offset={10}
+                                  formatter={(value) => compactMoney(value)}
+                                  style={{ fill: 'var(--gx-cyan)', fontSize: 9, fontWeight: 700 }}
+                                />
+                              )}
+                            </Line>
                           </ComposedChart>
                         </ResponsiveContainer>
                       </div>
