@@ -178,53 +178,6 @@ export const GestorPage = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expenseStoreFilter]);
 
-  // Auto-authenticate from localStorage on mount.
-  // AuthPage stores credentials in localStorage.gestor_auth after a successful
-  // tenant login, so the user shouldn't have to type the password a second time
-  // when redirected to /gestor/dashboard.
-  useEffect(() => {
-    if (isAuthenticated) return;
-    const stored = localStorage.getItem('gestor_auth');
-    if (!stored) return;
-    let user, pass;
-    try {
-      [user, pass] = atob(stored).split(':');
-    } catch (_e) {
-      localStorage.removeItem('gestor_auth');
-      return;
-    }
-    if (!user || !pass) return;
-    let active = true;
-    (async () => {
-      try {
-        const response = await axios.get(`${API}/gestor/dashboard`, {
-          auth: { username: user, password: pass }
-        });
-        if (!active) return;
-        setUsername(user);
-        setPassword(pass);
-        setDashboard(response.data);
-        setIsAuthenticated(true);
-        // Schedule secondary fetches after auth state propagates
-        setTimeout(() => {
-          fetchChartData();
-          fetchFinancialSummary();
-          fetchMenuItems();
-          fetchPrazoData();
-          fetchExpenses();
-          fetchManualSales();
-        }, 50);
-      } catch (_e) {
-        // Stale credentials — clear and let the manual login form show.
-        localStorage.removeItem('gestor_auth');
-        localStorage.removeItem('tenant_id');
-        localStorage.removeItem('tenant_username');
-      }
-    })();
-    return () => { active = false; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const handleLogin = async (e) => {
     e.preventDefault();
     setIsLoading(true);
@@ -931,6 +884,7 @@ export const GestorPage = () => {
           response += '\n✅ Todos salvos!';
           setAwaitingCategory(false);
           fetchExpenses();
+          fetchFinancialSummary();
           setTimeout(() => closeExpenseChat(), 2000);
         }
         
@@ -1013,6 +967,7 @@ export const GestorPage = () => {
           response += '\n✅ Todos salvos!';
           setAwaitingCategory(false);
           fetchExpenses();
+          fetchFinancialSummary();
           setTimeout(() => closeExpenseChat(), 2000);
         }
         
@@ -1048,6 +1003,7 @@ export const GestorPage = () => {
         setPendingExpensesList([]);
         setAwaitingCategory(false);
         fetchExpenses();
+        fetchFinancialSummary();
         toast.success(`${pendingExpensesList.length} gastos salvos!`);
         
         setTimeout(() => closeExpenseChat(), 2000);
@@ -1099,6 +1055,7 @@ export const GestorPage = () => {
       setAnalyzedExpense(null);
       fetchExpenses();
       fetchChartData();
+      fetchFinancialSummary();
     } catch (error) {
       toast.error('Erro ao salvar gasto');
     }
@@ -1142,6 +1099,7 @@ export const GestorPage = () => {
       fetchManualSales();
       fetchExpenses();
       fetchChartData();
+      fetchFinancialSummary();
     } catch (error) {
       const msg = error?.response?.data?.detail || 'Erro ao lançar venda manual';
       toast.error(typeof msg === 'string' ? msg : 'Erro ao lançar venda manual');
@@ -1161,6 +1119,7 @@ export const GestorPage = () => {
       fetchManualSales();
       fetchExpenses();
       fetchChartData();
+      fetchFinancialSummary();
     } catch (error) {
       toast.error('Erro ao remover venda manual');
     }
@@ -1179,6 +1138,7 @@ export const GestorPage = () => {
       toast.success('Gasto removido!');
       fetchExpenses();
       fetchChartData();
+      fetchFinancialSummary();
     } catch (error) {
       toast.error('Erro ao remover gasto');
     }
@@ -1281,12 +1241,23 @@ export const GestorPage = () => {
     }
     
     if (auth) {
+      try {
+        const [storedUser, storedPass] = atob(auth).split(':');
+        setUsername(storedUser || '');
+        setPassword(storedPass || '');
+      } catch (_e) {
+        localStorage.removeItem('gestor_auth');
+        navigate('/auth');
+        return;
+      }
       setIsAuthenticated(true);
       fetchDashboard();
+      fetchFinancialSummary();
       fetchChartData();
       fetchMenuItems();
       fetchPrazoData();
       fetchExpenses();
+      fetchManualSales();
     }
   }, [navigate]);
 
