@@ -3658,8 +3658,8 @@ async def get_prazo_debts(store: Optional[str] = None):
     prazo_orders = await db.orders.find(query, {"_id": 0}).to_list(1000)
     
     # Get all prazo customers to lookup phones
-    prazo_customers = await db.prazo_customers.find({}, {"_id": 0, "name": 1, "phone": 1}).to_list(1000)
-    customer_phones = {c.get("name", "").lower(): c.get("phone", "") for c in prazo_customers}
+    prazo_customers = await db.prazo_customers.find({}, {"_id": 0, "name": 1, "phone": 1, "store": 1}).to_list(1000)
+    customer_phones = {(c.get("store"), c.get("name", "").lower()): c.get("phone", "") for c in prazo_customers}
     
     # Group by customer name
     debts_by_customer = {}
@@ -3673,13 +3673,14 @@ async def get_prazo_debts(store: Optional[str] = None):
         if remaining <= 0:
             continue  # Skip fully paid orders
         
-        if name not in debts_by_customer:
+        debt_key = (order_store, name)
+        if debt_key not in debts_by_customer:
             # Look up phone by customer name (case insensitive)
-            phone = customer_phones.get(name.lower(), "")
-            debts_by_customer[name] = {"name": name, "total": 0, "orders": [], "order_count": 0, "store": order_store, "phone": phone}
-        debts_by_customer[name]["total"] += remaining  # Use remaining amount
-        debts_by_customer[name]["order_count"] += 1
-        debts_by_customer[name]["orders"].append({
+            phone = customer_phones.get((order_store, name.lower()), "")
+            debts_by_customer[debt_key] = {"name": name, "total": 0, "orders": [], "order_count": 0, "store": order_store, "phone": phone}
+        debts_by_customer[debt_key]["total"] += remaining  # Use remaining amount
+        debts_by_customer[debt_key]["order_count"] += 1
+        debts_by_customer[debt_key]["orders"].append({
             "id": order.get("id"),
             "total": order_total,
             "partial_paid": partial_paid,
