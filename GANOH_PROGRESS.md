@@ -79,3 +79,17 @@
 - Terminologia corrigida para "Resultado simples", evitando apresentar receita menos despesas registradas como lucro contábil.
 - Smoke de produção valida os pisos históricos do relatório: 2026 receita >= R$ 368.856,69; despesas >= R$ 56.008,18; setembro receita >= R$ 50.792,00; despesas >= R$ 11.331,55.
 - Deploy validado: 196795b3abd3c0680851b22c69bd9c2b70bbec6c.
+
+
+## Tema + gráficos financeiros — 29/09/2026
+
+- Corrigido travamento ao alternar claro/escuro no Safari/iPhone: a animação agora possui fallback e nunca deixa `transitioning` preso.
+- Gestor reaproveita sessão salva e carrega automaticamente o resumo financeiro.
+- Data dos filtros financeiros usa calendário local, evitando deslocamento UTC no celular.
+- Gráfico de vendas substituído por Recharts responsivo, com área, eixos legíveis e tooltip.
+- Gráfico financeiro substituído por Recharts com barras de Receita/Gastos e linha de Resultado simples.
+- Totais de Receita, Gastos e Resultado ficam visíveis abaixo do gráfico.
+- Em telas pequenas, séries longas usam rolagem horizontal em vez de comprimir as colunas.
+- Semana, Mês e Ano permanecem calculados a partir dos dados factuais disponíveis. Histórico recuperado do PDF antes da migração é mensal; semanas históricas não são inventadas.
+- Deploy validado: `dep-dattvop42hec73d4ane0` / commit `0a78d1c5e657fe8506a66e66ce4ee89f38296efd`.
+- Smoke de produção aprovado: site, gestor, resumo financeiro, menus, clientes, dívidas, despesas, gráficos anual/semanal e caixas.
