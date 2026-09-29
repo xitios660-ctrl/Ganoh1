@@ -2386,18 +2386,20 @@ async def remove_pix_adjustment(adjustment_id: str):
 
 @api_router.get("/gestor/dashboard")
 async def get_gestor_dashboard(username: str = Depends(verify_gestor)):
-    # Use Brazil timezone for correct day calculation
+    """Return the manager overview with concurrent MongoDB reads.
+
+    This endpoint is on the critical path when Gestor opens. The previous
+    implementation performed the two stores and their queries sequentially,
+    which multiplied database latency. Keep the response contract identical,
+    but run independent reads concurrently and fetch only fields that are used.
+    """
     brazil_tz = pytz.timezone('America/Sao_Paulo')
     now_brazil = datetime.now(brazil_tz)
     today_brazil = now_brazil.replace(hour=0, minute=0, second=0, microsecond=0)
     month_start_brazil = today_brazil.replace(day=1)
-    
-    # Convert to UTC for database query
     today_utc = today_brazil.astimezone(pytz.UTC)
     month_start_utc = month_start_brazil.astimezone(pytz.UTC)
 
-    # Cash-basis revenue (align with /gestor/chart/monthly and Gastos):
-    # exclude prazo orders; include ready/delivered/received; add PIX adj + prazo payments.
     REVENUE_STATUSES = ("ready", "delivered", "received")
 
     def _is_revenue_order(order):
@@ -2409,42 +2411,55 @@ async def get_gestor_dashboard(username: str = Depends(verify_gestor)):
     def _sum_amounts(docs, key="amount"):
         return sum(float(d.get(key, 0) or 0) for d in docs)
 
-    result = {"stores": {}}
-    
-    for store_key in STORES.keys():
-        # Today's orders
-        today_orders = await db.orders.find({
-            "store": store_key,
-            "created_at": {"$gte": today_utc.isoformat()}
-        }, {"_id": 0}).to_list(1000)
-        
-        # Month's orders
-        month_orders = await db.orders.find({
-            "store": store_key,
-            "created_at": {"$gte": month_start_utc.isoformat()}
-        }, {"_id": 0}).to_list(10000)
-
-        # PIX manual adjustments + prazo cash received (same sources as chart endpoints)
+    async def _build_store(store_key: str):
         pix_query_base = {"removed": {"$ne": True}, "store": store_key}
         prazo_query_base = {"store": store_key}
-        pix_today = await db.pix_adjustments.find(
-            {**pix_query_base, "created_at": {"$gte": today_utc.isoformat()}}, {"_id": 0}
-        ).to_list(10000)
-        pix_month = await db.pix_adjustments.find(
-            {**pix_query_base, "created_at": {"$gte": month_start_utc.isoformat()}}, {"_id": 0}
-        ).to_list(10000)
-        prazo_today_full = await db.prazo_payments.find(
-            {**prazo_query_base, "created_at": {"$gte": today_utc.isoformat()}}, {"_id": 0}
-        ).to_list(10000)
-        prazo_today_partial = await db.prazo_partial_payments.find(
-            {**prazo_query_base, "created_at": {"$gte": today_utc.isoformat()}}, {"_id": 0}
-        ).to_list(10000)
-        prazo_month_full = await db.prazo_payments.find(
-            {**prazo_query_base, "created_at": {"$gte": month_start_utc.isoformat()}}, {"_id": 0}
-        ).to_list(10000)
-        prazo_month_partial = await db.prazo_partial_payments.find(
-            {**prazo_query_base, "created_at": {"$gte": month_start_utc.isoformat()}}, {"_id": 0}
-        ).to_list(10000)
+
+        (
+            today_orders,
+            month_orders,
+            pix_today,
+            pix_month,
+            prazo_today_full,
+            prazo_today_partial,
+            prazo_month_full,
+            prazo_month_partial,
+            low_stock_count,
+        ) = await asyncio.gather(
+            db.orders.find(
+                {"store": store_key, "created_at": {"$gte": today_utc.isoformat()}},
+                {"_id": 0, "status": 1, "payment_method": 1, "total": 1},
+            ).to_list(1000),
+            db.orders.find(
+                {"store": store_key, "created_at": {"$gte": month_start_utc.isoformat()}},
+                {"_id": 0, "status": 1, "payment_method": 1, "total": 1, "items": 1},
+            ).to_list(10000),
+            db.pix_adjustments.find(
+                {**pix_query_base, "created_at": {"$gte": today_utc.isoformat()}},
+                {"_id": 0, "amount": 1},
+            ).to_list(10000),
+            db.pix_adjustments.find(
+                {**pix_query_base, "created_at": {"$gte": month_start_utc.isoformat()}},
+                {"_id": 0, "amount": 1},
+            ).to_list(10000),
+            db.prazo_payments.find(
+                {**prazo_query_base, "created_at": {"$gte": today_utc.isoformat()}},
+                {"_id": 0, "amount": 1, "payment_method": 1},
+            ).to_list(10000),
+            db.prazo_partial_payments.find(
+                {**prazo_query_base, "created_at": {"$gte": today_utc.isoformat()}},
+                {"_id": 0, "amount": 1, "payment_method": 1},
+            ).to_list(10000),
+            db.prazo_payments.find(
+                {**prazo_query_base, "created_at": {"$gte": month_start_utc.isoformat()}},
+                {"_id": 0, "amount": 1, "payment_method": 1},
+            ).to_list(10000),
+            db.prazo_partial_payments.find(
+                {**prazo_query_base, "created_at": {"$gte": month_start_utc.isoformat()}},
+                {"_id": 0, "amount": 1, "payment_method": 1},
+            ).to_list(10000),
+            db.stock.count_documents({"store": store_key, "quantity": {"$lte": 5}}),
+        )
 
         today_order_revenue = sum(o.get("total", 0) for o in today_orders if _is_revenue_order(o))
         month_order_revenue = sum(o.get("total", 0) for o in month_orders if _is_revenue_order(o))
@@ -2460,10 +2475,9 @@ async def get_gestor_dashboard(username: str = Depends(verify_gestor)):
             + _sum_amounts(prazo_month_full)
             + _sum_amounts(prazo_month_partial)
         )
-        today_order_count = len([o for o in today_orders if _is_revenue_order(o)])
-        month_order_count = len([o for o in month_orders if _is_revenue_order(o)])
-        
-        # By payment method (today) — cash-basis (excl. unpaid prazo orders)
+        today_order_count = sum(1 for o in today_orders if _is_revenue_order(o))
+        month_order_count = sum(1 for o in month_orders if _is_revenue_order(o))
+
         today_by_payment = {"pix": 0, "debit": 0, "credit": 0, "cash": 0, "prazo": 0, "voucher": 0}
         for order in today_orders:
             if _is_revenue_order(order):
@@ -2473,54 +2487,48 @@ async def get_gestor_dashboard(username: str = Depends(verify_gestor)):
         for payment in prazo_today_full + prazo_today_partial:
             pm = payment.get("payment_method", "cash")
             today_by_payment[pm] = today_by_payment.get(pm, 0) + payment.get("amount", 0)
-        
-        # Product sales count (same revenue statuses; prazo excluded from revenue products)
+
         product_sales = {}
         for order in month_orders:
             if order.get("status") in REVENUE_STATUSES:
                 for item in order.get("items", []):
-                    name = item.get("name", "").split(" + ")[0]  # Remove adicionais from name
+                    name = item.get("name", "").split(" + ")[0]
                     if name not in product_sales:
                         product_sales[name] = {"count": 0, "revenue": 0}
                     product_sales[name]["count"] += item.get("quantity", 1)
                     product_sales[name]["revenue"] += item.get("price", 0) * item.get("quantity", 1)
-        
-        # Top and low products
+
         sorted_products = sorted(product_sales.items(), key=lambda x: x[1]["count"], reverse=True)
         top_products = [{"name": k, **v} for k, v in sorted_products[:5]]
         low_products = [{"name": k, **v} for k, v in sorted_products[-5:] if v["count"] > 0]
-        
-        # Stock alerts
-        low_stock = await db.stock.find({
-            "store": store_key,
-            "quantity": {"$lte": 5}
-        }, {"_id": 0}).to_list(100)
-        
-        result["stores"][store_key] = {
+
+        return store_key, {
             "name": STORES[store_key]["name"],
             "today": {
                 "total": today_total,
                 "order_count": today_order_count,
-                "by_payment_method": today_by_payment
+                "by_payment_method": today_by_payment,
             },
             "month": {
                 "total": month_total,
-                "order_count": month_order_count
+                "order_count": month_order_count,
             },
             "top_products": top_products,
             "low_products": low_products,
-            "low_stock_alerts": len(low_stock)
+            "low_stock_alerts": low_stock_count,
         }
-    
-    # Combined totals
-    result["combined"] = {
-        "today_total": sum(s["today"]["total"] for s in result["stores"].values()),
-        "month_total": sum(s["month"]["total"] for s in result["stores"].values()),
-        "today_orders": sum(s["today"]["order_count"] for s in result["stores"].values()),
-        "month_orders": sum(s["month"]["order_count"] for s in result["stores"].values())
+
+    store_results = await asyncio.gather(*(_build_store(store_key) for store_key in STORES.keys()))
+    stores = {store_key: payload for store_key, payload in store_results}
+    return {
+        "stores": stores,
+        "combined": {
+            "today_total": sum(s["today"]["total"] for s in stores.values()),
+            "month_total": sum(s["month"]["total"] for s in stores.values()),
+            "today_orders": sum(s["today"]["order_count"] for s in stores.values()),
+            "month_orders": sum(s["month"]["order_count"] for s in stores.values()),
+        },
     }
-    
-    return result
 
 @api_router.get("/gestor/sales/{store}")
 async def get_store_sales(store: StoreLocation, days: int = 30, username: str = Depends(verify_gestor)):
