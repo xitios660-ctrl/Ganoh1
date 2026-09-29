@@ -15,6 +15,8 @@ services:
         value: ganoh_production
       - key: GESTOR_PASSWORD
         sync: false
+      - key: STAFF_PASSWORD
+        sync: false
       - key: PRAZO_PASSWORD
         sync: false
       - key: CLEAR_DATA_PASSWORD
