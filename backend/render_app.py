@@ -64,6 +64,12 @@ else:
     async def health():
         try:
             await db.command('ping')
+            if os.environ.get('GANOH_RECOVERY_SOURCE') == 'pdf':
+                marker = await db.recovery_runs.find_one({'id': 'pdf-2026-09-28'})
+                if not marker or marker.get('status') != 'verified':
+                    raise HTTPException(status_code=503, detail='Recovery unverified')
+        except HTTPException:
+            raise
         except Exception:
             raise HTTPException(status_code=503, detail='Database unavailable')
         return {'status': 'ok', 'migration_pending': False}
