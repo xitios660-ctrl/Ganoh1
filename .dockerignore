@@ -6,6 +6,9 @@
 **/__pycache__
 **/.pytest_cache
 **/tests
+!backend/tests/
+!backend/tests/test_cash_input_validation.py
+!backend/tests/test_cash_full_withdrawal_regression.py
 .screenshots
 test_reports
 memory
