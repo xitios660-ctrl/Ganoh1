@@ -93,3 +93,32 @@
 - Semana, Mês e Ano permanecem calculados a partir dos dados factuais disponíveis. Histórico recuperado do PDF antes da migração é mensal; semanas históricas não são inventadas.
 - Deploy validado: `dep-dattvop42hec73d4ane0` / commit `0a78d1c5e657fe8506a66e66ce4ee89f38296efd`.
 - Smoke de produção aprovado: site, gestor, resumo financeiro, menus, clientes, dívidas, despesas, gráficos anual/semanal e caixas.
+
+
+## E2E completo de produção — 29/09/2026
+
+Executado no próprio Render contra a API real em loopback, com registros temporários `E2E_TEST_*` e limpeza direta no Mongo em `finally`.
+
+Aprovado 18/18:
+1. health do servidor;
+2. site público;
+3. cardápios Runner e GYM Londres;
+4. Gestor + gráficos semanais;
+5. pedido real com total descontado;
+6. pedido chegando à cozinha e rastreamento;
+7. reflexo no Gestor e caixa;
+8. fluxo received → preparing → ready → delivered + histórico;
+9. venda manual criar/listar/excluir;
+10. gasto criar → resultado semanal → excluir;
+11. cliente de prazo/comanda;
+12. adicionar valor/crédito + usar crédito;
+13. pedido a prazo virando devedor;
+14. adicionar valor com dívida e abatimento automático;
+15. pagamento parcial de devedor;
+16. quitação completa removendo da lista de devedores;
+17. Gestor, gráficos e estoque após todas as escritas;
+18. limpeza verificada: zero registros de teste restantes.
+
+Resultado final no log: `GANOH E2E PASSED`.
+O modo `GANOH_E2E_ONCE` foi desligado após o teste e o deploy final ficou LIVE.
+Smoke somente leitura final também aprovado.
