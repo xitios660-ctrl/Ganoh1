@@ -38,6 +38,10 @@ try:
     if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and \
        os.environ.get('GANOH_E2E_ONCE', 'false').lower() == 'true':
         e2e = subprocess.Popen([sys.executable, 'scripts/e2e_production.py'], cwd=ROOT)
+    routing_test = None
+    if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and \
+       os.environ.get('GANOH_STORE_ROUTING_TEST_ONCE', 'false').lower() == 'true':
+        routing_test = subprocess.Popen([sys.executable, 'scripts/store_routing_e2e.py'], cwd=ROOT)
     while not stopping and all(child.poll() is None for child in children):
         if recovery and recovery.poll() is not None:
             print('GANOH recovery process finished' if recovery.returncode == 0 else
@@ -51,6 +55,10 @@ try:
             print('GANOH full E2E finished' if e2e.returncode == 0 else
                   'GANOH full E2E failed', flush=True)
             e2e = None
+        if routing_test and routing_test.poll() is not None:
+            print('GANOH store routing test finished' if routing_test.returncode == 0 else
+                  'GANOH store routing test failed', flush=True)
+            routing_test = None
         time.sleep(0.5)
     failed = any(child.poll() not in (None, 0) for child in children)
 finally:
@@ -60,6 +68,8 @@ finally:
         smoke.terminate()
     if 'e2e' in locals() and e2e and e2e.poll() is None:
         e2e.terminate()
+    if 'routing_test' in locals() and routing_test and routing_test.poll() is None:
+        routing_test.terminate()
     stop()
     for child in children:
         try:
