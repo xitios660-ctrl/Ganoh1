@@ -23,6 +23,7 @@ import resend
 import whatsapp_ai
 import whatsapp_finance
 import whatsapp_comprovantes
+from recovered_history import archived_month
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -2012,7 +2013,8 @@ async def get_cash_drawer(store: StoreLocation):
     # Cash orders since last reset — filtered in Python (timezone-safe)
     cash_query = {
         "store": store.value,
-        "status": {"$in": ["ready", "delivered"]},
+        # Cash is received when a cash order is registered, before kitchen completion.
+        "status": {"$in": ["received", "preparing", "ready", "delivered"]},
         "payment_method": "cash",
         "synthetic": {"$ne": True},
     }
@@ -2095,7 +2097,7 @@ async def get_cash_drawer_debug(
     # Cash orders since last reset — filtered in Python (timezone-safe)
     cash_query = {
         "store": store.value,
-        "status": {"$in": ["ready", "delivered"]},
+        "status": {"$in": ["received", "preparing", "ready", "delivered"]},
         "payment_method": "cash",
         "synthetic": {"$ne": True},
     }
@@ -2240,27 +2242,44 @@ async def withdraw_cash(store: StoreLocation, withdrawal: CashWithdrawal):
     
     # Check if there's enough balance
     current_drawer = await get_cash_drawer(store)
-    if withdrawal.amount > current_drawer["current_balance"]:
+    available_cents = round(current_drawer["current_balance"] * 100)
+    amount_cents = round(withdrawal.amount * 100)
+    if amount_cents > available_cents:
         raise HTTPException(status_code=400, detail="Saldo insuficiente no caixa")
     
     # Create withdrawal record (UTC — comparisons are timezone-safe)
     withdrawal_record = {
         "id": str(uuid.uuid4()),
         "store": store.value,
-        "amount": withdrawal.amount,
+        "amount": amount_cents / 100,
         "category": withdrawal.category,
         "description": withdrawal.description or ("Vale Transporte" if withdrawal.category == "vt" else "Retirada de caixa"),
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
     await db.cash_withdrawals.insert_one({**withdrawal_record})
+
+    # A full withdrawal closes the old drawer period. Otherwise a later edit to
+    # an old order can shift the new balance (e.g. R$ 5.00 becomes R$ 4.45).
+    # Keep the withdrawal record for audit, but start the active balance at zero.
+    if amount_cents == available_cents:
+        await db.cash_drawer_config.update_one(
+            {"store": store.value},
+            {"$set": {
+                "balance": 0,
+                "last_reset_at": datetime.now(timezone.utc).isoformat(),
+                "last_full_withdrawal": {**withdrawal_record},
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }},
+            upsert=True,
+        )
     
     # If VT, also register as expense
     if withdrawal.category == "vt":
         expense = {
             "id": str(uuid.uuid4()),
             "description": "Vale Transporte (VT)",
-            "amount": withdrawal.amount,
+            "amount": amount_cents / 100,
             "category": "vt",
             "store": store.value,
             "notes": f"Retirado do caixa em {now_brazil.strftime('%d/%m/%Y %H:%M')}",
@@ -2655,7 +2674,7 @@ async def get_monthly_chart_data(month: int = None, year: int = None, store: str
                     daily_data[date]["gym_londres_count"] += 1
         except:
             pass
-    
+
     # Add PIX adjustments to daily totals
     for day_str, pix_data in pix_by_day.items():
         if day_str in daily_data:
@@ -2910,7 +2929,7 @@ async def get_yearly_chart_data(year: int = None, store: str = None, username: s
         orders_query["store"] = store
 
     # Get all completed orders this year
-    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "store": 1}).to_list(100000)
+    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "store": 1, "payment_method": 1}).to_list(100000)
     
     # Group by month (in Brazil timezone)
     month_names = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
@@ -2919,6 +2938,8 @@ async def get_yearly_chart_data(year: int = None, store: str = None, username: s
         monthly_data[month] = {"month": month, "month_name": month_names[month-1], "total": 0, "count": 0}
     
     for order in orders:
+        if order.get("payment_method") == "prazo":
+            continue
         try:
             order_time = datetime.fromisoformat(order.get("created_at", "").replace("Z", "+00:00"))
             # Convert to Brazil timezone to get correct month
@@ -2929,6 +2950,11 @@ async def get_yearly_chart_data(year: int = None, store: str = None, username: s
         except:
             pass
     
+    for month in range(1, 13):
+        archive_revenue, archive_orders = archived_month(target_year, month, store)
+        monthly_data[month]["total"] += archive_revenue
+        monthly_data[month]["count"] += archive_orders
+
     # Convert to sorted list
     chart_data = sorted(monthly_data.values(), key=lambda x: x["month"])
     
@@ -5530,6 +5556,13 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
         if month is None:
             continue
         monthly_data[month]["expenses"] += exp.get("amount", 0)
+
+    # The report contains only monthly totals for historical paid sales. The
+    # 301 detailed expenses are restored as regular documents above.
+    for month in range(1, 13):
+        archive_revenue, archive_orders = archived_month(target_year, month, store)
+        monthly_data[month]["revenue"] += archive_revenue
+        monthly_data[month]["order_count"] += archive_orders
 
     for m in monthly_data.values():
         m["profit"] = m["revenue"] - m["expenses"]
