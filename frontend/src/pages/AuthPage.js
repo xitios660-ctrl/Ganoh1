@@ -37,11 +37,17 @@ export const AuthPage = () => {
     // Prevents being stuck in a broken state when the tenant was deleted
     // or the local storage data is stale.
     const tenantId = localStorage.getItem('tenant_id');
+    const storedGestorAuth = localStorage.getItem('gestor_auth');
+    if (storedGestorAuth) {
+      // GestorPage validates the stored credentials against /gestor/dashboard.
+      // Skip a redundant /auth/check roundtrip so returning staff opens faster.
+      navigate('/gestor/dashboard', { replace: true });
+      return;
+    }
     if (tenantId) {
       axios.get(`${API}/auth/check/${tenantId}`)
-        .then(() => navigate('/gestor/dashboard'))
+        .then(() => navigate('/gestor/dashboard', { replace: true }))
         .catch(() => {
-          // Stale/invalid session — clear and stay on /auth
           localStorage.removeItem('tenant_id');
           localStorage.removeItem('tenant_username');
           localStorage.removeItem('tenant_display_name');
@@ -49,7 +55,7 @@ export const AuthPage = () => {
         });
     }
 
-    // Fetch existing accounts
+    // Fetch existing accounts only when the login screen is actually needed.
     fetchAccounts();
   }, [navigate]);
 
