@@ -10,7 +10,8 @@ const STORES = [
   { id: 'gym-londres', name: 'GYM Londres' },
 ];
 
-const STAFF_PASSWORD = (process.env.REACT_APP_STAFF_PASSWORD || '').trim();
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || '';
+const API = `${BACKEND_URL}/api`;
 const STAFF_SESSION_KEY = 'ganoh_staff_unlocked';
 
 /* Tela de acesso interno - separa Cozinha e Gestor em sessões distintas */
@@ -37,14 +38,28 @@ export const StaffAccessPage = () => {
   const [pwdError, setPwdError] = useState('');
   const [pwdShake, setPwdShake] = useState(false);
 
-  const handleUnlock = (e) => {
+  const handleUnlock = async (e) => {
     e.preventDefault();
-    if (STAFF_PASSWORD && pwd.trim() === STAFF_PASSWORD) {
+    setPwdError('');
+    try {
+      const response = await fetch(`${API}/staff/unlock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: (pwd || '').trim() }),
+      });
+      if (!response.ok) {
+        let detail = 'Senha incorreta';
+        try {
+          const body = await response.json();
+          if (body?.detail) detail = body.detail;
+        } catch {}
+        throw new Error(detail);
+      }
       try { sessionStorage.setItem(STAFF_SESSION_KEY, '1'); } catch {}
       setUnlocked(true);
       setPwdError('');
-    } else {
-      setPwdError(STAFF_PASSWORD ? 'Senha incorreta' : 'Acesso staff não configurado');
+    } catch (error) {
+      setPwdError(error?.message || 'Não foi possível liberar o acesso');
       setPwdShake(true);
       setTimeout(() => setPwdShake(false), 500);
     }
