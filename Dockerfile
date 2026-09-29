@@ -19,7 +19,7 @@ WORKDIR /app
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
 COPY backend/ ./backend/
-RUN cd backend && pytest -q tests/test_cash_input_validation.py tests/test_cash_full_withdrawal_regression.py && rm -rf tests
+RUN cd backend && pytest -q tests/test_cash_input_validation.py tests/test_cash_full_withdrawal_regression.py tests/test_staff_unlock.py && rm -rf tests
 COPY whatsapp/ ./whatsapp/
 COPY --from=whatsapp /build/node_modules ./whatsapp/node_modules
 COPY --from=frontend /build/build ./frontend/build
