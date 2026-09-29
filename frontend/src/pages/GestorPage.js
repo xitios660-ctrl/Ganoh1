@@ -15,6 +15,7 @@ import {
   ChevronRight, Trash2, Plus, Pencil, UtensilsCrossed, CalendarClock, UserPlus, Receipt, Camera, Upload, Loader2, MessageCircle, QrCode, Users, PlusCircle
 } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
+import { AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, ComposedChart, Bar, Line, Legend, ReferenceLine } from 'recharts';
 import { AdicionaisTab, WhatsAppTab, PrazoTab } from '../components/gestor';
 import { ThemeToggle } from '../components/ThemeToggle';
 import '../styles/gestor-cinematic.css';
@@ -31,6 +32,50 @@ const localDateInputValue = (date = new Date()) => {
   const dd = String(date.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
 };
+
+const compactMoney = (value) => {
+  const n = Number(value || 0);
+  if (Math.abs(n) >= 1000000) return `R$ ${(n / 1000000).toFixed(1).replace('.', ',')} mi`;
+  if (Math.abs(n) >= 1000) return `R$ ${(n / 1000).toFixed(Math.abs(n) >= 10000 ? 0 : 1).replace('.', ',')} mil`;
+  return `R$ ${Math.round(n)}`;
+};
+
+const chartLabel = (item, period) => {
+  if (period === 'day') return item.hour?.slice(0, 5) || '';
+  if (period === 'week') return item.day_name || item.label || '';
+  if (period === 'month') return String(item.day || '');
+  return item.month_name || '';
+};
+
+const SalesTooltipContent = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload || {};
+  return (
+    <div className="rounded-xl border px-3 py-2 shadow-xl text-xs" style={{ background: 'var(--gx-panel)', borderColor: 'var(--gx-line)', color: 'var(--gx-ink)' }}>
+      <div className="font-semibold mb-1">{label}</div>
+      <div>Receita: <strong style={{ color: 'var(--gx-green)' }}>{formatPrice(row.total)}</strong></div>
+      <div style={{ color: 'var(--gx-mute)' }}>{row.count || 0} pedido(s)</div>
+    </div>
+  );
+};
+
+const FinancialTooltipContent = ({ active, payload, label }) => {
+  if (!active || !payload?.length) return null;
+  const row = payload[0]?.payload || {};
+  return (
+    <div className="rounded-xl border px-3 py-2 shadow-xl text-xs min-w-[190px]" style={{ background: 'var(--gx-panel)', borderColor: 'var(--gx-line)', color: 'var(--gx-ink)' }}>
+      <div className="font-semibold mb-1">{label}</div>
+      <div className="flex justify-between gap-4"><span>Receita</span><strong style={{ color: 'var(--gx-green)' }}>{formatPrice(row.revenue)}</strong></div>
+      <div className="flex justify-between gap-4"><span>Gastos</span><strong style={{ color: 'var(--gx-rose)' }}>{formatPrice(row.expenses)}</strong></div>
+      <div className="flex justify-between gap-4 border-t mt-1 pt-1" style={{ borderColor: 'var(--gx-line)' }}>
+        <span>Resultado</span>
+        <strong style={{ color: row.profit >= 0 ? 'var(--gx-cyan)' : 'var(--gx-rose)' }}>{formatPrice(row.profit)}</strong>
+      </div>
+      {row.order_count !== undefined && <div className="mt-1" style={{ color: 'var(--gx-mute)' }}>{row.order_count} pedido(s)</div>}
+    </div>
+  );
+};
+
 
 // Products List Dialog
 const ProductsDialog = ({ isOpen, onClose, title, products, type }) => {
@@ -1806,40 +1851,48 @@ export const GestorPage = () => {
                         Histórico recuperado do relatório: vendas pagas antigas disponíveis por mês. As barras diárias mostram apenas vendas registradas no banco novo.
                       </p>
                     )}
-                    {/* Bar Chart — cinematic */}
-                    <div className="gx-chart-shell" style={{ height: 260 }}>
-                      <div className="h-full flex items-end justify-between gap-1 relative">
-                        {chartData.data.map((item, idx) => {
-                          const values = chartData.data.map(d => d.total);
-                          const maxValue = Math.max(...values, 1);
-                          const heightPercent = item.total > 0 ? Math.max((item.total / maxValue) * 100, 5) : 2;
-                          return (
-                            <div
-                              key={idx}
-                              className="flex-1 min-w-[10px] max-w-[40px] flex flex-col items-center group relative h-full gx-bar-wrap"
-                            >
-                              <div className="flex-1 w-full flex items-end justify-center">
-                                <div
-                                  className={`w-full gx-bar ${item.total > 0 ? '' : 'zero'}`}
-                                  style={{ height: `${heightPercent}%`, minHeight: item.total > 0 ? '8px' : '2px' }}
-                                />
-                              </div>
-                              <div className="gx-tooltip">
-                                {chartPeriod === 'day' ? item.hour :
-                                 chartPeriod === 'week' ? item.label :
-                                 chartPeriod === 'month' ? `Dia ${item.day}` :
-                                 item.month_name}: <strong style={{ color: 'var(--gx-green)' }}>{formatPrice(item.total)}</strong>
-                                <br/><span style={{ color: 'var(--gx-mute)' }}>{item.count} pedidos</span>
-                              </div>
-                              <span className="text-[9px] mt-1.5 shrink-0" style={{ color: 'var(--gx-mute)' }}>
-                                {chartPeriod === 'day' ? item.hour?.slice(0,2) :
-                                 chartPeriod === 'week' ? `${item.day_name?.slice(0,3)}` :
-                                 chartPeriod === 'month' ? item.day :
-                                 item.month_name?.slice(0,3)}
-                              </span>
-                            </div>
-                          );
-                        })}
+                    {/* Sales chart — responsive and readable */}
+                    <div className="gx-chart-shell overflow-x-auto" style={{ height: 300 }}>
+                      <div style={{ minWidth: chartPeriod === 'month' ? 820 : chartPeriod === 'day' ? 760 : 620, height: 280 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <AreaChart
+                            data={chartData.data.map(item => ({ ...item, chart_label: chartLabel(item, chartPeriod) }))}
+                            margin={{ top: 16, right: 18, left: 4, bottom: 4 }}
+                          >
+                            <defs>
+                              <linearGradient id="ganohSalesFill" x1="0" y1="0" x2="0" y2="1">
+                                <stop offset="0%" stopColor="var(--gx-green)" stopOpacity={0.42} />
+                                <stop offset="100%" stopColor="var(--gx-green)" stopOpacity={0.03} />
+                              </linearGradient>
+                            </defs>
+                            <CartesianGrid stroke="var(--gx-line)" strokeDasharray="3 6" vertical={false} />
+                            <XAxis
+                              dataKey="chart_label"
+                              tick={{ fill: 'var(--gx-mute)', fontSize: 10 }}
+                              axisLine={false}
+                              tickLine={false}
+                              interval={chartPeriod === 'month' ? 2 : 0}
+                            />
+                            <YAxis
+                              tickFormatter={compactMoney}
+                              tick={{ fill: 'var(--gx-mute)', fontSize: 10 }}
+                              axisLine={false}
+                              tickLine={false}
+                              width={72}
+                            />
+                            <RechartsTooltip content={<SalesTooltipContent />} cursor={{ stroke: 'var(--gx-line)' }} />
+                            <Area
+                              type="monotone"
+                              dataKey="total"
+                              name="Receita"
+                              stroke="var(--gx-green)"
+                              strokeWidth={3}
+                              fill="url(#ganohSalesFill)"
+                              dot={chartPeriod === 'week' || chartPeriod === 'year' ? { r: 3, fill: 'var(--gx-green)' } : false}
+                              activeDot={{ r: 5 }}
+                            />
+                          </AreaChart>
+                        </ResponsiveContainer>
                       </div>
                     </div>
 
@@ -2071,7 +2124,7 @@ export const GestorPage = () => {
                   <div className="gx-card-head">
                     <div className="gx-card-title">
                       <BarChart3 className="h-5 w-5" style={{ color: 'var(--gx-green)' }} />
-                      Receita vs Gastos
+                      Receita, Gastos e Resultado
                     </div>
                     <div className="gx-seg">
                       <button className={`gx-seg-btn ${expensesPeriod === 'day' ? 'active' : ''}`} onClick={() => { setExpensesPeriod('day'); fetchExpenses('day'); }} data-testid="gastos-period-day">Dia</button>
@@ -2160,55 +2213,64 @@ export const GestorPage = () => {
                       </span>
                     </div>
                     
-                    <div className="gx-chart-shell" style={{ height: 220 }}>
-                      <div className="h-full flex items-end justify-between gap-1">
-                        {expensesChartData.data.map((item, idx) => {
-                          const maxValue = Math.max(...expensesChartData.data.map(d => Math.max(d.revenue, d.expenses)), 1);
-                          const revenueHeight = item.revenue > 0 ? Math.max((item.revenue / maxValue) * 100, 5) : 2;
-                          const expenseHeight = item.expenses > 0 ? Math.max((item.expenses / maxValue) * 100, 5) : 2;
-                          return (
-                            <div 
-                              key={idx} 
-                              className="flex-1 min-w-[10px] max-w-[35px] flex flex-col items-center group relative h-full gx-bar-wrap"
-                            >
-                              <div className="flex-1 w-full flex items-end justify-center gap-[2px]">
-                                <div 
-                                  className={`w-1/2 gx-bar ${item.revenue > 0 ? '' : 'zero'}`}
-                                  style={{ height: `${revenueHeight}%`, minHeight: item.revenue > 0 ? '6px' : '2px' }}
-                                />
-                                <div 
-                                  className={`w-1/2 gx-bar-red ${item.expenses > 0 ? '' : 'zero'}`}
-                                  style={{ height: `${expenseHeight}%`, minHeight: item.expenses > 0 ? '6px' : '2px' }}
-                                />
-                              </div>
-                              <div className="gx-tooltip">
-                                <strong>{expensesPeriod === 'day' ? item.hour :
-                                 expensesPeriod === 'week' ? item.label :
-                                 expensesPeriod === 'month' ? `Dia ${item.day}` :
-                                 item.month_name}</strong><br/>
-                                Receita: <span style={{ color: 'var(--gx-green)' }}>{formatPrice(item.revenue)}</span><br/>
-                                Gastos: <span style={{ color: 'var(--gx-rose)' }}>{formatPrice(item.expenses)}</span><br/>
-                                Resultado simples: <span style={{ color: item.profit >= 0 ? 'var(--gx-green)' : 'var(--gx-rose)' }}>{formatPrice(item.profit)}</span>
-                              </div>
-                              <span className="text-[9px] mt-1.5 shrink-0" style={{ color: 'var(--gx-mute)' }}>
-                                {expensesPeriod === 'day' ? item.hour?.slice(0,2) :
-                                 expensesPeriod === 'week' ? item.day_name :
-                                 expensesPeriod === 'month' ? item.day :
-                                 item.month_name}
-                              </span>
-                            </div>
-                          );
-                        })}
+                    <div className="gx-chart-shell overflow-x-auto" style={{ height: 340 }}>
+                      <div
+                        style={{
+                          minWidth: expensesPeriod === 'month' ? 920 : expensesPeriod === 'day' ? 840 : 650,
+                          height: 320
+                        }}
+                      >
+                        <ResponsiveContainer width="100%" height="100%">
+                          <ComposedChart
+                            data={expensesChartData.data.map(item => ({ ...item, chart_label: chartLabel(item, expensesPeriod) }))}
+                            margin={{ top: 18, right: 20, left: 6, bottom: 6 }}
+                          >
+                            <CartesianGrid stroke="var(--gx-line)" strokeDasharray="3 6" vertical={false} />
+                            <ReferenceLine y={0} stroke="var(--gx-line-strong)" />
+                            <XAxis
+                              dataKey="chart_label"
+                              tick={{ fill: 'var(--gx-mute)', fontSize: 10 }}
+                              axisLine={false}
+                              tickLine={false}
+                              interval={expensesPeriod === 'month' ? 2 : expensesPeriod === 'day' ? 2 : 0}
+                            />
+                            <YAxis
+                              tickFormatter={compactMoney}
+                              tick={{ fill: 'var(--gx-mute)', fontSize: 10 }}
+                              axisLine={false}
+                              tickLine={false}
+                              width={72}
+                            />
+                            <RechartsTooltip content={<FinancialTooltipContent />} cursor={{ fill: 'rgba(127,184,74,0.05)' }} />
+                            <Legend
+                              verticalAlign="top"
+                              height={34}
+                              wrapperStyle={{ fontSize: 11, color: 'var(--gx-ink-soft)' }}
+                            />
+                            <Bar dataKey="revenue" name="Receita" fill="var(--gx-green)" radius={[5, 5, 0, 0]} maxBarSize={22} />
+                            <Bar dataKey="expenses" name="Gastos" fill="var(--gx-rose)" radius={[5, 5, 0, 0]} maxBarSize={22} />
+                            <Line
+                              type="monotone"
+                              dataKey="profit"
+                              name="Resultado"
+                              stroke="var(--gx-cyan)"
+                              strokeWidth={3}
+                              dot={expensesPeriod === 'week' || expensesPeriod === 'year' ? { r: 3 } : false}
+                              activeDot={{ r: 5 }}
+                            />
+                          </ComposedChart>
+                        </ResponsiveContainer>
                       </div>
                     </div>
-                    <div className="flex justify-center gap-4 mt-3 text-xs">
-                      <div className="flex items-center gap-1" style={{ color: 'var(--gx-ink-soft)' }}>
-                        <div className="w-3 h-3 rounded" style={{ background: 'linear-gradient(180deg, var(--gx-green), var(--gx-green-2))' }} />
-                        <span>Receita</span>
+                    <div className="grid grid-cols-3 gap-2 mt-3 text-xs">
+                      <div className="rounded-lg px-3 py-2 border" style={{ borderColor: 'var(--gx-line)', color: 'var(--gx-ink-soft)' }}>
+                        Receita<br/><strong style={{ color: 'var(--gx-green)' }}>{formatPrice(expensesChartData.total_revenue)}</strong>
                       </div>
-                      <div className="flex items-center gap-1" style={{ color: 'var(--gx-ink-soft)' }}>
-                        <div className="w-3 h-3 rounded" style={{ background: 'linear-gradient(180deg, #fb7185, #be123c)' }} />
-                        <span>Gastos</span>
+                      <div className="rounded-lg px-3 py-2 border" style={{ borderColor: 'var(--gx-line)', color: 'var(--gx-ink-soft)' }}>
+                        Gastos<br/><strong style={{ color: 'var(--gx-rose)' }}>{formatPrice(expensesChartData.total_expenses)}</strong>
+                      </div>
+                      <div className="rounded-lg px-3 py-2 border" style={{ borderColor: 'var(--gx-line)', color: 'var(--gx-ink-soft)' }}>
+                        Resultado<br/><strong style={{ color: expensesChartData.total_profit >= 0 ? 'var(--gx-cyan)' : 'var(--gx-rose)' }}>{formatPrice(expensesChartData.total_profit)}</strong>
                       </div>
                     </div>
                   </div>
