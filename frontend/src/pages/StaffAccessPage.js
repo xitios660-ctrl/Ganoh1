@@ -311,7 +311,7 @@ export const StaffAccessPage = () => {
                 </ul>
 
                 <button
-                  onClick={() => navigate('/auth')}
+                  onClick={() => navigate(localStorage.getItem('gestor_auth') ? '/gestor/dashboard' : '/auth')}
                   data-testid="staff-gestor-enter"
                   className="mt-auto w-full p-3.5 rounded-lg bg-[#a8d96b] hover:bg-[#bce283] text-black font-medium tracking-wide transition-all flex items-center justify-center gap-2 group/enter"
                 >
