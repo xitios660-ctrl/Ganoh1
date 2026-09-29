@@ -9,6 +9,7 @@
 !backend/tests/
 !backend/tests/test_cash_input_validation.py
 !backend/tests/test_cash_full_withdrawal_regression.py
+!backend/tests/test_staff_unlock.py
 .screenshots
 test_reports
 memory
