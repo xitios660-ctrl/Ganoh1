@@ -51,7 +51,10 @@ def request(method, path, data=None, auth=False, timeout=15):
             raw = resp.read()
             if not raw:
                 return {}
-            return json.loads(raw)
+            content_type = (resp.headers.get("Content-Type") or "").lower()
+            if "application/json" in content_type:
+                return json.loads(raw)
+            return raw.decode(errors="replace")
     except HTTPError as exc:
         raw = exc.read().decode(errors="replace")
         raise RuntimeError(f"{method} {path} -> HTTP {exc.code}: {raw[:240]}") from exc
