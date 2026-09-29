@@ -13,7 +13,7 @@ import zlib
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from pymongo import MongoClient
+from pymongo import MongoClient, UpdateOne
 
 PARTS = ('CUSTOMERS', 'ORDERS', 'EXPENSES', 'MENU')
 EXPECTED = {'customers': 93, 'orders': 470, 'expenses': 301, 'menu': 320}
@@ -104,8 +104,12 @@ def main():
             # Refuse to mix PDF rows with unrelated production records on first run.
             if db[collection].count_documents({'source': {'$ne': 'pdf_recovery'}}):
                 raise ValueError(f'Recovery stopped: existing {collection} records')
-            for record in records:
-                db[collection].update_one({'id': record['id']}, {'$setOnInsert': record}, upsert=True)
+            for start in range(0, len(records), 200):
+                batch = records[start:start + 200]
+                db[collection].bulk_write([
+                    UpdateOne({'id': record['id']}, {'$setOnInsert': record}, upsert=True)
+                    for record in batch
+                ], ordered=False)
             if db[collection].count_documents({'source': 'pdf_recovery'}) != len(records):
                 raise ValueError(f'Recovery verification failed: {collection}')
         total_due = round(sum(o['total'] - o['partial_paid'] for o in db.orders.find({'source': 'pdf_recovery'})), 2)
