@@ -547,43 +547,30 @@ export const KitchenPage = () => {
     }
   }, [soundEnabled]);
 
-  const fetchData = useCallback(async (showToast = false) => {
+  const fetchLiveData = useCallback(async (showToast = false) => {
+    const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
     try {
-      const requests = [
+      // Only the data required to render the operational kitchen screen.
+      // Heavy management/history requests are loaded separately so the page
+      // does not wait for them before becoming usable.
+      const settled = await Promise.allSettled([
         axios.get(`${API}/orders/${store}`),
         axios.get(`${API}/kitchen/${store}/stats`),
-        axios.get(`${API}/cash/${store}/today`),
-        axios.get(`${API}/stock/${store}`),
-        axios.get(`${API}/orders/${store}/pending-pix`),
-        axios.get(`${API}/orders/${store}/history`),
-        axios.get(`${API}/prazo/debts?store=${store}`),  // Fetch prazo debts for this store only
-        axios.get(`${API}/kitchen/adicionais`),  // Fetch adicionais
-        axios.get(`${API}/kitchen/menu/${store}`),  // Fetch menu items for this store
-        axios.get(`${API}/prazo/customers?store=${store}`),  // Fetch prazo customers for this store
-        axios.get(`${API}/cash/${store}/drawer`),  // Fetch cash drawer status
-        axios.get(`${API}/pix-adjustments/${store}`),  // Fetch PIX manual adjustments
-        axios.get(`${API}/prazo/payments-history?store=${store}&limit=50`)  // Fetch prazo payment history
-      ];
-      
-      // Use allSettled so a single failure doesn't kill the whole refresh (offline-friendly)
-      const settled = await Promise.allSettled(requests);
-      const anyFailed = settled.some((r) => r.status === 'rejected');
-      const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
-      if (anyFailed && !isOffline) {
-        // genuine server error
-        throw new Error('partial-failure');
-      }
+        axios.get(`${API}/orders/${store}/pending-pix`)
+      ]);
+
       const data = (i) => settled[i].status === 'fulfilled' ? settled[i].value : null;
-      const ordersRes = data(0), statsRes = data(1), cashRes = data(2), stockRes = data(3),
-            pixRes = data(4), historyRes = data(5), prazoDebtsRes = data(6), adicionaisRes = data(7),
-            menuRes = data(8), prazoCustomersRes = data(9), cashDrawerRes = data(10),
-            pixAdjRes = data(11), prazoHistoryRes = data(12);
-      
-      if (ordersRes && pixRes) {
-        const newOrders = ordersRes.data.orders.filter(o => !['delivered', 'pending_payment', 'payment_rejected'].includes(o.status));
-        const newPendingCount = newOrders.filter(o => o.status === 'received').length + pixRes.data.orders.length;
+      const ordersRes = data(0);
+      const statsRes = data(1);
+      const pixRes = data(2);
+
+      if (ordersRes) {
+        const pixOrders = pixRes?.data?.orders || [];
+        const newOrders = (ordersRes.data.orders || []).filter(
+          o => !['delivered', 'pending_payment', 'payment_rejected'].includes(o.status)
+        );
+        const newPendingCount = newOrders.filter(o => o.status === 'received').length + pixOrders.length;
         if (hasSeededOrderCountRef.current && newPendingCount > prevOrderCount.current) {
-          // Detected a NEW incoming order → capture the freshest received ones
           const receivedNow = newOrders
             .filter(o => o.status === 'received')
             .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
@@ -595,94 +582,109 @@ export const KitchenPage = () => {
         prevOrderCount.current = newPendingCount;
         hasSeededOrderCountRef.current = true;
         setOrders(newOrders);
-        setPendingPixOrders(pixRes.data.orders);
+        if (pixRes) setPendingPixOrders(pixOrders);
+      } else if (pixRes) {
+        setPendingPixOrders(pixRes.data.orders || []);
       }
+
       if (statsRes) setStats(statsRes.data);
-      if (cashRes) setSalesData(cashRes.data);
-      if (stockRes) setStock(stockRes.data.stock);
-      if (historyRes) setHistoryOrders(historyRes.data.orders);
-      
-      // Set prazo debts for this store
-      if (prazoDebtsRes) {
-        setPrazoDebts(prazoDebtsRes.data);
-      }
-      
-      // Set adicionais
-      if (adicionaisRes) {
-        setAdicionais(adicionaisRes.data.adicionais || []);
-      }
-      
-      // Set menu items
-      if (menuRes) {
-        setMenuItems(menuRes.data.items || []);
-      }
-      
-      // Set prazo customers
-      if (prazoCustomersRes) {
-        setPrazoCustomers(prazoCustomersRes.data.customers || []);
-      }
-      
-      // Set cash drawer
-      if (cashDrawerRes) {
-        setCashDrawer(cashDrawerRes.data);
-      }
-      
-      // Set PIX adjustments
-      if (pixAdjRes) {
-        setPixAdjustments(pixAdjRes.data);
-      }
-      
-      // Set prazo payment history
-      if (prazoHistoryRes) {
-        setPrazoPaymentHistory(prazoHistoryRes.data.payments || []);
-      }
-      
-      if (showToast && !isOffline) toast.success('Atualizado');
-      if (showToast && isOffline) toast.info('Offline · usando dados em cache');
-    } catch (error) {
-      const isOffline = typeof navigator !== 'undefined' && navigator.onLine === false;
-      if (!isOffline) toast.error('Erro ao carregar');
+
+      const allFailed = settled.every((r) => r.status === 'rejected');
+      if (allFailed && !isOffline && showToast) toast.error('Erro ao atualizar');
+      else if (showToast && !isOffline) toast.success('Atualizado');
+      else if (showToast && isOffline) toast.info('Offline · usando dados em cache');
+    } catch (_error) {
+      if (!isOffline && showToast) toast.error('Erro ao atualizar');
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [store, playNewOrderSound]);
+  }, [store, startAlarmLoop]);
+
+  const fetchSecondaryData = useCallback(async () => {
+    try {
+      const settled = await Promise.allSettled([
+        axios.get(`${API}/cash/${store}/today`),
+        axios.get(`${API}/stock/${store}`),
+        axios.get(`${API}/orders/${store}/history`),
+        axios.get(`${API}/prazo/debts?store=${store}`),
+        axios.get(`${API}/kitchen/adicionais`),
+        axios.get(`${API}/kitchen/menu/${store}`),
+        axios.get(`${API}/prazo/customers?store=${store}`),
+        axios.get(`${API}/cash/${store}/drawer`),
+        axios.get(`${API}/pix-adjustments/${store}`),
+        axios.get(`${API}/prazo/payments-history?store=${store}&limit=50`)
+      ]);
+      const data = (i) => settled[i].status === 'fulfilled' ? settled[i].value : null;
+      const cashRes = data(0), stockRes = data(1), historyRes = data(2), prazoDebtsRes = data(3),
+            adicionaisRes = data(4), menuRes = data(5), prazoCustomersRes = data(6),
+            cashDrawerRes = data(7), pixAdjRes = data(8), prazoHistoryRes = data(9);
+
+      if (cashRes) setSalesData(cashRes.data);
+      if (stockRes) setStock(stockRes.data.stock || []);
+      if (historyRes) setHistoryOrders(historyRes.data.orders || []);
+      if (prazoDebtsRes) setPrazoDebts(prazoDebtsRes.data);
+      if (adicionaisRes) setAdicionais(adicionaisRes.data.adicionais || []);
+      if (menuRes) setMenuItems(menuRes.data.items || []);
+      if (prazoCustomersRes) setPrazoCustomers(prazoCustomersRes.data.customers || []);
+      if (cashDrawerRes) setCashDrawer(cashDrawerRes.data);
+      if (pixAdjRes) setPixAdjustments(pixAdjRes.data);
+      if (prazoHistoryRes) setPrazoPaymentHistory(prazoHistoryRes.data.payments || []);
+    } catch (_error) {
+      // Secondary panels are best-effort. Never block the operational kitchen.
+    }
+  }, [store]);
+
+  const fetchData = useCallback((showToast = false) => {
+    // Refresh live operational data immediately, then update secondary panels
+    // without making the user wait for the full request bundle.
+    void fetchLiveData(showToast);
+    void fetchSecondaryData();
+  }, [fetchLiveData, fetchSecondaryData]);
 
   useEffect(() => {
-    if (store) {
-      // Remember last kitchen store opened so /equipe can pre-select it
-      try { localStorage.setItem('ganoh_last_kitchen_store', store); } catch { /* ignore quota errors */ }
-      // Initialize stock (best-effort, ignore failures when offline)
-      axios.post(`${API}/stock/${store}/initialize`).catch(() => {}).then(() => fetchData());
-      // Visibility-aware polling: 6s when active, paused when tab hidden
-      // This dramatically reduces server load when multiple kitchens are open
-      let interval = null;
-      const startPolling = () => {
-        if (interval) return;
-        interval = setInterval(() => fetchData(), 6000);
-      };
-      const stopPolling = () => {
-        if (interval) {
-          clearInterval(interval);
-          interval = null;
-        }
-      };
-      const handleVisibility = () => {
-        if (document.hidden) {
-          stopPolling();
-        } else {
-          fetchData();
-          startPolling();
-        }
-      };
-      startPolling();
-      document.addEventListener('visibilitychange', handleVisibility);
-      return () => {
+    if (!store) return undefined;
+
+    try { localStorage.setItem('ganoh_last_kitchen_store', store); } catch { /* ignore quota errors */ }
+
+    // Open the kitchen immediately. Stock initialization is maintenance work and
+    // must never sit in front of the first render.
+    void fetchLiveData();
+    const secondaryTimer = setTimeout(() => {
+      void fetchSecondaryData();
+      void axios.post(`${API}/stock/${store}/initialize`).catch(() => {});
+    }, 150);
+
+    // Poll only the three operational endpoints. Previously every 6 seconds we
+    // repeated the full 13-request bundle, which caused visible lag on mobile.
+    let interval = null;
+    const startPolling = () => {
+      if (interval) return;
+      interval = setInterval(() => { void fetchLiveData(); }, 6000);
+    };
+    const stopPolling = () => {
+      if (interval) {
+        clearInterval(interval);
+        interval = null;
+      }
+    };
+    const handleVisibility = () => {
+      if (document.hidden) {
         stopPolling();
-        document.removeEventListener('visibilitychange', handleVisibility);
-      };
-    }
-  }, [store, fetchData]);
+      } else {
+        void fetchLiveData();
+        startPolling();
+      }
+    };
+
+    startPolling();
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => {
+      clearTimeout(secondaryTimer);
+      stopPolling();
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [store, fetchLiveData, fetchSecondaryData]);
 
   const handleStatusChange = async (orderId, newStatus) => {
     try {
