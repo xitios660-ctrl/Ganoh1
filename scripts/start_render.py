@@ -20,6 +20,10 @@ def stop(*_):
 signal.signal(signal.SIGTERM, stop)
 signal.signal(signal.SIGINT, stop)
 try:
+    if any(name.startswith('GANOH_RECOVERY_') and value for name, value in os.environ.items()):
+        completed = subprocess.run([sys.executable, 'scripts/recover_pdf.py'], cwd=ROOT, check=False)
+        if completed.returncode:
+            sys.exit(completed.returncode)
     if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and os.environ.get('WHATSAPP_PROVIDER') == 'baileys':
         children.append(subprocess.Popen(['node', 'server.mjs'], cwd=ROOT / 'whatsapp'))
     children.append(subprocess.Popen([sys.executable, '-m', 'uvicorn', 'render_app:app',
