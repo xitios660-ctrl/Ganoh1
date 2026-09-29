@@ -1695,6 +1695,12 @@ export const GestorPage = () => {
                                     chartData.total_year)}
                       </span>
                     </div>
+                    {((chartPeriod === 'month' && chartData.archived_month_revenue > 0) ||
+                      (chartPeriod === 'year' && chartData.archived_monthly_only)) && (
+                      <p className="text-xs mb-3" style={{ color: 'var(--gx-mute)' }}>
+                        Histórico recuperado do relatório: vendas pagas antigas disponíveis por mês. As barras diárias mostram apenas vendas registradas no banco novo.
+                      </p>
+                    )}
                     {/* Bar Chart — cinematic */}
                     <div className="gx-chart-shell" style={{ height: 260 }}>
                       <div className="h-full flex items-end justify-between gap-1 relative">
@@ -1894,11 +1900,11 @@ export const GestorPage = () => {
               {expensesChartData && (
                 <div className="gx-kpi-grid">
                   <div className="gx-kpi gx-enter" data-i="1" data-testid="gastos-revenue">
-                    <div className="gx-kpi-label"><span className="gx-kpi-icon emerald"><TrendingUp className="h-4 w-4" /></span> Receita do Mês</div>
+                    <div className="gx-kpi-label"><span className="gx-kpi-icon emerald"><TrendingUp className="h-4 w-4" /></span> Receita {expensesPeriod === 'year' ? 'do Ano' : expensesPeriod === 'day' ? 'do Dia' : 'do Mês'}</div>
                     <div className="gx-kpi-value" style={{ color: 'var(--gx-emerald)' }}>{formatPrice(expensesChartData.total_revenue)}</div>
                   </div>
                   <div className="gx-kpi gx-enter" data-i="2" data-testid="gastos-expenses">
-                    <div className="gx-kpi-label"><span className="gx-kpi-icon rose"><Receipt className="h-4 w-4" /></span> Gastos do Mês</div>
+                    <div className="gx-kpi-label"><span className="gx-kpi-icon rose"><Receipt className="h-4 w-4" /></span> Gastos {expensesPeriod === 'year' ? 'do Ano' : expensesPeriod === 'day' ? 'do Dia' : 'do Mês'}</div>
                     <div className="gx-kpi-value rose">{formatPrice(expensesChartData.total_expenses)}</div>
                   </div>
                   <div className="gx-kpi gx-enter" data-i="3" data-testid="gastos-profit">
@@ -1906,7 +1912,7 @@ export const GestorPage = () => {
                       <span className={`gx-kpi-icon ${expensesChartData.total_profit >= 0 ? '' : 'rose'}`}>
                         <DollarSign className="h-4 w-4" />
                       </span>
-                      Lucro do Mês
+                      Resultado (receita − gastos)
                     </div>
                     <div className={`gx-kpi-value ${expensesChartData.total_profit >= 0 ? 'green' : 'rose'}`}>
                       {formatPrice(expensesChartData.total_profit)}
@@ -1917,6 +1923,12 @@ export const GestorPage = () => {
                     <div className="gx-kpi-value cyan">{expensesChartData.total_orders}</div>
                   </div>
                 </div>
+              )}
+
+              {expensesChartData && (expensesChartData.archived_month_revenue > 0 || expensesChartData.archived_monthly_only) && (
+                <p className="text-xs mt-2" style={{ color: 'var(--gx-mute)' }}>
+                  Receita antiga recuperada por mês. O resultado subtrai os gastos registrados e não inclui custos que ficaram fora do relatório.
+                </p>
               )}
 
               {/* Category Filter Buttons */}
