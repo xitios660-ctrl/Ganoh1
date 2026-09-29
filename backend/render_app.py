@@ -20,14 +20,39 @@ if os.environ.get('MIGRATION_PENDING', 'true').lower() == 'true':
     async def pending_health():
         return {'status': 'maintenance', 'migration_pending': True}
 
-    @app.api_route('/{path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
-    async def maintenance(path: str):
-        return HTMLResponse('<!doctype html><html lang="pt-BR"><meta charset="utf-8">'
-                            '<meta name="viewport" content="width=device-width,initial-scale=1">'
-                            '<title>Ganoh</title><h1>Ganoh</h1>'
-                            '<p>Estamos preparando o sistema. Volte em breve.</p></html>',
-                            status_code=503, headers={'Retry-After': '300',
-                                                     'Cache-Control': 'no-store'})
+    build = _frontend_build()
+    notice = ('<style>#ganoh-migration-notice{position:fixed;inset:0;z-index:2147483647;'
+              'display:grid;place-items:center;background:rgba(8,12,20,.72);'
+              'font-family:system-ui,sans-serif;color:white;padding:24px;text-align:center}'
+              '#ganoh-migration-notice div{max-width:480px;padding:32px;border-radius:20px;'
+              'background:#17202e;box-shadow:0 20px 70px #0009}'
+              '#ganoh-migration-notice h1{font-size:25px;margin:0 0 12px}'
+              '#ganoh-migration-notice p{line-height:1.5;margin:0}</style>'
+              '<div id="ganoh-migration-notice" role="alert"><div>'
+              '<h1>Ganoh em preparação</h1><p>A interface está publicada. '
+              'O caixa, os pedidos e o WhatsApp estarão disponíveis após conectar '
+              'e conferir o banco de dados.</p></div></div>')
+
+    @app.api_route('/api/{path:path}', methods=['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
+    async def pending_api(path: str):
+        raise HTTPException(status_code=503, detail='Migração do banco pendente')
+
+    @app.api_route('/{path:path}', methods=['POST', 'PUT', 'PATCH', 'DELETE'])
+    async def pending_write(path: str):
+        raise HTTPException(status_code=503, detail='Migração do banco pendente')
+
+    @app.get('/{path:path}')
+    async def pending_frontend(path: str):
+        # Show the real built interface, with an unmistakable blocking notice.
+        # No business API is mounted while migration is pending.
+        asset = (build / path).resolve()
+        if path and asset.is_file() and asset.is_relative_to(build.resolve()):
+            return FileResponse(asset)
+        if '.' in Path(path).name or not (build / 'index.html').is_file():
+            raise HTTPException(status_code=404)
+        html = (build / 'index.html').read_text(encoding='utf-8')
+        return HTMLResponse(html.replace('</body>', notice + '</body>'),
+                            headers={'Cache-Control': 'no-store'})
 else:
     required = ('MONGO_URL', 'DB_NAME', 'GESTOR_PASSWORD', 'PRAZO_PASSWORD', 'CLEAR_DATA_PASSWORD')
     missing = [name for name in required if not os.environ.get(name)]
