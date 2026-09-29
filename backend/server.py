@@ -2717,6 +2717,9 @@ async def get_monthly_chart_data(month: int = None, year: int = None, store: str
     # Calculate totals by store (including PIX adjustments)
     total_runner = sum(d["runner"] for d in chart_data)
     total_gym = sum(d["gym_londres"] for d in chart_data)
+    archived_total, archived_count = archived_month(target_year, target_month, store)
+    archived_runner, archived_runner_count = archived_month(target_year, target_month, 'runner') if store in (None, 'all', 'runner') else (0, 0)
+    archived_gym, archived_gym_count = archived_month(target_year, target_month, 'gym-londres') if store in (None, 'all', 'gym-londres') else (0, 0)
     
     return {
         "month": f"{month_names[target_month]} {target_year}",
@@ -2724,11 +2727,13 @@ async def get_monthly_chart_data(month: int = None, year: int = None, store: str
         "year": target_year,
         "store_filter": store or "all",
         "data": chart_data,
-        "total_month": sum(d["total"] for d in chart_data),
-        "total_orders": sum(d["count"] for d in chart_data),
+        "total_month": sum(d["total"] for d in chart_data) + archived_total,
+        "total_orders": sum(d["count"] for d in chart_data) + archived_count,
+        "archived_month_revenue": archived_total,
+        "archived_month_orders": archived_count,
         "by_store": {
-            "runner": {"total": total_runner, "orders": sum(d["runner_count"] for d in chart_data)},
-            "gym_londres": {"total": total_gym, "orders": sum(d["gym_londres_count"] for d in chart_data)}
+            "runner": {"total": total_runner + archived_runner, "orders": sum(d["runner_count"] for d in chart_data) + archived_runner_count},
+            "gym_londres": {"total": total_gym + archived_gym, "orders": sum(d["gym_londres_count"] for d in chart_data) + archived_gym_count}
         },
         "by_payment": {
             "pix": round(by_payment.get("pix", 0), 2),
@@ -2961,6 +2966,7 @@ async def get_yearly_chart_data(year: int = None, store: str = None, username: s
     return {
         "year": target_year,
         "data": chart_data,
+        "archived_monthly_only": archived_month(target_year, 9, store)[1] > 0,
         "total_year": sum(d["total"] for d in chart_data),
         "total_orders": sum(d["count"] for d in chart_data)
     }
@@ -5331,7 +5337,8 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
     # Convert to sorted list
     chart_data = sorted(daily_data.values(), key=lambda x: x["date"])
     
-    total_revenue = sum(d["revenue"] for d in chart_data)
+    archived_total, archived_count = archived_month(target_year, target_month, store)
+    total_revenue = sum(d["revenue"] for d in chart_data) + archived_total
     total_expenses = sum(d["expenses"] for d in chart_data)
     
     month_names = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", 
@@ -5342,9 +5349,10 @@ async def get_monthly_chart_with_expenses(month: int = None, year: int = None, s
         "period": "month",
         "data": chart_data,
         "total_revenue": total_revenue,
+        "archived_month_revenue": archived_total,
         "total_expenses": total_expenses,
         "total_profit": total_revenue - total_expenses,
-        "total_orders": sum(d["order_count"] for d in chart_data),
+        "total_orders": sum(d["order_count"] for d in chart_data) + archived_count,
         "expenses_by_category": expenses_by_category,
         "categories": EXPENSE_CATEGORIES
     }
@@ -5577,6 +5585,7 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
         "year": target_year,
         "period": "year",
         "data": chart_data,
+        "archived_monthly_only": archived_month(target_year, 9, store)[1] > 0,
         "total_revenue": total_revenue,
         "total_expenses": total_expenses,
         "total_profit": total_revenue - total_expenses,
