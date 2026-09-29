@@ -7040,27 +7040,18 @@ async def startup_db_client():
     except Exception as e:
         logger.warning(f"Could not ensure all indexes (non-fatal): {e}")
     
-    # Schedule auto-ready check every minute
-    scheduler.add_job(auto_mark_orders_ready, 'interval', minutes=1, id='auto_ready_orders')
-    
-    # Schedule MORNING shift report at 14:00 Brazil time
-    scheduler.add_job(
-        send_morning_shift_report, 
-        CronTrigger(hour=14, minute=0, timezone=BRAZIL_TZ),
-        id='morning_shift_report'
-    )
-    
-    # Schedule daily SALES report at 22:00 Brazil time (end of day summary)
-    scheduler.add_job(
-        send_daily_sales_report, 
-        CronTrigger(hour=22, minute=0, timezone=BRAZIL_TZ),
-        id='daily_sales_report'
-    )
-    
     if os.environ.get("SCHEDULER_ENABLED", "true").lower() == "true":
+        scheduler.add_job(auto_mark_orders_ready, 'interval', minutes=1, id='auto_ready_orders')
+        if os.environ.get("WHATSAPP_SEND_ENABLED", "false").lower() == "true":
+            scheduler.add_job(send_morning_shift_report,
+                              CronTrigger(hour=14, minute=0, timezone=BRAZIL_TZ),
+                              id='morning_shift_report')
+            scheduler.add_job(send_daily_sales_report,
+                              CronTrigger(hour=22, minute=0, timezone=BRAZIL_TZ),
+                              id='daily_sales_report')
         scheduler.start()
+        logger.info("Automatic order readiness enabled")
     logger.info("Database initialized, default tenant ensured")
-    logger.info("Scheduler started - Auto-ready every 1 min, Morning report at 14:00, Daily report at 22:00")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
