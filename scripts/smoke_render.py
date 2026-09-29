@@ -44,11 +44,24 @@ def main():
         assert 'current_balance' in get('/api/cash/' + store + '/drawer')
     year = get('/api/gestor/chart/yearly?year=2026', True)
     result = get('/api/gestor/chart/yearly-with-expenses?year=2026', True)
+    september = get('/api/gestor/chart/monthly-with-expenses?month=9&year=2026', True)
+    week = get('/api/gestor/chart/weekly-with-expenses?date=2026-09-29', True)
+    summary = get('/api/gestor/financial-summary', True)
     assert year['total_year'] >= 368856.69 - .01 and year['total_orders'] >= 8778
     assert result['total_revenue'] >= 368856.69 - .01
     assert result['total_expenses'] >= 56008.18 - .01
+    assert september['total_revenue'] >= 50792.00 - .01
+    assert september['total_expenses'] >= 11331.55 - .01
     assert len(get('/api/gestor/chart/weekly?date=2026-09-28', True)['data']) == 7
-    print('GANOH smoke verified: site, gestor, 2 menus, customers, debts, expenses, yearly/weekly charts, cash drawers', flush=True)
+    assert len(week['data']) == 7 and week['period'] == 'week'
+    assert summary['periods']['year']['revenue'] >= 368856.69 - .01
+    assert summary['periods']['year']['expenses'] >= 56008.18 - .01
+    assert summary['periods']['month']['revenue'] >= 50792.00 - .01
+    assert summary['current']['customers'] >= 93 and summary['current']['products'] >= 320
+    assert abs(summary['periods']['year']['result_simple'] - (
+        summary['periods']['year']['revenue'] - summary['periods']['year']['expenses']
+    )) < .02
+    print('GANOH smoke verified: site, gestor, financial summary, 2 menus, customers, debts, expenses, yearly/weekly charts, cash drawers', flush=True)
 
 
 if __name__ == '__main__':
