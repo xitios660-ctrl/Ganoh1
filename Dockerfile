@@ -18,7 +18,9 @@ COPY --from=whatsapp /usr/local/bin/node /usr/local/bin/node
 WORKDIR /app
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
-COPY backend/ ./backend/\nRUN cd backend && pytest -q tests/test_cash_input_validation.py tests/test_cash_full_withdrawal_regression.py\nCOPY whatsapp/ ./whatsapp/
+COPY backend/ ./backend/
+RUN cd backend && pytest -q tests/test_cash_input_validation.py tests/test_cash_full_withdrawal_regression.py
+COPY whatsapp/ ./whatsapp/
 COPY --from=whatsapp /build/node_modules ./whatsapp/node_modules
 COPY --from=frontend /build/build ./frontend/build
 COPY scripts/ ./scripts/
