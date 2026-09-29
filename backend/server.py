@@ -5250,6 +5250,291 @@ Obrigado! ☕"""
         "order_count": len(prazo_orders)
     }
 
+
+# ==================== FINANCIAL SUMMARY / WEEK WITH EXPENSES ====================
+
+def _ganoh_brazil_dt(value, brazil_tz):
+    """Parse an ISO timestamp and normalize it to America/Sao_Paulo."""
+    try:
+        dt = datetime.fromisoformat((value or "").replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = pytz.UTC.localize(dt)
+        return dt.astimezone(brazil_tz)
+    except Exception:
+        return None
+
+
+def _ganoh_pdf_live_start(brazil_tz):
+    """Paid-sale history before this date exists only as monthly PDF aggregates."""
+    return brazil_tz.localize(datetime(2026, 9, 29))
+
+
+@api_router.get("/gestor/chart/weekly-with-expenses")
+async def get_weekly_chart_with_expenses(date: str = None, store: str = None, username: str = Depends(verify_gestor)):
+    """Revenue, registered expenses and simple result for the 7-day window.
+
+    The recovered PDF contains paid-sales totals by month, not by day. When a
+    requested week overlaps the pre-migration PDF-only period, the response is
+    deliberately limited to the first day with factual daily sales data rather
+    than fabricating a historical weekly split.
+    """
+    brazil_tz = pytz.timezone("America/Sao_Paulo")
+    now_brazil = datetime.now(brazil_tz)
+    if date:
+        try:
+            ref = brazil_tz.localize(datetime.strptime(date, "%Y-%m-%d"))
+        except Exception:
+            ref = now_brazil
+    else:
+        ref = now_brazil
+
+    requested_end = ref.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    requested_start = requested_end - timedelta(days=7)
+    effective_start = requested_start
+    coverage_complete = True
+    coverage_note = None
+
+    if os.environ.get("GANOH_RECOVERY_SOURCE") == "pdf":
+        live_start = _ganoh_pdf_live_start(brazil_tz)
+        if requested_start < live_start:
+            coverage_complete = False
+            effective_start = min(max(live_start, requested_start), requested_end)
+            if requested_end <= live_start:
+                coverage_note = "Vendas históricas semanais indisponíveis: o PDF recuperado possui totais pagos apenas por mês."
+            else:
+                coverage_note = f"Semana parcial: vendas diárias disponíveis a partir de {live_start.strftime('%d/%m/%Y')}."
+
+    start_utc = effective_start.astimezone(pytz.UTC)
+    end_utc = requested_end.astimezone(pytz.UTC)
+
+    orders_query = {
+        "status": {"$in": ["ready", "delivered", "received"]},
+        "payment_method": {"$ne": "prazo"},
+        "created_at": {"$gte": start_utc.isoformat(), "$lt": end_utc.isoformat()},
+    }
+    pix_query = {
+        "removed": {"$ne": True},
+        "created_at": {"$gte": start_utc.isoformat(), "$lt": end_utc.isoformat()},
+    }
+    prazo_query = {"created_at": {"$gte": start_utc.isoformat(), "$lt": end_utc.isoformat()}}
+    expenses_query = {"created_at": {"$gte": start_utc.isoformat(), "$lt": end_utc.isoformat()}}
+
+    if store and store != "all":
+        orders_query["store"] = store
+        pix_query["store"] = store
+        prazo_query["store"] = store
+        expenses_query["$or"] = [{"store": store}, {"store": "all"}, {"store": {"$exists": False}}]
+
+    orders, expenses, pix_adjustments, prazo_full, prazo_partial = await asyncio.gather(
+        db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1}).to_list(50000),
+        db.expenses.find(expenses_query, {"_id": 0, "created_at": 1, "amount": 1, "category": 1}).to_list(10000),
+        db.pix_adjustments.find(pix_query, {"_id": 0, "created_at": 1, "amount": 1}).to_list(10000),
+        db.prazo_payments.find(prazo_query, {"_id": 0, "created_at": 1, "amount": 1}).to_list(10000),
+        db.prazo_partial_payments.find(prazo_query, {"_id": 0, "created_at": 1, "amount": 1}).to_list(10000),
+    )
+
+    weekday_short = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+    daily_data = {}
+    for i in range(7):
+        d = requested_start + timedelta(days=i)
+        key = d.strftime("%Y-%m-%d")
+        daily_data[key] = {
+            "date": key,
+            "day": d.day,
+            "day_name": weekday_short[d.weekday()],
+            "label": f"{weekday_short[d.weekday()]} {d.day:02d}/{d.month:02d}",
+            "revenue": 0,
+            "expenses": 0,
+            "profit": 0,
+            "order_count": 0,
+            "covered": d >= effective_start,
+        }
+
+    def add_amount(rows, field):
+        for row in rows:
+            dt = _ganoh_brazil_dt(row.get("created_at"), brazil_tz)
+            if not dt:
+                continue
+            key = dt.strftime("%Y-%m-%d")
+            if key in daily_data:
+                daily_data[key][field] += float(row.get("amount", 0) or 0)
+
+    for order in orders:
+        dt = _ganoh_brazil_dt(order.get("created_at"), brazil_tz)
+        if not dt:
+            continue
+        key = dt.strftime("%Y-%m-%d")
+        if key in daily_data:
+            daily_data[key]["revenue"] += float(order.get("total", 0) or 0)
+            daily_data[key]["order_count"] += 1
+
+    add_amount(pix_adjustments, "revenue")
+    add_amount(prazo_full + prazo_partial, "revenue")
+
+    expenses_by_category = {}
+    for exp in expenses:
+        dt = _ganoh_brazil_dt(exp.get("created_at"), brazil_tz)
+        if not dt:
+            continue
+        key = dt.strftime("%Y-%m-%d")
+        amount = float(exp.get("amount", 0) or 0)
+        if key in daily_data:
+            daily_data[key]["expenses"] += amount
+        cat = exp.get("category", "outros")
+        expenses_by_category[cat] = expenses_by_category.get(cat, 0) + amount
+
+    for day in daily_data.values():
+        day["profit"] = day["revenue"] - day["expenses"]
+
+    chart_data = sorted(daily_data.values(), key=lambda x: x["date"])
+    total_revenue = sum(d["revenue"] for d in chart_data)
+    total_expenses = sum(d["expenses"] for d in chart_data)
+    total_orders = sum(d["order_count"] for d in chart_data)
+
+    return {
+        "period": "week",
+        "start": requested_start.strftime("%d/%m/%Y"),
+        "end": (requested_end - timedelta(days=1)).strftime("%d/%m/%Y"),
+        "effective_start": effective_start.strftime("%d/%m/%Y") if effective_start < requested_end else None,
+        "coverage_complete": coverage_complete,
+        "coverage_note": coverage_note,
+        "data": chart_data,
+        "total_revenue": round(total_revenue, 2),
+        "total_expenses": round(total_expenses, 2),
+        "total_profit": round(total_revenue - total_expenses, 2),
+        "total_orders": total_orders,
+        "ticket_average": round(total_revenue / total_orders, 2) if total_orders else 0,
+        "expenses_by_category": expenses_by_category,
+        "categories": EXPENSE_CATEGORIES,
+    }
+
+
+@api_router.get("/gestor/financial-summary")
+async def get_financial_summary(username: str = Depends(verify_gestor)):
+    """Compact current management summary: today, week, month, year and live totals."""
+    brazil_tz = pytz.timezone("America/Sao_Paulo")
+    now = datetime.now(brazil_tz)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    tomorrow = today_start + timedelta(days=1)
+    requested_week_start = tomorrow - timedelta(days=7)
+    month_start = today_start.replace(day=1)
+    year_start = brazil_tz.localize(datetime(now.year, 1, 1))
+    year_end = brazil_tz.localize(datetime(now.year + 1, 1, 1))
+
+    week_start = requested_week_start
+    week_complete = True
+    week_note = None
+    if os.environ.get("GANOH_RECOVERY_SOURCE") == "pdf":
+        live_start = _ganoh_pdf_live_start(brazil_tz)
+        if week_start < live_start:
+            week_complete = False
+            week_start = min(max(live_start, week_start), tomorrow)
+            week_note = f"Semana parcial desde {live_start.strftime('%d/%m/%Y')}; o histórico pago anterior existe apenas por mês."
+
+    y0 = year_start.astimezone(pytz.UTC).isoformat()
+    y1 = year_end.astimezone(pytz.UTC).isoformat()
+
+    orders, expenses, pix_adjustments, prazo_full, prazo_partial, customers, menu_count = await asyncio.gather(
+        db.orders.find(
+            {
+                "status": {"$in": ["ready", "delivered", "received"]},
+                "payment_method": {"$ne": "prazo"},
+                "created_at": {"$gte": y0, "$lt": y1},
+            },
+            {"_id": 0, "created_at": 1, "total": 1, "store": 1},
+        ).to_list(100000),
+        db.expenses.find(
+            {"created_at": {"$gte": y0, "$lt": y1}},
+            {"_id": 0, "created_at": 1, "amount": 1, "store": 1},
+        ).to_list(20000),
+        db.pix_adjustments.find(
+            {"removed": {"$ne": True}, "created_at": {"$gte": y0, "$lt": y1}},
+            {"_id": 0, "created_at": 1, "amount": 1, "store": 1},
+        ).to_list(20000),
+        db.prazo_payments.find(
+            {"created_at": {"$gte": y0, "$lt": y1}},
+            {"_id": 0, "created_at": 1, "amount": 1, "store": 1},
+        ).to_list(20000),
+        db.prazo_partial_payments.find(
+            {"created_at": {"$gte": y0, "$lt": y1}},
+            {"_id": 0, "created_at": 1, "amount": 1, "store": 1},
+        ).to_list(20000),
+        db.prazo_customers.find({}, {"_id": 0, "credit": 1}).to_list(2000),
+        db.menu.count_documents({}),
+    )
+
+    def in_window(row, start, end):
+        dt = _ganoh_brazil_dt(row.get("created_at"), brazil_tz)
+        return bool(dt and start <= dt < end)
+
+    def summarize(start, end, archive_months=(), coverage_complete=True, coverage_note=None):
+        live_orders = [o for o in orders if in_window(o, start, end)]
+        live_expenses = [e for e in expenses if in_window(e, start, end)]
+        live_pix = [p for p in pix_adjustments if in_window(p, start, end)]
+        live_prazo = [p for p in (prazo_full + prazo_partial) if in_window(p, start, end)]
+
+        archive_revenue = 0
+        archive_orders = 0
+        for year, month in archive_months:
+            rev, count = archived_month(year, month, None)
+            archive_revenue += rev
+            archive_orders += count
+
+        revenue = (
+            sum(float(o.get("total", 0) or 0) for o in live_orders)
+            + sum(float(p.get("amount", 0) or 0) for p in live_pix)
+            + sum(float(p.get("amount", 0) or 0) for p in live_prazo)
+            + archive_revenue
+        )
+        expense_total = sum(float(e.get("amount", 0) or 0) for e in live_expenses)
+        order_count = len(live_orders) + archive_orders
+        result_simple = revenue - expense_total
+        return {
+            "revenue": round(revenue, 2),
+            "expenses": round(expense_total, 2),
+            "result_simple": round(result_simple, 2),
+            "orders": order_count,
+            "ticket_average": round(revenue / order_count, 2) if order_count else 0,
+            "margin_simple": round((result_simple / revenue) * 100, 1) if revenue else 0,
+            "coverage_complete": coverage_complete,
+            "coverage_note": coverage_note,
+        }
+
+    month_archive = [(now.year, now.month)]
+    year_archive = [(now.year, m) for m in range(1, 13)]
+
+    debt_orders = await db.orders.find(
+        {"payment_method": "prazo", "prazo_paid": {"$ne": True}},
+        {"_id": 0, "store": 1, "customer_name": 1, "total": 1, "partial_paid": 1},
+    ).to_list(5000)
+    debt_total = 0
+    debt_groups = set()
+    for order in debt_orders:
+        remaining = float(order.get("total", 0) or 0) - float(order.get("partial_paid", 0) or 0)
+        if remaining <= 0:
+            continue
+        debt_total += remaining
+        debt_groups.add((order.get("store", ""), order.get("customer_name", "")))
+
+    return {
+        "as_of": now.isoformat(),
+        "disclaimer": "Resultado simples = receita menos despesas registradas; não é lucro contábil.",
+        "periods": {
+            "today": summarize(today_start, tomorrow),
+            "week": summarize(week_start, tomorrow, coverage_complete=week_complete, coverage_note=week_note),
+            "month": summarize(month_start, tomorrow, archive_months=month_archive),
+            "year": summarize(year_start, tomorrow, archive_months=year_archive),
+        },
+        "current": {
+            "receivables": round(debt_total, 2),
+            "debt_groups": len(debt_groups),
+            "customer_credits": round(sum(float(c.get("credit", 0) or 0) for c in customers), 2),
+            "customers": len(customers),
+            "products": menu_count,
+        },
+    }
+
+
 # ==================== UPDATED CHART DATA WITH EXPENSES ====================
 @api_router.get("/gestor/chart/monthly-with-expenses")
 async def get_monthly_chart_with_expenses(month: int = None, year: int = None, store: str = None, username: str = Depends(verify_gestor)):
