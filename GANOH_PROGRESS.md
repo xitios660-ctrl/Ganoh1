@@ -54,3 +54,16 @@
 ## Pendências
 - WhatsApp/Baileys: revisar em etapa separada.
 - Fazer validação visual manual do fluxo da equipe em celular/desktop caso apareça diferença de layout.
+
+## Otimização de desempenho — 29/09/2026
+
+- Cozinha: carregamento inicial separado em dados operacionais e dados secundários.
+- Cozinha: tela deixa de aguardar inicialização de estoque antes de abrir.
+- Cozinha: polling de 6s reduzido de 13 requisições para apenas os 3 endpoints operacionais (pedidos, status e PIX pendente).
+- Cozinha: histórico, estoque, prazo, cardápio, caixa e demais dados carregam em segundo plano e continuam disponíveis.
+- Gestor: acesso com sessão salva pula a validação redundante de /auth/check e abre direto no dashboard.
+- Gestor: endpoint /api/gestor/dashboard paralelizado para consultar as duas lojas e fontes independentes do MongoDB simultaneamente, mantendo o mesmo contrato de resposta.
+- Frontend production build: aprovado.
+- Backend regression suite: 40 testes aprovados.
+- Smoke de produção após deploy: aprovado para site, gestor, 2 menus, clientes, dívidas, gastos, gráficos anual/semanal e caixas.
+- Deploy validado: commit 2a937d171453b0d29e9ef567551aeac3dd2a9bc4.
