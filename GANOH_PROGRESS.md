@@ -67,3 +67,15 @@
 - Backend regression suite: 40 testes aprovados.
 - Smoke de produção após deploy: aprovado para site, gestor, 2 menus, clientes, dívidas, gastos, gráficos anual/semanal e caixas.
 - Deploy validado: commit 2a937d171453b0d29e9ef567551aeac3dd2a9bc4.
+
+## Resumo financeiro e histórico do PDF — 29/09/2026
+
+- Dashboard ganhou Resumo financeiro com Hoje, Semana, Mês e Ano.
+- Cada período exibe receita, despesas registradas, resultado simples, pedidos e ticket médio.
+- Dashboard também exibe recebíveis atuais, grupos em aberto, créditos de clientes, clientes cadastrados e produtos.
+- Aba Gastos ganhou o período Semana e gráfico Receita x Gastos x Resultado simples.
+- Histórico mensal/anual usa os agregados recuperados do PDF de 28/09/2026 e soma apenas movimentações novas posteriores.
+- Semana usa somente dados diários factuais. Enquanto a janela de 7 dias alcançar o período anterior à migração, mostra aviso de cobertura parcial a partir de 29/09/2026.
+- Terminologia corrigida para "Resultado simples", evitando apresentar receita menos despesas registradas como lucro contábil.
+- Smoke de produção valida os pisos históricos do relatório: 2026 receita >= R$ 368.856,69; despesas >= R$ 56.008,18; setembro receita >= R$ 50.792,00; despesas >= R$ 11.331,55.
+- Deploy validado: 196795b3abd3c0680851b22c69bd9c2b70bbec6c.
