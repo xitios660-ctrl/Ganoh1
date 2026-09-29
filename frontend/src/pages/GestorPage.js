@@ -25,6 +25,12 @@ const API = `${BACKEND_URL}/api`;
 const LOGO_URL = "/assets/ganoh-logo.png";
 
 const formatPrice = (price) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(price || 0);
+const localDateInputValue = (date = new Date()) => {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+};
 
 // Products List Dialog
 const ProductsDialog = ({ isOpen, onClose, title, products, type }) => {
@@ -125,7 +131,7 @@ export const GestorPage = () => {
   const [expensesPeriod, setExpensesPeriod] = useState('month');
   const [expensesSelectedMonth, setExpensesSelectedMonth] = useState(new Date().getMonth() + 1);
   const [expensesSelectedYear, setExpensesSelectedYear] = useState(new Date().getFullYear());
-  const [expensesSelectedDate, setExpensesSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+  const [expensesSelectedDate, setExpensesSelectedDate] = useState(() => localDateInputValue());
   const [expenseStoreFilter, setExpenseStoreFilter] = useState('all');
   // Contador export modal
   const [showContadorModal, setShowContadorModal] = useState(false);
@@ -161,6 +167,55 @@ export const GestorPage = () => {
   const [showAdicionalDialog, setShowAdicionalDialog] = useState(false);
   const [newAdicional, setNewAdicional] = useState({ name: '', price: '' });
   const [editingAdicional, setEditingAdicional] = useState(null);
+
+  // Restore a saved Gestor session and preload the financial periods.
+  // This avoids a second login and ensures Semana/Mês/Ano are populated on entry.
+  useEffect(() => {
+    const stored = localStorage.getItem('gestor_auth');
+    if (!stored || isAuthenticated) return undefined;
+
+    let user;
+    let pass;
+    try {
+      [user, pass] = atob(stored).split(':');
+    } catch (_error) {
+      localStorage.removeItem('gestor_auth');
+      return undefined;
+    }
+    if (!user || !pass) return undefined;
+
+    let active = true;
+    (async () => {
+      try {
+        const response = await axios.get(`${API}/gestor/dashboard`, {
+          auth: { username: user, password: pass }
+        });
+        if (!active) return;
+        setUsername(user);
+        setPassword(pass);
+        setDashboard(response.data);
+        setIsAuthenticated(true);
+
+        // Secondary panels load in parallel after the dashboard becomes usable.
+        setTimeout(() => {
+          fetchChartData();
+          fetchFinancialSummary();
+          fetchMenuItems();
+          fetchPrazoData();
+          fetchExpenses();
+          fetchManualSales();
+        }, 0);
+      } catch (_error) {
+        localStorage.removeItem('gestor_auth');
+        localStorage.removeItem('tenant_id');
+        localStorage.removeItem('tenant_username');
+        localStorage.removeItem('tenant_display_name');
+      }
+    })();
+
+    return () => { active = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Refetch chart when store filter changes (for ALL periods - day/week/month/year)
   useEffect(() => {
@@ -3096,12 +3151,12 @@ export const GestorPage = () => {
                   </p>
                 </div>
                 <div className="bg-blue-100 rounded-lg p-3 text-center">
-                  <p className="text-xs text-blue-700">Lucro Bruto</p>
+                  <p className="text-xs text-blue-700">Resultado simples</p>
                   <p className="text-xl font-bold text-blue-700">
                     R$ {contadorExportData.resumo_geral.lucro_bruto.toFixed(2)}
                   </p>
                   <p className="text-[10px] text-blue-600">
-                    Margem: {contadorExportData.resumo_geral.margem_lucro_percentual}%
+                    Margem simples: {contadorExportData.resumo_geral.margem_lucro_percentual}%
                   </p>
                 </div>
               </div>
