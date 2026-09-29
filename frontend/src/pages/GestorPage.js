@@ -76,6 +76,7 @@ export const GestorPage = () => {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [dashboard, setDashboard] = useState(null);
+  const [financialSummary, setFinancialSummary] = useState(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [productsDialog, setProductsDialog] = useState({ open: false, title: '', products: [], type: 'top' });
   const [showClearDialog, setShowClearDialog] = useState(false);
@@ -207,6 +208,7 @@ export const GestorPage = () => {
         // Schedule secondary fetches after auth state propagates
         setTimeout(() => {
           fetchChartData();
+          fetchFinancialSummary();
           fetchMenuItems();
           fetchPrazoData();
           fetchExpenses();
@@ -240,6 +242,7 @@ export const GestorPage = () => {
       // Fetch chart, menu, and prazo data after successful login
       setTimeout(() => {
         fetchChartData();
+        fetchFinancialSummary();
         fetchMenuItems();
         fetchPrazoData();
         fetchExpenses();
@@ -249,6 +252,20 @@ export const GestorPage = () => {
       toast.error('Credenciais inválidas');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchFinancialSummary = async () => {
+    const auth = localStorage.getItem('gestor_auth');
+    if (!auth) return;
+    try {
+      const [user, pass] = atob(auth).split(':');
+      const response = await axios.get(`${API}/gestor/financial-summary`, {
+        auth: { username: user, password: pass }
+      });
+      setFinancialSummary(response.data);
+    } catch (_error) {
+      // Keep the rest of Gestor usable even if this summary fails.
     }
   };
 
@@ -464,6 +481,9 @@ export const GestorPage = () => {
       if (period === 'day') {
         params = { date };
         chartEndpoint = `${API}/gestor/chart/daily-with-expenses`;
+      } else if (period === 'week') {
+        params = { date };
+        chartEndpoint = `${API}/gestor/chart/weekly-with-expenses`;
       } else if (period === 'month') {
         params = { month, year };
         chartEndpoint = `${API}/gestor/chart/monthly-with-expenses`;
@@ -1361,7 +1381,7 @@ export const GestorPage = () => {
           </div>
           <div className="flex items-center gap-2">
             <ThemeToggle />
-            <button className="gx-icon-btn" onClick={() => { setIsRefreshing(true); fetchDashboard(true); }} disabled={isRefreshing} title="Atualizar" data-testid="gestor-refresh-btn">
+            <button className="gx-icon-btn" onClick={() => { setIsRefreshing(true); fetchDashboard(true); fetchFinancialSummary(); }} disabled={isRefreshing} title="Atualizar" data-testid="gestor-refresh-btn">
               <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
             </button>
             <button className="gx-icon-btn" onClick={handleLogout} title="Sair" data-testid="gestor-logout-btn">
@@ -1430,6 +1450,65 @@ export const GestorPage = () => {
                 <div className="gx-kpi-foot">Soma das duas lojas</div>
               </div>
             </div>
+
+            {financialSummary && (
+              <div className="gx-card mb-6" data-testid="financial-summary">
+                <div className="gx-card-head">
+                  <div className="gx-card-title">
+                    <DollarSign className="h-5 w-5" style={{ color: 'var(--gx-green)' }} />
+                    Resumo financeiro
+                  </div>
+                  <span className="text-[10px] uppercase tracking-[0.18em]" style={{ color: 'var(--gx-mute)' }}>
+                    Resultado simples
+                  </span>
+                </div>
+                <div className="gx-card-body">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+                    {[
+                      ['Hoje', financialSummary.periods?.today],
+                      ['Semana', financialSummary.periods?.week],
+                      ['Mês', financialSummary.periods?.month],
+                      ['Ano', financialSummary.periods?.year],
+                    ].map(([label, period]) => period && (
+                      <div key={label} className="gx-kpi" style={{ minHeight: 150 }}>
+                        <div className="gx-kpi-label">{label}</div>
+                        <div className={`gx-kpi-value ${period.result_simple >= 0 ? 'green' : 'rose'}`}>
+                          {formatPrice(period.result_simple)}
+                        </div>
+                        <div className="space-y-1 text-xs mt-2" style={{ color: 'var(--gx-mute)' }}>
+                          <div className="flex justify-between gap-2"><span>Receita</span><strong style={{ color: 'var(--gx-ink)' }}>{formatPrice(period.revenue)}</strong></div>
+                          <div className="flex justify-between gap-2"><span>Despesas</span><strong style={{ color: 'var(--gx-rose)' }}>{formatPrice(period.expenses)}</strong></div>
+                          <div className="flex justify-between gap-2"><span>Pedidos</span><strong style={{ color: 'var(--gx-ink)' }}>{period.orders}</strong></div>
+                          <div className="flex justify-between gap-2"><span>Ticket médio</span><strong style={{ color: 'var(--gx-ink)' }}>{formatPrice(period.ticket_average)}</strong></div>
+                        </div>
+                        {period.coverage_note && (
+                          <p className="text-[10px] mt-2" style={{ color: 'var(--gx-amber)' }}>{period.coverage_note}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-5 gap-2 mt-4">
+                    {[
+                      ['A receber', formatPrice(financialSummary.current?.receivables || 0)],
+                      ['Grupos em aberto', financialSummary.current?.debt_groups || 0],
+                      ['Créditos clientes', formatPrice(financialSummary.current?.customer_credits || 0)],
+                      ['Clientes', financialSummary.current?.customers || 0],
+                      ['Produtos', financialSummary.current?.products || 0],
+                    ].map(([label, value]) => (
+                      <div key={label} className="gx-row" style={{ flexDirection: 'column', alignItems: 'flex-start', padding: 10 }}>
+                        <span className="text-[10px] uppercase tracking-wider" style={{ color: 'var(--gx-mute)' }}>{label}</span>
+                        <strong className="text-sm mt-1" style={{ color: 'var(--gx-ink)' }}>{value}</strong>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="text-[10px] mt-3" style={{ color: 'var(--gx-mute)' }}>
+                    {financialSummary.disclaimer}
+                  </p>
+                </div>
+              </div>
+            )}
 
             {/* Store Tabs */}
             <Tabs defaultValue="runner" className="space-y-4">
@@ -1900,11 +1979,11 @@ export const GestorPage = () => {
               {expensesChartData && (
                 <div className="gx-kpi-grid">
                   <div className="gx-kpi gx-enter" data-i="1" data-testid="gastos-revenue">
-                    <div className="gx-kpi-label"><span className="gx-kpi-icon emerald"><TrendingUp className="h-4 w-4" /></span> Receita {expensesPeriod === 'year' ? 'do Ano' : expensesPeriod === 'day' ? 'do Dia' : 'do Mês'}</div>
+                    <div className="gx-kpi-label"><span className="gx-kpi-icon emerald"><TrendingUp className="h-4 w-4" /></span> Receita {expensesPeriod === 'year' ? 'do Ano' : expensesPeriod === 'day' ? 'do Dia' : expensesPeriod === 'week' ? 'da Semana' : 'do Mês'}</div>
                     <div className="gx-kpi-value" style={{ color: 'var(--gx-emerald)' }}>{formatPrice(expensesChartData.total_revenue)}</div>
                   </div>
                   <div className="gx-kpi gx-enter" data-i="2" data-testid="gastos-expenses">
-                    <div className="gx-kpi-label"><span className="gx-kpi-icon rose"><Receipt className="h-4 w-4" /></span> Gastos {expensesPeriod === 'year' ? 'do Ano' : expensesPeriod === 'day' ? 'do Dia' : 'do Mês'}</div>
+                    <div className="gx-kpi-label"><span className="gx-kpi-icon rose"><Receipt className="h-4 w-4" /></span> Gastos {expensesPeriod === 'year' ? 'do Ano' : expensesPeriod === 'day' ? 'do Dia' : expensesPeriod === 'week' ? 'da Semana' : 'do Mês'}</div>
                     <div className="gx-kpi-value rose">{formatPrice(expensesChartData.total_expenses)}</div>
                   </div>
                   <div className="gx-kpi gx-enter" data-i="3" data-testid="gastos-profit">
@@ -1912,7 +1991,7 @@ export const GestorPage = () => {
                       <span className={`gx-kpi-icon ${expensesChartData.total_profit >= 0 ? '' : 'rose'}`}>
                         <DollarSign className="h-4 w-4" />
                       </span>
-                      Resultado (receita − gastos)
+                      Resultado simples (receita − gastos)
                     </div>
                     <div className={`gx-kpi-value ${expensesChartData.total_profit >= 0 ? 'green' : 'rose'}`}>
                       {formatPrice(expensesChartData.total_profit)}
@@ -1928,6 +2007,12 @@ export const GestorPage = () => {
               {expensesChartData && (expensesChartData.archived_month_revenue > 0 || expensesChartData.archived_monthly_only) && (
                 <p className="text-xs mt-2" style={{ color: 'var(--gx-mute)' }}>
                   Receita antiga recuperada por mês. O resultado subtrai os gastos registrados e não inclui custos que ficaram fora do relatório.
+                </p>
+              )}
+
+              {expensesChartData?.coverage_note && (
+                <p className="text-xs mt-2" style={{ color: 'var(--gx-amber)' }}>
+                  {expensesChartData.coverage_note}
                 </p>
               )}
 
@@ -1964,6 +2049,7 @@ export const GestorPage = () => {
                     </div>
                     <div className="gx-seg">
                       <button className={`gx-seg-btn ${expensesPeriod === 'day' ? 'active' : ''}`} onClick={() => { setExpensesPeriod('day'); fetchExpenses('day'); }} data-testid="gastos-period-day">Dia</button>
+                      <button className={`gx-seg-btn ${expensesPeriod === 'week' ? 'active' : ''}`} onClick={() => { setExpensesPeriod('week'); fetchExpenses('week'); }} data-testid="gastos-period-week">Semana</button>
                       <button className={`gx-seg-btn ${expensesPeriod === 'month' ? 'active' : ''}`} onClick={() => { setExpensesPeriod('month'); fetchExpenses('month'); }} data-testid="gastos-period-month">Mês</button>
                       <button className={`gx-seg-btn ${expensesPeriod === 'year' ? 'active' : ''}`} onClick={() => { setExpensesPeriod('year'); fetchExpenses('year'); }} data-testid="gastos-period-year">Ano</button>
                     </div>
@@ -1971,13 +2057,13 @@ export const GestorPage = () => {
                   <div className="gx-card-body">
                     {/* Period selectors */}
                     <div className="flex gap-2 mb-4 flex-wrap items-center">
-                      {expensesPeriod === 'day' && (
+                      {(expensesPeriod === 'day' || expensesPeriod === 'week') && (
                         <Input 
                           type="date" 
                           value={expensesSelectedDate}
                           onChange={(e) => {
                             setExpensesSelectedDate(e.target.value);
-                            fetchExpenses('day', e.target.value);
+                            fetchExpenses(expensesPeriod, e.target.value);
                           }}
                           className="w-auto gx-input"
                           style={{ width: 180 }}
@@ -2041,8 +2127,9 @@ export const GestorPage = () => {
                         </Select>
                       )}
                       <span className="text-sm ml-auto" style={{ color: 'var(--gx-mute)' }}>
-                        {expensesPeriod === 'day' ? expensesChartData.date : 
-                         expensesPeriod === 'month' ? expensesChartData.month : 
+                        {expensesPeriod === 'day' ? expensesChartData.date :
+                         expensesPeriod === 'week' ? `${expensesChartData.start} a ${expensesChartData.end}` :
+                         expensesPeriod === 'month' ? expensesChartData.month :
                          `Ano ${expensesChartData.year}`}
                       </span>
                     </div>
@@ -2069,16 +2156,18 @@ export const GestorPage = () => {
                                 />
                               </div>
                               <div className="gx-tooltip">
-                                <strong>{expensesPeriod === 'day' ? item.hour : 
-                                 expensesPeriod === 'month' ? `Dia ${item.day}` : 
+                                <strong>{expensesPeriod === 'day' ? item.hour :
+                                 expensesPeriod === 'week' ? item.label :
+                                 expensesPeriod === 'month' ? `Dia ${item.day}` :
                                  item.month_name}</strong><br/>
                                 Receita: <span style={{ color: 'var(--gx-green)' }}>{formatPrice(item.revenue)}</span><br/>
                                 Gastos: <span style={{ color: 'var(--gx-rose)' }}>{formatPrice(item.expenses)}</span><br/>
-                                Lucro: <span style={{ color: item.profit >= 0 ? 'var(--gx-green)' : 'var(--gx-rose)' }}>{formatPrice(item.profit)}</span>
+                                Resultado simples: <span style={{ color: item.profit >= 0 ? 'var(--gx-green)' : 'var(--gx-rose)' }}>{formatPrice(item.profit)}</span>
                               </div>
                               <span className="text-[9px] mt-1.5 shrink-0" style={{ color: 'var(--gx-mute)' }}>
-                                {expensesPeriod === 'day' ? item.hour?.slice(0,2) : 
-                                 expensesPeriod === 'month' ? item.day : 
+                                {expensesPeriod === 'day' ? item.hour?.slice(0,2) :
+                                 expensesPeriod === 'week' ? item.day_name :
+                                 expensesPeriod === 'month' ? item.day :
                                  item.month_name}
                               </span>
                             </div>
