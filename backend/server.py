@@ -663,30 +663,20 @@ class StaffUnlockRequest(BaseModel):
 
 @api_router.post("/staff/unlock")
 async def unlock_staff(payload: StaffUnlockRequest):
-    """Validate the staff gate without exposing or requiring a frontend secret.
+    """Validate the fixed staff password separately from the Gestor password.
 
-    Priority:
-    1) dedicated STAFF_PASSWORD when configured;
-    2) current default gestor account password stored in MongoDB.
+    Only the SHA-256 digest is stored in source; the plaintext password is never
+    bundled into the frontend or written to logs.
     """
+    import hashlib
+
     incoming = (payload.password or "").strip()
     if not incoming:
         raise HTTPException(status_code=401, detail="Senha incorreta")
 
-    expected = (os.environ.get("STAFF_PASSWORD") or "").strip()
-    if expected:
-        if len(incoming) == len(expected) and secrets.compare_digest(incoming, expected):
-            return {"success": True}
-        raise HTTPException(status_code=401, detail="Senha incorreta")
-
-    tenant = await get_tenant_by_credentials("gestor", incoming)
-    if tenant:
-        return {"success": True}
-
-    # Final compatibility fallback for deployments where the default tenant
-    # has not yet been synchronized but GESTOR_PASSWORD is present.
-    gestor_password = (os.environ.get("GESTOR_PASSWORD") or "").strip()
-    if gestor_password and len(incoming) == len(gestor_password) and secrets.compare_digest(incoming, gestor_password):
+    staff_password_hash = "bda646314a7910cf8825f400babccacccdc91e12878b203b4c0679537acf2f55"
+    incoming_hash = hashlib.sha256(incoming.encode()).hexdigest()
+    if secrets.compare_digest(incoming_hash, staff_password_hash):
         return {"success": True}
 
     raise HTTPException(status_code=401, detail="Senha incorreta")
