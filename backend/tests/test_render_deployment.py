@@ -57,17 +57,26 @@ def test_startup_does_not_insert_historical_sales_or_start_scheduler(monkeypatch
     scheduler.start.assert_not_called()
 
 
-def test_maintenance_blocks_business_writes(monkeypatch):
+def test_maintenance_shows_interface_but_blocks_business_api(monkeypatch, tmp_path):
+    build = tmp_path / 'build'
+    (build / 'static').mkdir(parents=True)
+    (build / 'index.html').write_text('<html><body>GANOH-APP</body></html>', encoding='utf-8')
+    (build / 'static' / 'app.js').write_text('app-code', encoding='utf-8')
     monkeypatch.setenv('MIGRATION_PENDING', 'true')
+    monkeypatch.setenv('FRONTEND_BUILD_DIR', str(build))
     sys.modules.pop('render_app', None)
     app = importlib.import_module('render_app').app
     client = TestClient(app)
     assert client.get('/healthz').json()['migration_pending'] is True
-    for response in (client.get('/'), client.get('/gestor'),
-                     client.post('/api/orders/runner', json={})):
+    for path in ('/', '/gestor/dashboard'):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert b'GANOH-APP' in response.content
+        assert b'Ganoh em prepara' in response.content
+    assert client.get('/static/app.js').text == 'app-code'
+    for response in (client.get('/api/orders'), client.post('/api/orders/runner', json={}),
+                     client.post('/gestor/dashboard', json={})):
         assert response.status_code == 503
-        assert response.headers['Cache-Control'] == 'no-store'
-        assert response.headers['Retry-After'] == '300'
 
 
 def test_spa_reload_works_and_unknown_api_does_not_return_html(monkeypatch, tmp_path):
