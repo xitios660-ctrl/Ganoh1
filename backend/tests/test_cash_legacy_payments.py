@@ -61,6 +61,7 @@ def test_daily_cash_accepts_unknown_legacy_payment_method(monkeypatch, module, s
     fake_db = SimpleNamespace(
         orders=FakeCollection([legacy_order]),
         pix_adjustments=FakeCollection([]),
+        order_history=FakeCollection([]),
     )
     monkeypatch.setattr(module, "db", fake_db)
 
@@ -87,6 +88,7 @@ def test_daily_cash_includes_local_offset_sale_just_after_midnight(monkeypatch, 
     fake_db = SimpleNamespace(
         orders=FakeCollection([early_sale]),
         pix_adjustments=FakeCollection([]),
+        order_history=FakeCollection([]),
     )
     monkeypatch.setattr(module, "db", fake_db)
 

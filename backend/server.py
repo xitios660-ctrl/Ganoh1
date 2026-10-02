@@ -1881,6 +1881,20 @@ async def get_today_cash(store: StoreLocation):
         "store": store.value,
         "status": {"$in": ["ready", "delivered"]},  # Conta pedidos prontos E entregues
     }, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    # Archived sales remain part of the day's revenue. Delivered orders may
+    # exist in both collections, so use the active record once per order ID.
+    history = await db.order_history.find({
+        "store": store.value,
+        "status": {"$in": ["ready", "delivered"]},
+    }, {"_id": 0}).sort("created_at", -1).to_list(5000)
+    active_ids = {order.get("id") for order in orders if order.get("id")}
+    for order in history:
+        order_id = order.get("id")
+        if order_id and order_id in active_ids:
+            continue
+        orders.append(order)
+        if order_id:
+            active_ids.add(order_id)
     orders = _filter_since(orders, today_utc)
     
     # Get manual PIX adjustments for today (Python filter — DB has mixed timezone offsets)
