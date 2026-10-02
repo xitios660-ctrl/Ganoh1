@@ -2,7 +2,7 @@
 
 Covers: menu dedup, test-item filtering, adicionais dedup, tenant auth (new password,
 old password rejection, account enumeration prevention), prazo customer lookup
-(min 2 chars + masked phone), auto-archive of stale ready orders, and kitchen
+(min 2 chars + masked phone), retention of stale ready orders, and kitchen
 stats consistency.
 """
 
@@ -149,9 +149,9 @@ class TestPrazoLookup:
             mongo.prazo_customers.delete_many({"name": test_name})
 
 
-# ============ AUTO-ARCHIVE OF STALE READY ORDERS + KITCHEN STATS ============
-class TestStaleReadyAutoArchive:
-    def test_ready_older_than_12h_is_auto_archived_and_stats_consistent(self, http, mongo):
+# ============ KEEP STALE READY ORDERS + KITCHEN STATS ============
+class TestStaleReadyRetention:
+    def test_ready_older_than_12h_is_retained_and_stats_consistent(self, http, mongo):
         store = "runner"
         old_id = f"TEST_stale_{uuid.uuid4().hex[:8]}"
         fresh_id = f"TEST_fresh_{uuid.uuid4().hex[:8]}"
@@ -175,15 +175,15 @@ class TestStaleReadyAutoArchive:
             r = http.get(f"{API}/orders/{store}", params={"status": "ready"})
             assert r.status_code == 200
             ids = [o.get("id") for o in r.json().get("orders", [])]
-            assert old_id not in ids, "Stale ready order was NOT auto-archived"
+            assert old_id in ids, "Ready order was removed automatically"
             assert fresh_id in ids, "Fresh ready order was incorrectly removed"
 
-            # Old order should now be in history
+            # Reading orders must not create history or change their status
             hist = mongo.order_history.find_one({"id": old_id})
-            assert hist is not None, "Auto-archived order not found in order_history"
-            assert hist.get("status") == "delivered"
+            assert hist is None
+            assert mongo.orders.find_one({"id": old_id})["status"] == "ready"
 
-            # Kitchen stats should NOT count the stale one
+            # Kitchen stats count all ready orders, regardless of age
             r2 = http.get(f"{API}/kitchen/{store}/stats")
             assert r2.status_code == 200
             stats = r2.json()

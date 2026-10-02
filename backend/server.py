@@ -1022,37 +1022,9 @@ async def get_orders(store: StoreLocation, status: Optional[str] = None):
     if status:
         query["status"] = status
 
-    # Auto-archive: ready orders older than 12 hours are considered stale and
-    # should not pollute the operational kitchen view. They are moved to history
-    # so they still appear under "Histórico" but disappear from the live screen.
-    # Must also run on the default kitchen poll (no status filter) used by KitchenPage;
-    # previously only ?status=ready archived, so top-bar stats (12h filter) disagreed
-    # with the Prontos list (all ready rows).
-    if status is None or status == "ready":
-        stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
-        stale_iso = stale_cutoff.isoformat()
-        stale_query = {
-            "store": store.value,
-            "status": "ready",
-            "$or": [
-                {"updated_at": {"$lt": stale_iso}},
-                {"updated_at": {"$exists": False}, "created_at": {"$lt": stale_iso}},
-            ],
-        }
-        stale_orders = await db.orders.find(stale_query).to_list(500)
-        for old in stale_orders:
-            doc = {k: v for k, v in old.items() if k != "_id"}
-            doc["status"] = "delivered"
-            doc["delivered_at"] = doc.get("updated_at") or doc.get("created_at") or datetime.now(timezone.utc).isoformat()
-            doc["auto_archived"] = True
-            try:
-                await db.order_history.insert_one(doc)
-            except Exception:
-                pass
-        if stale_orders:
-            await db.orders.delete_many({"id": {"$in": [o.get("id") for o in stale_orders if o.get("id")]}})
-
-    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
+    # Polling the kitchen must not change, archive, or delete orders.
+    # Orders keep their status until an explicit staff action.
+    orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(5000)
     return {"orders": orders}
 
 @api_router.get("/orders/{store}/pending-pix")
@@ -1850,17 +1822,7 @@ async def initialize_stock(store: StoreLocation, default_quantity: int = 50):
 async def get_kitchen_stats(store: StoreLocation):
     pending = await db.orders.count_documents({"store": store.value, "status": "received"})
     preparing = await db.orders.count_documents({"store": store.value, "status": "preparing"})
-    # Only count "fresh" ready orders (last 12h) - matches the auto-archive policy
-    # so the textual badge stays in sync with the visual list.
-    stale_cutoff = (datetime.now(timezone.utc) - timedelta(hours=12)).isoformat()
-    ready = await db.orders.count_documents({
-        "store": store.value,
-        "status": "ready",
-        "$or": [
-            {"updated_at": {"$gte": stale_cutoff}},
-            {"updated_at": {"$exists": False}, "created_at": {"$gte": stale_cutoff}},
-        ],
-    })
+    ready = await db.orders.count_documents({"store": store.value, "status": "ready"})
 
     return {"pending": pending, "preparing": preparing, "ready": ready}
 
