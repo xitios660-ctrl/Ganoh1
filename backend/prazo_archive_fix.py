@@ -7,10 +7,153 @@ from fastapi import APIRouter, HTTPException
 router = APIRouter()
 db = None
 
+TARGET_REPAIR_ID = "security-night-pdf-debt-2026-09-28-v1"
+TARGET_CUSTOMER_ID = "0bdbd62d-a39f-479a-bd12-1bc3e57d3b85"
+TARGET_CUSTOMER_NAME = "Segurança noite"
+TARGET_STORE = "gym-londres"
+TARGET_ORDERS = [
+    {
+        "id": "9cbfedb9-0cc4-4058-84b7-a76777638f94",
+        "created_at": "2026-09-24T23:16:00+00:00",
+        "total": 31.00,
+        "items": [
+            {"name": "3 ovos mexidos", "price": 12.00, "quantity": 2},
+            {"name": "Café com Leite (Leite Integral)", "price": 7.00, "quantity": 1},
+        ],
+    },
+    {
+        "id": "ff3fe498-837c-43a3-acc3-53503e1ef18c",
+        "created_at": "2026-09-24T23:24:00+00:00",
+        "total": 16.00,
+        "items": [{"name": "3 ovos mexidos + queijo branco", "price": 16.00, "quantity": 1}],
+    },
+    {
+        "id": "36de7de8-44e3-425d-b0bf-7e5603bc5067",
+        "created_at": "2026-09-24T23:26:00+00:00",
+        "total": 10.50,
+        "items": [{"name": "Paçoquita", "price": 1.50, "quantity": 7}],
+    },
+    {
+        "id": "87fa1a3d-3bdd-4aaf-9c69-c816e1670d75",
+        "created_at": "2026-09-25T22:04:00+00:00",
+        "total": 12.00,
+        "items": [{"name": "kitkat", "price": 6.00, "quantity": 2}],
+    },
+    {
+        "id": "e67cb908-ba5e-48e1-9295-e562cfb7bb55",
+        "created_at": "2026-09-25T23:05:00+00:00",
+        "total": 32.60,
+        "items": [
+            {"name": "Frango, Mussarela, Tomate e Orégano", "price": 26.00, "quantity": 1},
+            {"name": "Coca-Cola Lata", "price": 6.60, "quantity": 1},
+        ],
+    },
+    {
+        "id": "9f9206e6-af94-4a0e-82fe-015423f53f9c",
+        "created_at": "2026-09-25T23:19:00+00:00",
+        "total": 6.00,
+        "items": [{"name": "kitkat", "price": 6.00, "quantity": 1}],
+    },
+]
+
 
 def set_database(database):
     global db
     db = database
+
+
+async def _repair_verified_security_night_debt_once():
+    """Restore the six verified PDF debts exactly once.
+
+    This is intentionally guarded by a repair marker so later legitimate payments
+    are never undone on a future restart.
+    """
+    if await db.repair_runs.find_one({"id": TARGET_REPAIR_ID}):
+        return {"applied": False, "reason": "already_applied"}
+
+    customer = await db.prazo_customers.find_one({"id": TARGET_CUSTOMER_ID})
+    if not customer:
+        customer = await db.prazo_customers.find_one({
+            "name": {"$regex": f"^{re.escape(TARGET_CUSTOMER_NAME)}$", "$options": "i"},
+            "store": TARGET_STORE,
+        })
+    if not customer:
+        await db.prazo_customers.insert_one({
+            "id": TARGET_CUSTOMER_ID,
+            "name": TARGET_CUSTOMER_NAME,
+            "phone": "",
+            "notes": "Recuperado do relatório gerencial de 28/09/2026",
+            "store": TARGET_STORE,
+            "credit": 0.0,
+            "source": "pdf_recovery",
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        })
+
+    repaired = 0
+    for spec in TARGET_ORDERS:
+        oid = spec["id"]
+        active = await db.orders.find_one({"id": oid})
+        history = await db.order_history.find_one({"id": oid})
+
+        if active:
+            base = {k: v for k, v in active.items() if k != "_id"}
+        elif history:
+            base = {k: v for k, v in history.items() if k != "_id"}
+        else:
+            base = {
+                "id": oid,
+                "created_at": spec["created_at"],
+                "updated_at": spec["created_at"],
+                "items": spec["items"],
+                "source": "pdf_recovery",
+            }
+
+        base.update({
+            "id": oid,
+            "customer_name": TARGET_CUSTOMER_NAME,
+            "store": TARGET_STORE,
+            "total": float(spec["total"]),
+            "partial_paid": 0.0,
+            "payment_method": "prazo",
+            "prazo_paid": False,
+            "status": "delivered",
+            "created_at": base.get("created_at") or spec["created_at"],
+            "updated_at": base.get("updated_at") or spec["created_at"],
+            "items": base.get("items") or spec["items"],
+            "source": base.get("source") or "pdf_recovery",
+            "verified_pdf_debt_restored": True,
+            "verified_pdf_debt_restored_at": datetime.now(timezone.utc).isoformat(),
+        })
+        for field in ("prazo_paid_at", "paid_at", "prazo_paid_method", "prazo_cleared"):
+            base.pop(field, None)
+
+        await db.orders.replace_one({"id": oid}, base, upsert=True)
+        repaired += 1
+
+    rows = await db.orders.find({
+        "id": {"$in": [x["id"] for x in TARGET_ORDERS]},
+        "customer_name": {"$regex": f"^{re.escape(TARGET_CUSTOMER_NAME)}$", "$options": "i"},
+        "store": TARGET_STORE,
+        "payment_method": "prazo",
+        "prazo_paid": {"$ne": True},
+    }, {"_id": 0, "total": 1, "partial_paid": 1}).to_list(20)
+    restored_total = round(sum(
+        max(0.0, float(x.get("total", 0) or 0) - float(x.get("partial_paid", 0) or 0))
+        for x in rows
+    ), 2)
+    if len(rows) != 6 or abs(restored_total - 108.10) > 0.01:
+        raise RuntimeError("verified prazo repair did not reach expected 6 orders / 108.10")
+
+    await db.repair_runs.insert_one({
+        "id": TARGET_REPAIR_ID,
+        "status": "verified",
+        "customer_id": TARGET_CUSTOMER_ID,
+        "store": TARGET_STORE,
+        "orders": 6,
+        "amount": 108.10,
+        "applied_at": datetime.now(timezone.utc).isoformat(),
+    })
+    return {"applied": True, "orders": repaired, "amount": restored_total}
 
 
 async def restore_unpaid_prazo_from_history():
@@ -34,7 +177,14 @@ async def restore_unpaid_prazo_from_history():
         doc["restored_from_history_at"] = datetime.now(timezone.utc).isoformat()
         await db.orders.insert_one(doc)
         restored += 1
-    return {"restored": restored}
+
+    target = await _repair_verified_security_night_debt_once()
+    if target.get("applied"):
+        print(
+            f"PRAZO_TARGET_REPAIR verified orders={target.get('orders')} amount={target.get('amount'):.2f}",
+            flush=True,
+        )
+    return {"restored": restored, "target_repair": target}
 
 
 @router.get("/api/orders/{store}")
