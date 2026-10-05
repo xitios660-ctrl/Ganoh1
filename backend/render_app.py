@@ -59,6 +59,18 @@ else:
     if missing:
         raise RuntimeError('Missing deployment settings: ' + ', '.join(missing))
     from server import app, db
+    import prazo_archive_fix
+
+    prazo_archive_fix.set_database(db)
+
+    # Hotfix routes must win over legacy routes with the same path.
+    # Prepending is intentional because Starlette resolves the first matching route.
+    app.router.routes[0:0] = list(prazo_archive_fix.router.routes)
+
+    @app.on_event('startup')
+    async def repair_archived_prazo_debts():
+        result = await prazo_archive_fix.restore_unpaid_prazo_from_history()
+        print(f"PRAZO_ARCHIVE_FIX restored={result.get('restored', 0)}", flush=True)
 
     @app.get('/healthz')
     async def health():
