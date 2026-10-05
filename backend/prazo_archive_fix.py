@@ -1,7 +1,6 @@
 """Keep unpaid prazo debts visible after kitchen order archiving."""
 from datetime import datetime, timezone, timedelta
 import re
-import uuid
 
 from fastapi import APIRouter, HTTPException
 
@@ -104,6 +103,12 @@ async def prazo_customer_history(customer_id: str, limit: int = 200):
     for order_id, order in by_id.items():
         if order_id in seen_order_ids:
             continue
+        credit_used = float(order.get("credit_used", 0) or 0)
+        order_total = float(order.get("total", 0) or 0)
+        overrun = round(max(0.0, order_total - credit_used), 2)
+        note = "Crédito consumido no pedido"
+        if overrun > 0:
+            note += f"; pedido excedeu o saldo em R$ {overrun:.2f}, valor lançado no prazo"
         events.append({
             "id": f"credit-order-{order_id}",
             "order_id": order_id,
@@ -111,10 +116,12 @@ async def prazo_customer_history(customer_id: str, limit: int = 200):
             "customer_name": name,
             "store": order.get("store", customer.get("store", "")),
             "event_type": "credit_used",
-            "amount": float(order.get("credit_used", 0) or 0),
+            "amount": credit_used,
             "previous_credit": float(order.get("previous_credit", 0) or 0),
             "new_credit": float(order.get("new_credit", 0) or 0),
-            "notes": "Crédito consumido no pedido",
+            "previous_debt": 0,
+            "new_debt": overrun,
+            "notes": note,
             "created_at": order.get("created_at") or "",
         })
     events.sort(key=lambda e: e.get("created_at") or "", reverse=True)
