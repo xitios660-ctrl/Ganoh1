@@ -60,17 +60,26 @@ else:
         raise RuntimeError('Missing deployment settings: ' + ', '.join(missing))
     from server import app, db
     import prazo_archive_fix
+    import expenses_hotfix
 
     prazo_archive_fix.set_database(db)
+    expenses_hotfix.set_database(db)
 
     # Hotfix routes must win over legacy routes with the same path.
     # Prepending is intentional because Starlette resolves the first matching route.
-    app.router.routes[0:0] = list(prazo_archive_fix.router.routes)
+    app.router.routes[0:0] = list(expenses_hotfix.router.routes) + list(prazo_archive_fix.router.routes)
 
     @app.on_event('startup')
     async def repair_archived_prazo_debts():
         result = await prazo_archive_fix.restore_unpaid_prazo_from_history()
         print(f"PRAZO_ARCHIVE_FIX restored={result.get('restored', 0)}", flush=True)
+
+    @app.on_event('startup')
+    async def verify_expense_visibility():
+        rows = await db.expenses.find({}, {'_id': 0, 'created_at': 1}).to_list(5000)
+        rows.sort(key=lambda item: expenses_hotfix._sort_key(item.get('created_at')), reverse=True)
+        latest = rows[0].get('created_at') if rows else None
+        print(f"EXPENSES_VISIBILITY count={len(rows)} latest={latest}", flush=True)
 
     @app.get('/healthz')
     async def health():
