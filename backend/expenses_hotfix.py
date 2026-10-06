@@ -6,7 +6,8 @@ and non-cacheable so recent entries cannot appear to disappear behind stale data
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
+from server import verify_gestor
 
 router = APIRouter()
 db = None
@@ -48,6 +49,7 @@ async def fresh_expenses(
     response: Response,
     store: Optional[str] = None,
     category: Optional[str] = None,
+    username: str = Depends(verify_gestor),
 ):
     """Return the live expense list newest-first with caching disabled."""
     if db is None:
