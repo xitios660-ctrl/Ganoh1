@@ -211,11 +211,34 @@ def main():
                         "gym_revenue": fnum(gym), "gym_orders": int(gym_count or 0),
                     })
 
+    # Read-only diagnostic summary for today's GYM Londres sales. No customer names/items.
+    today_key = datetime.now(BRT).strftime("%Y-%m-%d")
+    today_gym_orders = []
+    diagnostic_projection = {
+        "_id": 0, "id": 1, "store": 1, "created_at": 1, "total": 1,
+        "payment_method": 1, "status": 1, "manual_sale": 1,
+    }
+    for collection_name in ("orders", "order_history"):
+        for order in db[collection_name].find({"store": "gym-londres"}, diagnostic_projection):
+            dt = parse_dt(order.get("created_at"))
+            if not dt or dt.strftime("%Y-%m-%d") != today_key:
+                continue
+            today_gym_orders.append({
+                "source": collection_name,
+                "id_suffix": str(order.get("id") or "")[-8:],
+                "created_at": order.get("created_at"),
+                "total": fnum(order.get("total")),
+                "payment_method": order.get("payment_method"),
+                "status": order.get("status"),
+                "manual_sale": bool(order.get("manual_sale")),
+            })
+
     payload = {
         "generated_at_brt": datetime.now(BRT).isoformat(),
         "database": db_name,
         "exact_daily": exact_rows,
         "archived_monthly_sales": archive_rows,
+        "today_gym_orders": today_gym_orders,
         "counts": {
             "orders_exact": len(all_orders),
             "expenses": len(expenses),
