@@ -61,18 +61,25 @@ else:
     from server import app, db
     import prazo_archive_fix
     import expenses_hotfix
+    import order_delete_hotfix
 
     prazo_archive_fix.set_database(db)
     expenses_hotfix.set_database(db)
+    order_delete_hotfix.set_database(db)
 
     # Hotfix routes must win over legacy routes with the same path.
     # Prepending is intentional because Starlette resolves the first matching route.
-    app.router.routes[0:0] = list(expenses_hotfix.router.routes) + list(prazo_archive_fix.router.routes)
+    app.router.routes[0:0] = list(order_delete_hotfix.router.routes) + list(expenses_hotfix.router.routes) + list(prazo_archive_fix.router.routes)
 
     @app.on_event('startup')
     async def repair_archived_prazo_debts():
         result = await prazo_archive_fix.restore_unpaid_prazo_from_history()
         print(f"PRAZO_ARCHIVE_FIX restored={result.get('restored', 0)}", flush=True)
+
+    @app.on_event('startup')
+    async def repair_verified_gym_debit_sale():
+        result = await order_delete_hotfix.restore_verified_gym_debit_sale()
+        print(f"GYM_DEBIT_REPAIR {result}", flush=True)
 
     @app.on_event('startup')
     async def verify_expense_visibility():
