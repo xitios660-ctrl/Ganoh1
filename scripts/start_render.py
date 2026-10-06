@@ -46,6 +46,10 @@ try:
     if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and \
        os.environ.get('GANOH_CASHFLOW_EXPORT_ONCE', 'false').lower() == 'true':
         cashflow_export = subprocess.Popen([sys.executable, 'scripts/export_cashflow_snapshot.py'], cwd=ROOT)
+    gym_debug = None
+    if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and \
+       os.environ.get('GANOH_GYM_DEBUG_ONCE', 'false').lower() == 'true':
+        gym_debug = subprocess.Popen([sys.executable, 'scripts/debug_gym_today.py'], cwd=ROOT)
     while not stopping and all(child.poll() is None for child in children):
         if recovery and recovery.poll() is not None:
             print('GANOH recovery process finished' if recovery.returncode == 0 else
@@ -67,6 +71,10 @@ try:
             print('GANOH cashflow export finished' if cashflow_export.returncode == 0 else
                   'GANOH cashflow export failed', flush=True)
             cashflow_export = None
+        if gym_debug and gym_debug.poll() is not None:
+            print('GANOH GYM debug finished' if gym_debug.returncode == 0 else
+                  'GANOH GYM debug failed', flush=True)
+            gym_debug = None
         time.sleep(0.5)
     failed = any(child.poll() not in (None, 0) for child in children)
 finally:
@@ -80,6 +88,8 @@ finally:
         routing_test.terminate()
     if 'cashflow_export' in locals() and cashflow_export and cashflow_export.poll() is None:
         cashflow_export.terminate()
+    if 'gym_debug' in locals() and gym_debug and gym_debug.poll() is None:
+        gym_debug.terminate()
     stop()
     for child in children:
         try:
