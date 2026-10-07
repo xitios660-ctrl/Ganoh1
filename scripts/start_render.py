@@ -42,6 +42,10 @@ try:
     if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and \
        os.environ.get('GANOH_STORE_ROUTING_TEST_ONCE', 'false').lower() == 'true':
         routing_test = subprocess.Popen([sys.executable, 'scripts/store_routing_e2e.py'], cwd=ROOT)
+    value_audit = None
+    if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and \
+       os.environ.get('GANOH_VALUE_AUDIT_ONCE', 'false').lower() == 'true':
+        value_audit = subprocess.Popen([sys.executable, 'scripts/value_audit_e2e.py'], cwd=ROOT)
     cashflow_export = None
     if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and \
        os.environ.get('GANOH_CASHFLOW_EXPORT_ONCE', 'false').lower() == 'true':
@@ -67,6 +71,10 @@ try:
             print('GANOH store routing test finished' if routing_test.returncode == 0 else
                   'GANOH store routing test failed', flush=True)
             routing_test = None
+        if value_audit and value_audit.poll() is not None:
+            print('GANOH value audit finished' if value_audit.returncode == 0 else
+                  'GANOH value audit failed', flush=True)
+            value_audit = None
         if cashflow_export and cashflow_export.poll() is not None:
             print('GANOH cashflow export finished' if cashflow_export.returncode == 0 else
                   'GANOH cashflow export failed', flush=True)
@@ -86,6 +94,8 @@ finally:
         e2e.terminate()
     if 'routing_test' in locals() and routing_test and routing_test.poll() is None:
         routing_test.terminate()
+    if 'value_audit' in locals() and value_audit and value_audit.poll() is None:
+        value_audit.terminate()
     if 'cashflow_export' in locals() and cashflow_export and cashflow_export.poll() is None:
         cashflow_export.terminate()
     if 'gym_debug' in locals() and gym_debug and gym_debug.poll() is None:
