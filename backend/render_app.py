@@ -63,20 +63,28 @@ else:
     import expenses_hotfix
     import order_delete_hotfix
     import menu_price_fix
+    import prazo_payment_hotfix
 
     prazo_archive_fix.set_database(db)
     expenses_hotfix.set_database(db)
     order_delete_hotfix.set_database(db)
     menu_price_fix.set_database(db)
+    prazo_payment_hotfix.set_database(db)
 
     # Hotfix routes must win over legacy routes with the same path.
     # Prepending is intentional because Starlette resolves the first matching route.
-    app.router.routes[0:0] = list(order_delete_hotfix.router.routes) + list(expenses_hotfix.router.routes) + list(prazo_archive_fix.router.routes)
+    app.router.routes[0:0] = list(prazo_payment_hotfix.router.routes) + list(order_delete_hotfix.router.routes) + list(expenses_hotfix.router.routes) + list(prazo_archive_fix.router.routes)
 
     @app.on_event('startup')
     async def repair_archived_prazo_debts():
         result = await prazo_archive_fix.restore_unpaid_prazo_from_history()
         print(f"PRAZO_ARCHIVE_FIX restored={result.get('restored', 0)}", flush=True)
+
+    @app.on_event('startup')
+    async def reconcile_prazo_payment_states():
+        security = await prazo_payment_hotfix.reconcile_security_night_paid_snapshot()
+        sync = await prazo_payment_hotfix.sync_active_payment_state_to_history()
+        print(f"PRAZO_PAYMENT_RECONCILE security={security} sync={sync}", flush=True)
 
     @app.on_event('startup')
     async def enforce_verified_menu_prices():
