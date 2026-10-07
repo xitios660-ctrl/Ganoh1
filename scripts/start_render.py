@@ -54,6 +54,10 @@ try:
     if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and \
        os.environ.get('GANOH_GYM_DEBUG_ONCE', 'false').lower() == 'true':
         gym_debug = subprocess.Popen([sys.executable, 'scripts/debug_gym_today.py'], cwd=ROOT)
+    prazo_named_audit = None
+    if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and \
+       os.environ.get('GANOH_PRAZO_NAMED_AUDIT_ONCE', 'false').lower() == 'true':
+        prazo_named_audit = subprocess.Popen([sys.executable, 'scripts/debug_prazo_named_customers.py'], cwd=ROOT)
     while not stopping and all(child.poll() is None for child in children):
         if recovery and recovery.poll() is not None:
             print('GANOH recovery process finished' if recovery.returncode == 0 else
@@ -83,6 +87,10 @@ try:
             print('GANOH GYM debug finished' if gym_debug.returncode == 0 else
                   'GANOH GYM debug failed', flush=True)
             gym_debug = None
+        if prazo_named_audit and prazo_named_audit.poll() is not None:
+            print('GANOH prazo named audit finished' if prazo_named_audit.returncode == 0 else
+                  'GANOH prazo named audit failed', flush=True)
+            prazo_named_audit = None
         time.sleep(0.5)
     failed = any(child.poll() not in (None, 0) for child in children)
 finally:
@@ -100,6 +108,8 @@ finally:
         cashflow_export.terminate()
     if 'gym_debug' in locals() and gym_debug and gym_debug.poll() is None:
         gym_debug.terminate()
+    if 'prazo_named_audit' in locals() and prazo_named_audit and prazo_named_audit.poll() is None:
+        prazo_named_audit.terminate()
     stop()
     for child in children:
         try:
