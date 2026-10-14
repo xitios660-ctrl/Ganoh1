@@ -2213,22 +2213,32 @@ async def set_cash_balance(store: StoreLocation, data: CashBalanceAdjust):
     # Get current config
     existing = await db.cash_drawer_config.find_one({"store": store.value})
     
+    # Treat this action as a physical cash count / new opening balance.
+    # Without moving last_reset_at, historical withdrawals and sales are applied
+    # again to the newly entered amount, making the drawer appear to revert or drift
+    # after refresh/restart. Keep historical records for audit, but only count
+    # movements recorded from this reconciliation forward.
+    reset_at = datetime.now(timezone.utc).isoformat()
     if existing:
         await db.cash_drawer_config.update_one(
             {"store": store.value},
             {"$set": {
-                "balance": data.balance,
-                "notes": data.notes or "Ajuste de saldo",
-                "updated_at": now_brazil.isoformat()
+                "balance": round(data.balance, 2),
+                "last_reset_at": reset_at,
+                "notes": data.notes or "Saldo conferido manualmente",
+                "updated_at": now_brazil.isoformat(),
+                "balance_reconciled_at": reset_at
             }}
         )
     else:
         await db.cash_drawer_config.insert_one({
             "store": store.value,
-            "balance": data.balance,
+            "balance": round(data.balance, 2),
+            "last_reset_at": reset_at,
             "notes": data.notes or "Saldo inicial",
             "created_at": now_brazil.isoformat(),
-            "updated_at": now_brazil.isoformat()
+            "updated_at": now_brazil.isoformat(),
+            "balance_reconciled_at": reset_at
         })
     
     # Return updated drawer status
