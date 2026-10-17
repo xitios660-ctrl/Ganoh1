@@ -58,6 +58,10 @@ try:
     if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and \
        os.environ.get('GANOH_PRAZO_NAMED_AUDIT_ONCE', 'false').lower() == 'true':
         prazo_named_audit = subprocess.Popen([sys.executable, 'scripts/debug_prazo_named_customers.py'], cwd=ROOT)
+    security_rollback = None
+    if os.environ.get('MIGRATION_PENDING', 'true').lower() != 'true' and \
+       os.environ.get('GANOH_SECURITY_DUPLICATE_ROLLBACK_ONCE', 'false').lower() == 'true':
+        security_rollback = subprocess.Popen([sys.executable, 'scripts/rollback_security_duplicate_payment.py'], cwd=ROOT)
     while not stopping and all(child.poll() is None for child in children):
         if recovery and recovery.poll() is not None:
             print('GANOH recovery process finished' if recovery.returncode == 0 else
@@ -91,6 +95,10 @@ try:
             print('GANOH prazo named audit finished' if prazo_named_audit.returncode == 0 else
                   'GANOH prazo named audit failed', flush=True)
             prazo_named_audit = None
+        if security_rollback and security_rollback.poll() is not None:
+            print('GANOH Security duplicate-payment rollback finished' if security_rollback.returncode == 0 else
+                  'GANOH Security duplicate-payment rollback failed', flush=True)
+            security_rollback = None
         time.sleep(0.5)
     failed = any(child.poll() not in (None, 0) for child in children)
 finally:
@@ -110,6 +118,8 @@ finally:
         gym_debug.terminate()
     if 'prazo_named_audit' in locals() and prazo_named_audit and prazo_named_audit.poll() is None:
         prazo_named_audit.terminate()
+    if 'security_rollback' in locals() and security_rollback and security_rollback.poll() is None:
+        security_rollback.terminate()
     stop()
     for child in children:
         try:
