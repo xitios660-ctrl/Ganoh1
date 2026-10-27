@@ -38,9 +38,9 @@ class BillingTests(unittest.TestCase):
         self.assertEqual(self.calls,[])
 
     def test_operational_routes_pass_through(self):
-        for path,method in [('/api/menu/runner','GET'),('/api/staff/unlock','POST'),('/api/orders','POST'),('/api/orders/runner/id/status','PUT'),('/api/stock/runner','GET'),('/runner/cozinha','GET')]:
+        for path,method in [('/api/menu/runner','GET'),('/api/prazo/customers/lookup','GET'),('/api/staff/unlock','POST'),('/api/orders','POST'),('/api/orders/runner/id/status','PUT'),('/api/stock/runner','GET'),('/runner/cozinha','GET')]:
             self.assertEqual(self.request(path,method)[0]['status'],200)
-        self.assertEqual(len(self.calls),6)
+        self.assertEqual(len(self.calls),7)
 
     def test_kitchen_lists_remove_money_without_modifying_source(self):
         for path in ['/api/orders/runner','/api/orders/runner/pending-pix','/api/orders/runner/order-1','/api/prazo/customers']:

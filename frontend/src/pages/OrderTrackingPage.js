@@ -181,7 +181,7 @@ export const OrderTrackingPage = () => {
                     <span className="font-medium">{item.name}</span>
                     <span className="text-muted-foreground ml-1">x{item.quantity}</span>
                   </div>
-                  <span>{formatPrice(item.price * item.quantity)}</span>
+                  <span>{financialsHidden() ? 'Valor restrito' : formatPrice(item.price * item.quantity)}</span>
                 </div>
               ))}
             </div>

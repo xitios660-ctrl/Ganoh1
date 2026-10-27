@@ -46,7 +46,7 @@ def blocked_during_grace(path):
         return True
     if path.endswith('/live') or path.endswith('/history') or path.endswith('/stats'):
         return True
-    if path.startswith('/api/prazo') and path != '/api/prazo/customers':
+    if path.startswith('/api/prazo') and path not in ('/api/prazo/customers', '/api/prazo/customers/lookup'):
         return True
     return False
 
