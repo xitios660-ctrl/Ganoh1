@@ -32,23 +32,30 @@ class BillingTests(unittest.TestCase):
             return asyncio.run(run())
 
     def test_manager_and_financials_blocked_even_with_valid_session(self):
-        for path in ['/gestor/dashboard','/GESTOR/dashboard','/api/%67estor/dashboard','/api/gestor/../cash/runner/today','//api//gestor/dashboard','/auth','/api/auth/login','/api/cash/runner/drawer','/api/admin/clear-data','/api/expenses/export-contador','/api/whatsapp/inbound','/api/live/runner/snapshot','/runner/live','/api/prazo/debts','/api/orders/runner/history','/api/kitchen/runner/stats','/docs','/openapi.json']:
+        for path in ['/gestor/dashboard','/GESTOR/dashboard','/api/%67estor/dashboard','/api/gestor/../cash/runner/today','//api//gestor/dashboard','/auth','/api/auth/login','/api/cash/runner/drawer','/api/admin/clear-data','/api/expenses/export-contador','/api/whatsapp/inbound','/api/live/runner/snapshot','/runner/live','/api/prazo/debts','/api/orders/runner/history','/docs','/openapi.json']:
             for method in ['GET','POST','PUT','PATCH','DELETE','OPTIONS','HEAD']:
                 self.assertEqual(self.request(path,method)[0]['status'],403,(path,method))
         self.assertEqual(self.calls,[])
 
     def test_operational_routes_pass_through(self):
-        for path,method in [('/api/menu/runner','GET'),('/api/prazo/customers/lookup','GET'),('/api/staff/unlock','POST'),('/api/orders','POST'),('/api/orders/runner/id/status','PUT'),('/api/stock/runner','GET'),('/runner/cozinha','GET')]:
+        for path,method in [('/api/menu/runner','GET'),('/api/prazo/customers/lookup','GET'),('/api/staff/unlock','POST'),('/api/orders','POST'),('/api/orders/runner/id/status','PUT'),('/api/stock/runner','GET'),('/runner/cozinha','GET'),('/api/kitchen/runner/stats','GET'),('/api/cash/runner/today','GET')]:
             self.assertEqual(self.request(path,method)[0]['status'],200)
-        self.assertEqual(len(self.calls),7)
+        self.assertEqual(len(self.calls),9)
 
-    def test_kitchen_lists_remove_money_without_modifying_source(self):
-        for path in ['/api/orders/runner','/api/orders/runner/pending-pix','/api/orders/runner/order-1','/api/prazo/customers']:
+        for path in ['/api/cash/runner/today', '/api/kitchen/runner/stats']:
+            for method in ['POST', 'PUT', 'PATCH', 'DELETE']:
+                self.assertEqual(self.request(path, method)[0]['status'],403)
+
+    def test_kitchen_lists_expose_only_order_values_without_modifying_source(self):
+        for path in ['/api/orders/runner','/api/orders/runner/pending-pix']:
             response=self.request(path)
             body=json.loads(response[1]['body'])
-            self.assertEqual(body['orders'][0],{'id':'order-1','status':'received','items':[{'name':'Cafe','quantity':1}]})
+            self.assertEqual(body['orders'][0],{'id':'order-1','status':'received','total':99,'items':[{'name':'Cafe','price':99,'quantity':1}]})
             self.assertEqual(self.data['orders'][0]['total'],99)
             self.assertIn((b'cache-control',b'no-store, max-age=0'), response[0]['headers'])
+        for path in ['/api/orders/runner/order-1','/api/prazo/customers']:
+            body=json.loads(self.request(path)[1]['body'])
+            self.assertEqual(body['orders'][0],{'id':'order-1','status':'received','items':[{'name':'Cafe','quantity':1}]})
 
     def test_exact_deadline_blocks_reads_and_writes_without_restart(self):
         end=billing.deadline()
@@ -67,6 +74,9 @@ class BillingTests(unittest.TestCase):
         self.assertEqual(first['expires_at'],second['expires_at'])
         self.assertEqual(second['mode'],'grace')
         self.assertTrue(second['financials_hidden'])
+        self.assertTrue(second['kitchen_values_visible'])
+        ended=json.loads(self.request('/api/billing/status',now=end)[1]['body'])
+        self.assertFalse(ended['kitchen_values_visible'])
 
     def test_invalid_or_missing_deadline_fails_closed(self):
         for value in ['', 'invalid', '2030-01-02T00:00:00']:

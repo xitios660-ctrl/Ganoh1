@@ -2,6 +2,7 @@
 import json
 import os
 import posixpath
+import re
 import time
 from datetime import datetime
 from urllib.parse import unquote
@@ -30,15 +31,29 @@ def status():
     end = deadline()
     mode = 'normal' if not restricted() else ('grace' if now < end else 'suspended')
     return {'mode': mode, 'server_time': now, 'expires_at': end if restricted() else None,
-            'manager_blocked': restricted(), 'financials_hidden': restricted()}
+            'manager_blocked': restricted(), 'financials_hidden': restricted(),
+            'kitchen_values_visible': mode == 'grace'}
 
 
 def normalized(path):
     return '/' + posixpath.normpath(unquote(path).replace('\\', '/')).lstrip('/').lower()
 
 
-def blocked_during_grace(path):
-    path = normalized(path)
+def kitchen_values_path(path):
+    """Only a read-only daily kitchen sales summary; not drawer or payment tools."""
+    return re.fullmatch(r'/api/cash/(runner|gym-londres)/today', path) is not None
+
+
+def kitchen_orders_path(path):
+    return re.fullmatch(r'/api/orders/(runner|gym-londres)(/pending-pix)?', path) is not None
+
+
+def blocked_during_grace(path, method='GET'):
+    canonical = normalized(path)
+    if path == canonical and method in ('GET', 'HEAD') and (kitchen_values_path(canonical) or
+            re.fullmatch(r'/api/kitchen/(runner|gym-londres)/stats', canonical)):
+        return False
+    path = canonical
     prefixes = ('/gestor', '/auth', '/api/gestor', '/api/auth', '/api/admin',
                 '/api/live', '/api/cash', '/api/expenses', '/api/pix-adjustments',
                 '/api/whatsapp', '/docs', '/redoc', '/openapi.json')
@@ -63,6 +78,21 @@ def redact(value):
     if isinstance(value, list):
         return [redact(item) for item in value]
     return value
+
+
+def kitchen_order_values(original, sanitized):
+    """Expose only order/line-item prices in the kitchen's operational lists."""
+    if not isinstance(original, dict) or not isinstance(sanitized, dict):
+        return sanitized
+    for source_order, safe_order in zip(original.get('orders', []), sanitized.get('orders', [])):
+        if not isinstance(source_order, dict) or not isinstance(safe_order, dict):
+            continue
+        if 'total' in source_order:
+            safe_order['total'] = source_order['total']
+        for source_item, safe_item in zip(source_order.get('items', []), safe_order.get('items', [])):
+            if isinstance(source_item, dict) and isinstance(safe_item, dict) and 'price' in source_item:
+                safe_item['price'] = source_item['price']
+    return sanitized
 
 
 def page(title):
@@ -94,12 +124,13 @@ class BillingGate:
         state = status()
         if scope['type'] == 'websocket' and restricted():
             return await send({'type': 'websocket.close', 'code': 1008})
-        path = normalized(scope.get('path', '/'))
+        raw_path = scope.get('path', '/')
+        path = normalized(raw_path)
         if path == '/api/billing/status' and scope.get('method') in ('GET', 'HEAD'):
             return await respond(scope, send, 200, state)
         if path == '/healthz' and state['mode'] == 'suspended':
             return await respond(scope, send, 200, {'status': 'suspended'})
-        blocked = state['mode'] == 'suspended' or (restricted() and blocked_during_grace(path))
+        blocked = state['mode'] == 'suspended' or (restricted() and blocked_during_grace(raw_path, scope.get('method', 'GET')))
         if blocked:
             code = 503 if state['mode'] == 'suspended' else 403
             if path.startswith('/api/') or path == '/api':
@@ -107,7 +138,8 @@ class BillingGate:
             return await respond(scope, send, code, page('Sistema temporariamente suspenso' if code == 503 else 'Acesso bloqueado'), html=True)
         if not self.app:
             return await respond(scope, send, 503, {'detail': MESSAGE})
-        # Remove monetary fields from kitchen lists, including requests made directly.
+        # Redact financial/payment evidence on direct API calls. Kitchen list values
+        # are the only exception; the customer tracking detail stays redacted.
         sanitize = restricted() and (path == '/api/prazo/customers' or
             path == '/api/orders' or path.startswith('/api/orders/'))
         if sanitize:
@@ -118,7 +150,10 @@ class BillingGate:
             start = next(m for m in messages if m['type'] == 'http.response.start')
             body = b''.join(m.get('body', b'') for m in messages if m['type'] == 'http.response.body')
             try:
-                data = redact(json.loads(body))
+                original = json.loads(body)
+                data = redact(original)
+                if scope.get('method') == 'GET' and raw_path == path and kitchen_orders_path(path):
+                    data = kitchen_order_values(original, data)
             except (ValueError, UnicodeDecodeError):
                 return await respond(scope, send, 503, {'detail': 'Resposta indisponível'})
             return await respond(scope, send, start['status'], data)

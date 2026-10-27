@@ -6,7 +6,7 @@ Service ID: srv-datrcju0tbcc73f02qrg
 
 Settings (merge changes; never replace other environment variables):
 - GANOH_SERVICE_SUSPENDED=true with no valid future GANOH_GRACE_UNTIL: full suspension.
-- GANOH_SERVICE_SUSPENDED=true with GANOH_GRACE_UNTIL=<absolute UTC ISO timestamp>: orders and kitchen until that instant; manager, financial totals, history, reports, WhatsApp and financial APIs blocked. Operational order responses omit monetary fields. Customer menu prices and cart amounts remain available for ordering.
+- GANOH_SERVICE_SUSPENDED=true with GANOH_GRACE_UNTIL=<absolute UTC ISO timestamp>: orders and kitchen until that instant; manager, cash drawer, debts, history, reports and WhatsApp blocked. Only kitchen order prices/totals and the read-only daily sales summary are visible. Tracking details and other operational responses still omit payment evidence and monetary fields. Customer menu prices and cart amounts remain available for ordering.
 - GANOH_SERVICE_SUSPENDED=false: normal access; grace deadline ignored. Only do this when user requests full reactivation.
 
 Deadline must be stored as a fixed timestamp, never computed as now+24h at process startup. Every HTTP request checks the deadline. The frontend uses server time and unmounts the operational interface at expiry. The supervisor stops the operational server at expiry and starts a standalone suspension page. Restarting after expiry cannot start the business app.

@@ -3,7 +3,8 @@ import { useLocation, Link } from 'react-router-dom';
 
 const BillingContext = createContext({ financials_hidden: true });
 let hideMoney = true;
-export const financialsHidden = () => hideMoney;
+let showKitchenValues = false;
+export const financialsHidden = (scope) => hideMoney && !(scope === 'kitchen' && showKitchenValues);
 export const useBilling = () => useContext(BillingContext);
 const api = `${process.env.REACT_APP_BACKEND_URL || ''}/api/billing/status`;
 const message = 'Acesso indisponível por falta de pagamento. Regularize o quanto antes.';
@@ -28,6 +29,7 @@ export function BillingAccess({ children }) {
         sample = { remaining: Math.max(0, (data.expires_at - data.server_time) * 1000 - (performance.now() - started)),
           monotonic: performance.now(), wall: Date.now(), mode: data.mode };
         hideMoney = data.financials_hidden;
+        showKitchenValues = data.kitchen_values_visible === true;
         setSeconds(Math.ceil(sample.remaining / 1000));
         setState(data);
         setUnavailable(false);
@@ -53,7 +55,7 @@ export function BillingAccess({ children }) {
   const banner = state?.mode === 'grace' && !expired ? (
     <div role="status" data-testid="billing-countdown" style={{ position: 'sticky', top: 0, zIndex: 2147483647, padding: '12px 16px', textAlign: 'center', background: '#fbbf24', color: '#17202e', fontFamily: 'system-ui', lineHeight: 1.5 }}>
       <strong>Uso temporário: <span style={{ fontVariantNumeric: 'tabular-nums' }}>{clock}</span></strong>
-      <div style={{ fontSize: 13 }}>Regularize o pagamento o quanto antes. Gestor e totais financeiros bloqueados. Ao zerar, o sistema será suspenso.</div>
+      <div style={{ fontSize: 13 }}>Regularize o pagamento o quanto antes. Apenas pedidos e valores da cozinha disponíveis; gestor e caixa bloqueados. Ao zerar, o sistema será suspenso.</div>
     </div>
   ) : null;
   if (!state || unavailable || blockedManager || expired) {

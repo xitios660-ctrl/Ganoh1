@@ -45,7 +45,7 @@ const formatTime = (isoString) => {
 };
 
 const formatCurrency = (value) => {
-  if (financialsHidden()) return 'Valor restrito';
+  if (financialsHidden('kitchen')) return 'Valor restrito';
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL'
@@ -1355,7 +1355,7 @@ export const KitchenPage = () => {
       </header>
 
       <main className="p-2">
-        <Tabs value={billing.financials_hidden && ['vendas', 'prazo', 'historico'].includes(activeTab) ? 'pedidos' : activeTab} onValueChange={setActiveTab}>
+        <Tabs value={billing.financials_hidden && (['prazo', 'historico'].includes(activeTab) || (activeTab === 'vendas' && !billing.kitchen_values_visible)) ? 'pedidos' : activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid w-full h-9 grid-cols-8">
             <TabsTrigger value="pix" className="text-xs h-7 px-1">
               PIX {pendingPixOrders.length > 0 && <Badge className="ml-1 bg-blue-600 h-4 min-w-4 p-0 justify-center text-[10px]">{pendingPixOrders.length}</Badge>}
@@ -1363,7 +1363,7 @@ export const KitchenPage = () => {
             <TabsTrigger value="pedidos" className="text-xs h-7 px-1">
               Pedidos {(receivedOrders.length + preparingOrders.length) > 0 && <Badge className="ml-1 bg-brand-600 h-4 min-w-4 p-0 justify-center text-[10px]">{receivedOrders.length + preparingOrders.length}</Badge>}
             </TabsTrigger>
-            <TabsTrigger disabled={billing.financials_hidden} value="vendas" className="text-xs h-7 px-1">Vendas</TabsTrigger>
+            <TabsTrigger disabled={billing.financials_hidden && !billing.kitchen_values_visible} value="vendas" className="text-xs h-7 px-1">Vendas</TabsTrigger>
             <TabsTrigger disabled={billing.financials_hidden} value="prazo" className="text-xs h-7 px-1">
               Prazo {prazoDebts.customer_count > 0 && <Badge className="ml-1 bg-amber-600 h-4 min-w-4 p-0 justify-center text-[10px]">{prazoDebts.customer_count}</Badge>}
             </TabsTrigger>
@@ -1455,7 +1455,7 @@ export const KitchenPage = () => {
           </TabsContent>
 
           {/* VENDAS TAB */}
-          {!billing.financials_hidden && (<TabsContent value="vendas" className="mt-2 space-y-3">
+          {(!billing.financials_hidden || billing.kitchen_values_visible) && (<TabsContent value="vendas" className="mt-2 space-y-3">
             {/* Turno Manhã */}
             <div className="bg-white rounded-xl p-3">
               <div className="flex items-center gap-2 mb-3">
@@ -1547,6 +1547,7 @@ export const KitchenPage = () => {
               </div>
             </div>
 
+            {!billing.financials_hidden && (<>
             {/* Caixa (Dinheiro em Espécie) - Premium readable */}
             <div className="kc-stat-hero kc-stat-hero--cash">
               <div className="kc-stat-hero__decor" />
@@ -1664,6 +1665,7 @@ export const KitchenPage = () => {
                 </div>
               )}
             </div>
+            </>)}
           </TabsContent>)}
 
           {/* PRAZO TAB - For all stores */}
