@@ -1,3 +1,4 @@
+from billing_access import restricted
 from fastapi import FastAPI, APIRouter, HTTPException, Depends, Header
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from dotenv import load_dotenv
@@ -1028,7 +1029,7 @@ async def get_orders(store: StoreLocation, status: Optional[str] = None):
     # Must also run on the default kitchen poll (no status filter) used by KitchenPage;
     # previously only ?status=ready archived, so top-bar stats (12h filter) disagreed
     # with the Prontos list (all ready rows).
-    if status is None or status == "ready":
+    if not restricted() and (status is None or status == "ready"):
         stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
         stale_iso = stale_cutoff.isoformat()
         stale_query = {
@@ -7352,7 +7353,8 @@ async def _register_manual_morning_sales_runner_v1():
 @app.on_event("startup")
 async def startup_db_client():
     """Initialize database, scheduler and default tenant"""
-    await ensure_default_tenant()
+    if not restricted():
+        await ensure_default_tenant()
     # Historical sales must only come from the verified migration, never from startup.
     # The old helper is kept for historical reference and is deliberately not executed.
     global WHATSAPP_GROUP_ID

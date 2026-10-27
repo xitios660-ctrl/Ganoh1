@@ -15,11 +15,14 @@ import GanohCursor from "./components/GanohCursor";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { BackgroundMusic } from "./components/BackgroundMusic";
 
+import { BillingAccess } from "./components/BillingAccess";
+
 function App() {
   return (
     <ThemeProvider>
       <CartProvider>
         <BrowserRouter>
+          <BillingAccess>
           <OfflineBanner />
           <BackgroundMusic />
           <GanohCursor />
@@ -48,6 +51,7 @@ function App() {
             {/* Fallback */}
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
+        </BillingAccess>
         </BrowserRouter>
       </CartProvider>
     </ThemeProvider>

@@ -1,5 +1,6 @@
 """Same-origin production entrypoint; do not open the business app before migration."""
 import os
+from billing_access import BillingGate, restricted
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
@@ -77,22 +78,30 @@ else:
 
     @app.on_event('startup')
     async def repair_archived_prazo_debts():
+        if restricted():
+            return
         result = await prazo_archive_fix.restore_unpaid_prazo_from_history()
         print(f"PRAZO_ARCHIVE_FIX restored={result.get('restored', 0)}", flush=True)
 
     @app.on_event('startup')
     async def reconcile_prazo_payment_states():
+        if restricted():
+            return
         security = await prazo_payment_hotfix.reconcile_security_night_paid_snapshot()
         sync = await prazo_payment_hotfix.sync_active_payment_state_to_history()
         print(f"PRAZO_PAYMENT_RECONCILE security={security} sync={sync}", flush=True)
 
     @app.on_event('startup')
     async def enforce_verified_menu_prices():
+        if restricted():
+            return
         result = await menu_price_fix.ensure_cafe_com_leite_price()
         print(f"MENU_PRICE_FIX {result}", flush=True)
 
     @app.on_event('startup')
     async def repair_verified_gym_debit_sale():
+        if restricted():
+            return
         result = await order_delete_hotfix.restore_verified_gym_debit_sale()
         print(f"GYM_DEBIT_REPAIR {result}", flush=True)
 
@@ -138,3 +147,6 @@ else:
 
     # Mount last so /api/* and /healthz registered above win.
     app.mount('/', SPAFiles(directory=build, html=True), name='frontend')
+
+# Gate every request, including direct API calls and already logged-in sessions.
+app = BillingGate(app)

@@ -1,3 +1,4 @@
+import { useBilling, financialsHidden } from '../components/BillingAccess';
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import axios from 'axios';
@@ -44,6 +45,7 @@ const formatTime = (isoString) => {
 };
 
 const formatCurrency = (value) => {
+  if (financialsHidden()) return 'Valor restrito';
   return new Intl.NumberFormat('pt-BR', {
     style: 'currency',
     currency: 'BRL'
@@ -414,6 +416,7 @@ export const KitchenPage = () => {
   const { store } = useParams();
   const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState('pedidos');
+  const billing = useBilling();
   const [orders, setOrders] = useState([]);
   // Bell rings when a new order arrives (received status only)
   const newOrdersForBell = orders.filter((o) => o.status === 'received');
@@ -1352,7 +1355,7 @@ export const KitchenPage = () => {
       </header>
 
       <main className="p-2">
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <Tabs value={billing.financials_hidden && ['vendas', 'prazo', 'historico'].includes(activeTab) ? 'pedidos' : activeTab} onValueChange={setActiveTab}>
           <TabsList className="grid w-full h-9 grid-cols-8">
             <TabsTrigger value="pix" className="text-xs h-7 px-1">
               PIX {pendingPixOrders.length > 0 && <Badge className="ml-1 bg-blue-600 h-4 min-w-4 p-0 justify-center text-[10px]">{pendingPixOrders.length}</Badge>}
@@ -1360,8 +1363,8 @@ export const KitchenPage = () => {
             <TabsTrigger value="pedidos" className="text-xs h-7 px-1">
               Pedidos {(receivedOrders.length + preparingOrders.length) > 0 && <Badge className="ml-1 bg-brand-600 h-4 min-w-4 p-0 justify-center text-[10px]">{receivedOrders.length + preparingOrders.length}</Badge>}
             </TabsTrigger>
-            <TabsTrigger value="vendas" className="text-xs h-7 px-1">Vendas</TabsTrigger>
-            <TabsTrigger value="prazo" className="text-xs h-7 px-1">
+            <TabsTrigger disabled={billing.financials_hidden} value="vendas" className="text-xs h-7 px-1">Vendas</TabsTrigger>
+            <TabsTrigger disabled={billing.financials_hidden} value="prazo" className="text-xs h-7 px-1">
               Prazo {prazoDebts.customer_count > 0 && <Badge className="ml-1 bg-amber-600 h-4 min-w-4 p-0 justify-center text-[10px]">{prazoDebts.customer_count}</Badge>}
             </TabsTrigger>
             <TabsTrigger value="estoque" className="text-xs h-7 px-1">
@@ -1369,7 +1372,7 @@ export const KitchenPage = () => {
             </TabsTrigger>
             <TabsTrigger value="cardapio" className="text-xs h-7 px-1">Card.</TabsTrigger>
             <TabsTrigger value="adicionais" className="text-xs h-7 px-1">Adic.</TabsTrigger>
-            <TabsTrigger value="historico" className="text-xs h-7 px-1">
+            <TabsTrigger disabled={billing.financials_hidden} value="historico" className="text-xs h-7 px-1">
               <History className="h-3 w-3" />
             </TabsTrigger>
           </TabsList>
@@ -1452,7 +1455,7 @@ export const KitchenPage = () => {
           </TabsContent>
 
           {/* VENDAS TAB */}
-          <TabsContent value="vendas" className="mt-2 space-y-3">
+          {!billing.financials_hidden && (<TabsContent value="vendas" className="mt-2 space-y-3">
             {/* Turno Manhã */}
             <div className="bg-white rounded-xl p-3">
               <div className="flex items-center gap-2 mb-3">
@@ -1661,10 +1664,10 @@ export const KitchenPage = () => {
                 </div>
               )}
             </div>
-          </TabsContent>
+          </TabsContent>)}
 
           {/* PRAZO TAB - For all stores */}
-          <TabsContent value="prazo" className="mt-2 space-y-3">
+          {!billing.financials_hidden && (<TabsContent value="prazo" className="mt-2 space-y-3">
             {/* Header with buttons */}
             <div className="flex justify-between items-center flex-wrap gap-2">
               <h3 className="font-semibold text-sm">Clientes no Prazo</h3>
@@ -1878,7 +1881,7 @@ export const KitchenPage = () => {
                 <p className="text-sm">Nenhum débito pendente</p>
               </div>
             )}
-          </TabsContent>
+          </TabsContent>)}
 
           {/* ESTOQUE TAB */}
           <TabsContent value="estoque" className="mt-2 space-y-3">
@@ -2016,7 +2019,7 @@ export const KitchenPage = () => {
           </TabsContent>
 
           {/* HISTÓRICO TAB */}
-          <TabsContent value="historico" className="mt-2">
+          {!billing.financials_hidden && (<TabsContent value="historico" className="mt-2">
             <div className="bg-white rounded-xl p-3">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-semibold text-sm flex items-center gap-1">
@@ -2038,7 +2041,7 @@ export const KitchenPage = () => {
                 </div>
               </ScrollArea>
             </div>
-          </TabsContent>
+          </TabsContent>)}
         </Tabs>
       </main>
 
@@ -2933,7 +2936,7 @@ export const KitchenPage = () => {
                       {(o.items || []).length > 3 ? ` +${o.items.length - 3}` : ''}
                     </p>
                     <p className="text-xs text-gray-500 mt-1">
-                      R$ {Number(o.total || 0).toFixed(2)} · {String(o.payment_method || '').toUpperCase()}
+                      {formatCurrency(o.total)} · {String(o.payment_method || '').toUpperCase()}
                     </p>
                   </div>
                 ))}

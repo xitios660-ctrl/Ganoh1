@@ -1,3 +1,4 @@
+import { financialsHidden } from '../components/BillingAccess';
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import axios from 'axios';
@@ -186,7 +187,7 @@ export const OrderTrackingPage = () => {
             </div>
             <div className="border-t pt-3 flex justify-between">
               <span className="font-semibold">Total</span>
-              <span className="text-xl font-bold text-brand-600">{formatPrice(order.total)}</span>
+              <span className="text-xl font-bold text-brand-600">{financialsHidden() ? 'Valor restrito' : formatPrice(order.total)}</span>
             </div>
           </div>
         )}
