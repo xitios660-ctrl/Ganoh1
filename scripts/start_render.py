@@ -23,6 +23,18 @@ if restricted():
     os.environ['WHATSAPP_PROVIDER'] = 'disabled'
 
 ROOT = Path(__file__).resolve().parent.parent
+# Read-only MongoDB connectivity probe for cross-workspace migration.
+# Runs only with explicit opt-in, without changing orders or financial data.
+if os.environ.get("GANOH_MIGRATION_DB_PROBE", "false").lower() == "true":
+    try:
+        from pymongo import MongoClient
+        with MongoClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=9000, connectTimeoutMS=9000) as conn:
+            conn.admin.command("ping")
+            db_probe = conn[os.environ["DB_NAME"]]
+            counts = {name: db_probe[name].count_documents({}) for name in ("orders", "order_history", "menu", "expenses")}
+            print(f"GANOH_MIGRATION_DB_PROBE verified counts={counts}", flush=True)
+    except Exception as exc:
+        print(f"GANOH_MIGRATION_DB_PROBE failed reason={type(exc).__name__}", flush=True)
 children = []
 stopping = False
 
