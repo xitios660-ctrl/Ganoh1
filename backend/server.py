@@ -283,7 +283,7 @@ async def ensure_default_tenant():
 GESTOR_USERNAME = os.environ.get('GESTOR_USERNAME', 'gestor')
 GESTOR_PASSWORD = os.environ.get('GESTOR_PASSWORD', '')  # required via env; empty = fail closed
 
-def verify_gestor(credentials: HTTPBasicCredentials = Depends(security)):
+async def verify_gestor(credentials: HTTPBasicCredentials = Depends(security)):
     # Trim whitespace and lowercase username to fix intermittent login bugs
     # (common on mobile keyboards that add space or capitalize first letter)
     incoming_user = (credentials.username or "").strip().lower()
@@ -299,6 +299,12 @@ def verify_gestor(credentials: HTTPBasicCredentials = Depends(security)):
     correct_username = secrets.compare_digest(incoming_user, expected_user)
     correct_password = secrets.compare_digest(incoming_pass, expected_pass)
     if not (correct_username and correct_password):
+        # During a cross-account migration, retain access for the already-registered
+        # Gestor tenant without resetting its password in the shared production DB.
+        if os.environ.get("GANOH_AUTH_TENANT_FALLBACK", "false").lower() == "true" and incoming_user == expected_user:
+            tenant = await get_tenant_by_credentials(incoming_user, incoming_pass)
+            if tenant:
+                return credentials.username
         raise HTTPException(
             status_code=401,
             detail="Credenciais inválidas",
