@@ -474,8 +474,8 @@ export const GestorPage = () => {
   const fetchPrazoData = async () => {
     try {
       const [customersRes, debtsRes] = await Promise.all([
-        axios.get(`${API}/prazo/customers`),
-        axios.get(`${API}/prazo/debts`)
+        axios.get(`${API}/prazo/customers`, { params: { _t: Date.now() }, headers: { 'Cache-Control': 'no-cache' } }),
+        axios.get(`${API}/prazo/debts`, { params: { _t: Date.now() }, headers: { 'Cache-Control': 'no-cache' } })
       ]);
       setPrazoCustomers(customersRes.data.customers || []);
       setPrazoDebts(debtsRes.data);
@@ -483,6 +483,23 @@ export const GestorPage = () => {
       console.log('Error fetching prazo data');
     }
   };
+
+  // Refresh customer balances when opening the Prazo tab and while it is visible.
+  // Only GET requests: this never changes debts, payments, or orders.
+  useEffect(() => {
+    if (!isAuthenticated || activeMainTab !== 'prazo') return undefined;
+    void fetchPrazoData();
+    const refreshVisible = () => {
+      if (!document.hidden) void fetchPrazoData();
+    };
+    const timer = setInterval(refreshVisible, 30000);
+    document.addEventListener('visibilitychange', refreshVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', refreshVisible);
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAuthenticated, activeMainTab]);
 
   const handleAddPrazoCustomer = async () => {
     const auth = localStorage.getItem('gestor_auth');
