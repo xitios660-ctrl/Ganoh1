@@ -1847,9 +1847,15 @@ export const KitchenPage = () => {
                       <div>
                         <p className="font-medium">{debt.name}</p>
                         <p className="text-xs text-muted-foreground">
-                          {debt.order_count} pedido(s)
+                          {debt.order_count} pedido(s) pendente(s)
                           {!debt.phone && <span className="text-red-500 ml-1">(sem telefone)</span>}
                         </p>
+                        {debt.orders?.[0]?.date && (
+                          <p className="text-xs font-medium text-amber-700" data-testid="prazo-latest-order-date">
+                            Último pedido pendente: {new Date(debt.orders[0].date).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </p>
+                        )}
+
                       </div>
                       <div className="flex items-center gap-1">
                         <span className="font-bold text-amber-600 mr-1">{formatCurrency(debt.total)}</span>
