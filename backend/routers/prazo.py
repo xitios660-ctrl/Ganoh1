@@ -436,7 +436,7 @@ async def get_prazo_debts(store: Optional[str] = None):
     if store:
         query["store"] = store
     
-    prazo_orders = await db.orders.find(query, {"_id": 0}).to_list(1000)
+    prazo_orders = await db.orders.find(query, {"_id": 0}).sort("created_at", -1).to_list(10000)
     
     prazo_customers = await db.prazo_customers.find({}, {"_id": 0, "name": 1, "phone": 1}).to_list(1000)
     customer_phones = {c.get("name", "").lower(): c.get("phone", "") for c in prazo_customers}
@@ -467,6 +467,20 @@ async def get_prazo_debts(store: Optional[str] = None):
             "store": order_store
         })
     
+    # The UI lists each customer's recent orders first. MongoDB's natural order
+    # is not chronological after migration/imports; normalize mixed ISO offsets.
+    def _order_timestamp(item):
+        try:
+            timestamp = datetime.fromisoformat(str(item.get("date") or "").replace("Z", "+00:00"))
+            if timestamp.tzinfo is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+            return timestamp.timestamp()
+        except (TypeError, ValueError, OverflowError):
+            return 0
+
+    for debt in debts_by_customer.values():
+        debt["orders"].sort(key=_order_timestamp, reverse=True)
+
     debts = sorted(debts_by_customer.values(), key=lambda x: x["total"], reverse=True)
     total_prazo = sum(d["total"] for d in debts)
     
