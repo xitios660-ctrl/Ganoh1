@@ -383,6 +383,12 @@ export const PrazoTab = ({ prazoCustomers, prazoDebts, onOpenNewCustomer, onDele
         </span>
       </div>
 
+      <div className="flex items-center gap-3 text-xs" style={{ color: 'var(--gx-mute)' }}>
+        <span>Saldos atualizados automaticamente a cada 30 segundos.</span>
+        <button type="button" onClick={onRefresh} className="underline font-semibold" data-testid="prazo-refresh-balances">
+          Atualizar agora
+        </button>
+      </div>
       {/* KPIs */}
       <div className="gx-kpi-grid">
         <motion.div className="gx-kpi gx-enter" data-i="1" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }}>
