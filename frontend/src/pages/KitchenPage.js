@@ -645,6 +645,40 @@ export const KitchenPage = () => {
     void fetchSecondaryData();
   }, [fetchLiveData, fetchSecondaryData]);
 
+  // Keep customer balances current while the Prazo tab is open.
+  // Refresh read-only summaries; never adjust debts or payments here.
+  useEffect(() => {
+    if (!store || activeTab !== 'prazo') return undefined;
+    let mounted = true;
+    const refreshPrazo = async () => {
+      try {
+        const [debts, customers] = await Promise.all([
+          axios.get(`${API}/prazo/debts?store=${store}`),
+          axios.get(`${API}/prazo/customers?store=${store}`),
+        ]);
+        if (mounted) {
+          setPrazoDebts(debts.data);
+          setPrazoCustomers(customers.data.customers || []);
+        }
+      } catch (_error) {
+        // Preserve the last visible balances during a transient connection error.
+      }
+    };
+    void refreshPrazo();
+    const timer = setInterval(() => {
+      if (!document.hidden) void refreshPrazo();
+    }, 30000);
+    const onVisible = () => {
+      if (!document.hidden) void refreshPrazo();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [store, activeTab]);
+
   useEffect(() => {
     if (!store) return undefined;
 
