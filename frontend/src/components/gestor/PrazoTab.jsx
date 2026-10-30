@@ -155,7 +155,8 @@ const HistoryDialog = ({ open, onClose, customer }) => {
   useEffect(() => {
     if (!open || !customer?.id) return;
     setLoading(true);
-    axios.get(`${API}/prazo/customers/${customer.id}/history`)
+    setData(null);
+    axios.get(`${API}/prazo/customers/${customer.id}/history`, { params: { _t: Date.now() }, headers: { 'Cache-Control': 'no-cache' } })
       .then((res) => setData(res.data))
       .catch(() => toast.error('Erro ao carregar histórico'))
       .finally(() => setLoading(false));
@@ -192,6 +193,47 @@ const HistoryDialog = ({ open, onClose, customer }) => {
         </div>
 
         <div className="px-6 py-4 overflow-y-auto gx-scroll" style={{ maxHeight: '60vh' }}>
+          {!loading && (
+            <div className="mb-5" data-testid="prazo-customer-orders">
+              <div className="flex justify-between items-center mb-2">
+                <h3 className="font-semibold text-sm" style={{ color: 'var(--gx-ink)' }}>
+                  Pedidos a prazo — mais recentes primeiro
+                </h3>
+                <span className="text-xs" style={{ color: 'var(--gx-mute)' }}>
+                  {data?.total_orders ?? 0} pedido(s)
+                </span>
+              </div>
+              {(data?.orders || []).length === 0 ? (
+                <div className="text-xs py-3" style={{ color: 'var(--gx-mute)' }}>Nenhum pedido a prazo registrado.</div>
+              ) : (
+                <div className="space-y-2">
+                  {data.orders.map((order, index) => {
+                    const amount = Number(order.total || 0);
+                    const paid = order.prazo_paid === true || Number(order.partial_paid || 0) >= amount;
+                    return (
+                      <div key={order.id || index} className="gx-row" data-testid={`prazo-customer-order-${index}`}>
+                        <div className="min-w-0 flex-1">
+                          <div className="font-medium text-xs" style={{ color: 'var(--gx-ink)' }}>
+                            {fmtDate(order.created_at)}
+                          </div>
+                          <div className="text-xs break-words" style={{ color: 'var(--gx-mute)' }}>
+                            {(order.items || []).map(i => `${i.quantity || 1}× ${i.name}`).join(' · ') || 'Lançamento manual'}
+                          </div>
+                          <div className="text-[11px]" style={{ color: paid ? 'var(--gx-emerald)' : 'var(--gx-rose)' }}>
+                            {paid ? 'Quitado' : 'A prazo'}
+                          </div>
+                        </div>
+                        <strong className="text-sm" style={{ color: 'var(--gx-ink)' }}>{formatPrice(amount)}</strong>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <h3 className="font-semibold text-sm mt-5 mb-2" style={{ color: 'var(--gx-ink)' }}>
+                Pagamentos e ajustes
+              </h3>
+            </div>
+          )}
           {loading ? (
             <div className="text-center py-10" style={{ color: 'var(--gx-mute)' }}>Carregando…</div>
           ) : events.length === 0 ? (
