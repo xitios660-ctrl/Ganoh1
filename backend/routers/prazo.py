@@ -924,37 +924,80 @@ async def remove_prazo_debt(customer_id: str, data: PrazoDebtAdjust):
 
 @router.get("/customers/{customer_id}/history")
 async def get_customer_prazo_history(customer_id: str, limit: int = 200):
-    """Return the full transaction history for a customer (newest first)."""
+    """Read-only customer statement: recent prazo orders AND financial events."""
     customer = await db.prazo_customers.find_one({"id": customer_id})
     if not customer:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
 
     customer_name = customer["name"]
+    store = customer.get("store", "runner")
+    name_query = {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"}
+    order_query = {
+        "customer_name": name_query,
+        "store": store,
+        "payment_method": "prazo",
+    }
+
+    # Active orders contain the latest payment state. The history collection
+    # also holds older archived orders, so merge by stable order id.
+    safe_limit = max(1, min(int(limit), 1000))
+    active = await db.orders.find(order_query, {"_id": 0}).to_list(10000)
+    archived = await db.order_history.find(order_query, {"_id": 0}).to_list(10000)
+    by_id = {}
+    for order in archived:
+        key = str(order.get("id") or "")
+        if key:
+            by_id[key] = order
+    for order in active:
+        key = str(order.get("id") or "")
+        if key:
+            by_id[key] = order
+    def order_timestamp(order):
+        try:
+            value = datetime.fromisoformat(str(order.get("created_at") or "").replace("Z", "+00:00"))
+            if value.tzinfo is None:
+                value = value.replace(tzinfo=timezone.utc)
+            return value.timestamp()
+        except (ValueError, TypeError, OverflowError):
+            return 0
+    orders = sorted(by_id.values(), key=order_timestamp, reverse=True)
+    total_orders = len(orders)
+    remaining_debt = round(sum(
+        max(0, float(o.get("total") or 0) - float(o.get("partial_paid") or 0))
+        for o in active
+        if o.get("prazo_paid") is not True
+    ), 2)
+
     events = await db.prazo_history.find(
         {
-            "$or": [
-                {"customer_id": customer_id},
-                {"customer_name": {"$regex": f"^{re.escape(customer_name)}$", "$options": "i"}},
-            ]
+            "$and": [
+                {"$or": [
+                    {"customer_id": customer_id},
+                    {"customer_name": name_query},
+                ]},
+                {"$or": [
+                    {"store": store},
+                    {"store": {"$exists": False}},
+                ]},
+            ],
         },
         {"_id": 0},
-    ).sort("created_at", -1).to_list(limit)
+    ).sort("created_at", -1).to_list(safe_limit)
 
-    # Aggregate snapshot
-    current_debt = await _get_customer_total_debt(customer_name)
     return {
         "customer": {
             "id": customer_id,
             "name": customer_name,
             "phone": customer.get("phone", ""),
             "credit": customer.get("credit", 0),
-            "store": customer.get("store", ""),
-            "current_debt": current_debt,
+            "store": store,
+            "current_debt": remaining_debt,
         },
+        "orders": orders[:safe_limit],
+        "total_orders": total_orders,
         "events": events,
         "total_count": len(events),
     }
-
 
 @router.get("/history")
 async def get_global_prazo_history(store: str = None, limit: int = 300):
