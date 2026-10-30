@@ -315,15 +315,8 @@ export const PrazoTab = ({ prazoCustomers, prazoDebts, onOpenNewCustomer, onDele
   const debtsByStore = useMemo(() => {
     const all = prazoDebts?.debts || [];
     if (storeFilter === 'all') return all;
-    return all.filter((d) => {
-      // Match debt to a customer in the selected store
-      const matchingCustomer = (prazoCustomers || []).find(
-        (c) => (c.name || '').toLowerCase() === (d.name || '').toLowerCase()
-              && (c.store || '').toLowerCase() === storeFilter
-      );
-      return !!matchingCustomer;
-    });
-  }, [prazoDebts, prazoCustomers, storeFilter]);
+    return all.filter((d) => (d.store || '').toLowerCase() === storeFilter);
+  }, [prazoDebts, storeFilter]);
 
   const totalPrazoFiltered = useMemo(() => {
     return debtsByStore.reduce((s, d) => s + (d.total || 0), 0);
@@ -331,7 +324,9 @@ export const PrazoTab = ({ prazoCustomers, prazoDebts, onOpenNewCustomer, onDele
 
   const debtMap = useMemo(() => {
     const m = {};
-    debtsByStore.forEach((d) => { m[(d.name || '').toLowerCase()] = d; });
+    debtsByStore.forEach((d) => {
+      m[`${(d.store || '').toLowerCase()}::${(d.name || '').toLowerCase()}`] = d;
+    });
     return m;
   }, [debtsByStore]);
 
@@ -347,7 +342,7 @@ export const PrazoTab = ({ prazoCustomers, prazoDebts, onOpenNewCustomer, onDele
     // Count of distinct customers that have any pending debt under the selected store
     const setNames = new Set();
     debtsByStore.forEach((d) => {
-      if ((d.total || 0) > 0) setNames.add((d.name || '').toLowerCase());
+      if ((d.total || 0) > 0) setNames.add(`${(d.store || '').toLowerCase()}::${(d.name || '').toLowerCase()}`);
     });
     return setNames.size;
   }, [debtsByStore]);
@@ -461,7 +456,8 @@ export const PrazoTab = ({ prazoCustomers, prazoDebts, onOpenNewCustomer, onDele
           ) : (
             <div className="space-y-2.5">
               {filtered.map((c, idx) => {
-                const d = debtMap[(c.name || '').toLowerCase()];
+                const d = debtMap[`${(c.store || '').toLowerCase()}::${(c.name || '').toLowerCase()}`];
+                const latestPending = d?.orders?.[0];
                 const debtTotal = d?.total || 0;
                 const credit = c.credit || 0;
                 return (
@@ -492,6 +488,14 @@ export const PrazoTab = ({ prazoCustomers, prazoDebts, onOpenNewCustomer, onDele
                           {c.store && <span>• {c.store}</span>}
                           {c.notes && <span className="italic">• {c.notes}</span>}
                         </div>
+                        {latestPending && (
+                          <div className="text-[11px] mt-1" data-testid={`prazo-latest-pending-${c.id}`} style={{ color: 'var(--gx-ink)' }}>
+                            <strong>Último pedido pendente:</strong> {fmtDate(latestPending.date)}
+                            <span className="block" style={{ color: 'var(--gx-mute)' }}>
+                              {(latestPending.items || []).map(i => `${i.quantity || 1}× ${i.name}`).join(' · ')}
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
