@@ -943,15 +943,26 @@ async def get_customer_prazo_history(customer_id: str, limit: int = 200):
     safe_limit = max(1, min(int(limit), 1000))
     active = await db.orders.find(order_query, {"_id": 0}).to_list(10000)
     archived = await db.order_history.find(order_query, {"_id": 0}).to_list(10000)
+    def order_key(order):
+        if order.get("id"):
+            return "id:" + str(order["id"])
+        # Legacy records can lack IDs. Keep them in the report and suppress
+        # only exact archival duplicates of the same order.
+        import json
+        signature = (
+            order.get("customer_name"),
+            order.get("created_at"),
+            order.get("total"),
+            json.dumps(order.get("items") or [], sort_keys=True, default=str),
+        )
+        return "legacy:" + repr(signature)
+
     by_id = {}
     for order in archived:
-        key = str(order.get("id") or "")
-        if key:
-            by_id[key] = order
+        by_id[order_key(order)] = {**order, "historical_only": True}
     for order in active:
-        key = str(order.get("id") or "")
-        if key:
-            by_id[key] = order
+        by_id[order_key(order)] = {**order, "historical_only": False}
+
     def order_timestamp(order):
         try:
             value = datetime.fromisoformat(str(order.get("created_at") or "").replace("Z", "+00:00"))
