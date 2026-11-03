@@ -52,6 +52,135 @@ const formatCurrency = (value) => {
   }).format(value);
 };
 
+// Read-only customer statement: archived and active orders, including already paid items.
+// Uses the existing per-customer, per-store history API and never changes a balance.
+const PrazoCustomerStatement = ({ customer, onClose }) => {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!customer?.id) return;
+    let cancelled = false;
+    setData(null);
+    setError('');
+    setLoading(true);
+    axios.get(`${API}/prazo/customers/${encodeURIComponent(customer.id)}/history`, {
+      params: { limit: 1000, _t: Date.now() },
+      headers: { 'Cache-Control': 'no-cache' }
+    }).then((result) => {
+      if (!cancelled) setData(result.data);
+    }).catch(() => {
+      if (!cancelled) setError('Não foi possível carregar os pedidos deste cliente.');
+    }).finally(() => {
+      if (!cancelled) setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [customer?.id]);
+
+  const fmt = (value) => {
+    if (!value) return 'Data não informada';
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? 'Data não informada' : d.toLocaleString('pt-BR');
+  };
+
+  const printStatement = () => {
+    const report = document.getElementById('ganoh-prazo-print-report');
+    if (!report || !data) return;
+    const popup = window.open('', '_blank');
+    if (!popup) {
+      toast.error('Permita abrir uma nova aba para salvar o extrato em PDF.');
+      return;
+    }
+    popup.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
+      <title>Extrato de consumo GANOH</title>
+      <style>body{font:12px Arial,sans-serif;color:#172b24;margin:25px;line-height:1.5}
+      h2{font-size:20px}h3{font-size:15px;margin-top:22px}
+      .report-order{border-bottom:1px solid #ddd;padding:8px 0;break-inside:avoid}
+      .report-payment{border-bottom:1px solid #eee;padding:6px 0}
+      .report-item{margin-left:12px;font-size:12px}p{margin:4px 0}
+      .print-meta{font-size:11px;color:#555}button{display:none}
+      </style></head><body>${report.innerHTML}</body></html>`);
+    popup.document.close();
+    popup.focus();
+    popup.print();
+  };
+
+  return (
+    <Dialog open={Boolean(customer)} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="max-w-[95vw] sm:max-w-3xl max-h-[90vh] overflow-y-auto" data-testid="prazo-complete-statement-dialog">
+        <DialogHeader>
+          <DialogTitle>Histórico completo de consumo</DialogTitle>
+        </DialogHeader>
+        {loading && <p className="py-6 text-sm">Consultando pedidos e pagamentos...</p>}
+        {error && <p className="py-6 text-sm text-red-600">{error}</p>}
+        {data && (
+          <>
+            <div className="flex flex-wrap gap-2 justify-between items-center">
+              <p className="text-xs text-muted-foreground">Pedidos registrados e arquivados, inclusive os já quitados.</p>
+              <Button size="sm" variant="outline" onClick={printStatement} data-testid="prazo-print-statement">
+                Imprimir / Salvar PDF
+              </Button>
+            </div>
+            <div id="ganoh-prazo-print-report">
+              <h2 className="text-lg font-bold">GANOH | Conta do cliente: {data.customer?.name || customer.name}</h2>
+              <p className="text-xs print-meta">Unidade: {STORE_NAMES[data.customer?.store] || data.customer?.store || 'Não informada'} · Extrato consultado em {fmt(new Date().toISOString())}</p>
+              <p className="font-semibold text-sm mt-2">
+                Saldo pendente registrado: {formatCurrency(data.customer?.current_debt || 0)}
+              </p>
+              <p className="text-xs text-muted-foreground print-meta">
+                Os pagamentos já registrados estão refletidos no saldo. Não os desconte novamente.
+                Valores importados sem itens não permitem identificar o consumo original.
+              </p>
+
+              <h3 className="font-semibold text-base mt-5 mb-2">Compras e consumos ({data.total_orders || 0})</h3>
+              {(data.orders || []).length === 0 && <p className="text-sm">Sem pedidos disponíveis neste cadastro.</p>}
+              {(data.orders || []).map((order, idx) => {
+                const total = Number(order.total || 0);
+                const partial = Number(order.partial_paid || 0);
+                const paid = order.prazo_paid === true || partial >= total;
+                const imported = order.source === 'pdf_recovery' ||
+                  (order.items || []).some(item => String(item.name || '').includes('Saldo Prazo Importado'));
+                return (
+                  <div key={order.id || idx} className="report-order border-b py-2">
+                    <div className="flex flex-wrap justify-between gap-2 text-sm">
+                      <strong>{fmt(order.created_at)}</strong>
+                      <strong>{formatCurrency(total)} · {paid ? 'Quitado' : order.historical_only ? 'Arquivo / conferir' : 'A prazo'}</strong>
+                    </div>
+                    {imported ? (
+                      <p className="text-xs text-amber-700">Saldo antigo recuperado de relatório. Produtos originais indisponíveis.</p>
+                    ) : (order.items || []).length ? (
+                      (order.items || []).map((item, itemIdx) => (
+                        <p className="report-item text-xs text-muted-foreground" key={itemIdx}>
+                          {item.quantity || 1}× {item.name || 'Produto sem nome'} · {formatCurrency(item.price || 0)} por unidade
+                        </p>
+                      ))
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Lançamento sem detalhamento de produtos.</p>
+                    )}
+                    {partial > 0 && !paid && (
+                      <p className="text-xs text-amber-700">Abatimento no pedido: {formatCurrency(partial)} · Resta {formatCurrency(Math.max(0,total-partial))}</p>
+                    )}
+                  </div>
+                );
+              })}
+
+              <h3 className="font-semibold text-base mt-5 mb-2">Pagamentos registrados ({data.total_payments || 0})</h3>
+              {(data.payments || []).length === 0 && <p className="text-xs text-muted-foreground">Sem pagamentos individualizados registrados.</p>}
+              {(data.payments || []).map((payment, idx) => (
+                <p className="report-payment text-xs py-1 border-b" key={payment.id || idx}>
+                  {fmt(payment.created_at)} · {payment.type === 'partial_payment' ? 'Abatimento' : 'Pagamento integral'}
+                  {' · '}{PAYMENT_LABELS[payment.payment_method] || payment.payment_method || 'Método não informado'}
+                  {' · '}<strong>{formatCurrency(payment.amount || 0)}</strong>
+                </p>
+              ))}
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+};
+
 // Order Card Component - Mobile optimized
 const OrderCard = ({ order, onStatusChange, onDelete }) => {
   const config = STATUS_CONFIG[order.status] || STATUS_CONFIG.received;
@@ -436,6 +565,7 @@ export const KitchenPage = () => {
   const [isClearing, setIsClearing] = useState(false);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [prazoDebts, setPrazoDebts] = useState({ debts: [], total_prazo: 0 });
+  const [statementCustomer, setStatementCustomer] = useState(null);
   const [showPrazoPayDialog, setShowPrazoPayDialog] = useState(false);
   const [selectedPrazoCustomer, setSelectedPrazoCustomer] = useState(null);
   const [prazoPassword, setPrazoPassword] = useState('');
@@ -1790,7 +1920,7 @@ export const KitchenPage = () => {
             {prazoCustomers.length > 0 && (
               <div className="bg-blue-50 rounded-xl p-3 border border-blue-200">
                 <h4 className="font-semibold text-sm text-blue-800 mb-2 flex items-center gap-1">
-                  <DollarSign className="h-4 w-4" /> Clientes Cadastrados 
+                  <DollarSign className="h-4 w-4" /> Clientes e Extratos Completos 
                   {prazoSearchTerm ? (
                     <span className="font-normal">
                       ({prazoCustomers.filter(c => c.name.toLowerCase().includes(prazoSearchTerm.toLowerCase())).length} de {prazoCustomers.length})
@@ -1812,6 +1942,9 @@ export const KitchenPage = () => {
                         {(customer.credit || 0) > 0 && (
                           <span className="font-bold text-green-600 text-xs bg-green-50 px-2 py-1 rounded">R$ {(customer.credit || 0).toFixed(2)}</span>
                         )}
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-blue-700 border-blue-400 hover:bg-blue-50" onClick={() => setStatementCustomer(customer)} title="Ver todos os consumos, inclusive os pagos" data-testid={`prazo-complete-history-${customer.id}`}>
+                          <History className="h-3 w-3 mr-1" /> Extrato
+                        </Button>
                         <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-blue-600 border-blue-600 hover:bg-blue-50" onClick={() => handleEditCustomer(customer)} title="Editar cliente">
                           <Pencil className="h-3 w-3" />
                         </Button>
@@ -2127,6 +2260,14 @@ export const KitchenPage = () => {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Itemized read-only statement: every registered client, even after full payment */}
+      {statementCustomer && (
+        <PrazoCustomerStatement
+          customer={statementCustomer}
+          onClose={() => setStatementCustomer(null)}
+        />
+      )}
 
       {/* Prazo Payment Dialog */}
       <Dialog open={showPrazoPayDialog} onOpenChange={setShowPrazoPayDialog}>
