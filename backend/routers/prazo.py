@@ -984,6 +984,14 @@ async def get_customer_prazo_history(customer_id: str, limit: int = 200):
         {"_id": 0},
     ).sort("created_at", -1).to_list(safe_limit)
 
+    # Payments have their own collections; the financial event log alone
+    # does not cover payments made before the audit timeline was introduced.
+    payment_match = {"customer_name": name_query, "store": store}
+    full_payments = await db.prazo_payments.find(payment_match, {"_id": 0}).to_list(5000)
+    partial_payments = await db.prazo_partial_payments.find(payment_match, {"_id": 0}).to_list(5000)
+    payments = sorted(full_payments + partial_payments,
+                      key=lambda entry: order_timestamp(entry), reverse=True)
+
     return {
         "customer": {
             "id": customer_id,
@@ -995,6 +1003,8 @@ async def get_customer_prazo_history(customer_id: str, limit: int = 200):
         },
         "orders": orders[:safe_limit],
         "total_orders": total_orders,
+        "payments": payments[:safe_limit],
+        "total_payments": len(payments),
         "events": events,
         "total_count": len(events),
     }
