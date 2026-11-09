@@ -2598,6 +2598,36 @@ async def update_gestor_stock(store: StoreLocation, menu_item_id: str, stock_upd
 
 # ==================== MONTHLY CHART DATA ====================
 
+def _ganoh_chart_local_date(value, tz):
+    """Parse legacy string or BSON datetime into a timezone-aware local date."""
+    try:
+        if isinstance(value, datetime):
+            date = value
+        else:
+            date = datetime.fromisoformat(str(value or "").replace("Z", "+00:00"))
+        if date.tzinfo is None:
+            date = date.replace(tzinfo=timezone.utc)
+        return date.astimezone(tz)
+    except (ValueError, TypeError, OverflowError):
+        return None
+
+
+def _ganoh_recovery_live_entry(value, tz):
+    """PDF sales cover paid records through 28 Sep 2026, inclusive.
+
+    Avoid adding any imported/backdated pre-cutover paid entries twice.
+    This is read-only filtering; historical raw records remain unchanged.
+    """
+    date = _ganoh_chart_local_date(value, tz)
+    if date is None:
+        return None
+    if (os.environ.get("GANOH_RECOVERY_SOURCE") == "pdf"
+            and date.year == 2026
+            and date < tz.localize(datetime(2026, 9, 29))):
+        return None
+    return date
+
+
 @api_router.get("/gestor/chart/monthly")
 async def get_monthly_chart_data(month: int = None, year: int = None, store: str = None, username: str = Depends(verify_gestor)):
     """Get daily sales data for a specific month for chart visualization.
@@ -2973,65 +3003,94 @@ async def get_daily_chart_data(date: str = None, store: str = None, username: st
 
 @api_router.get("/gestor/chart/yearly")
 async def get_yearly_chart_data(year: int = None, store: str = None, username: str = Depends(verify_gestor)):
-    """Get monthly sales data for a specific year, optionally filtered by store."""
-    # Use Brazil timezone (Mogi das Cruzes, SP)
-    brazil_tz = pytz.timezone('America/Sao_Paulo')
-    now_brazil = datetime.now(brazil_tz)
-    target_year = year if year else now_brazil.year
+    """Annual RECEIVED revenue, not the face value of unpaid prazo sales.
 
-    # Create year start/end in Brazil timezone
-    year_start_brazil = brazil_tz.localize(datetime(target_year, 1, 1))
-    year_end_brazil = brazil_tz.localize(datetime(target_year + 1, 1, 1))
+    Components: paid orders + valid manual PIX adjustments + received prazo
+    payments/partial payments + report-only historical paid-sale totals.
+    Counts mean paid orders, not additional settlement transactions.
+    """
+    brazil_tz = pytz.timezone("America/Sao_Paulo")
+    target_year = year or datetime.now(brazil_tz).year
+    year_start = brazil_tz.localize(datetime(target_year, 1, 1)).astimezone(pytz.UTC)
+    year_end = brazil_tz.localize(datetime(target_year + 1, 1, 1)).astimezone(pytz.UTC)
+    window = {"$gte": year_start.isoformat(), "$lt": year_end.isoformat()}
+    store_clause = {"store": store} if store and store != "all" else {}
 
-    # Convert to UTC for database query
-    year_start_utc = year_start_brazil.astimezone(pytz.UTC)
-    year_end_utc = year_end_brazil.astimezone(pytz.UTC)
-
-    # Build query
-    orders_query = {
+    paid_orders_query = {
+        **store_clause,
         "status": {"$in": ["ready", "delivered", "received"]},
-        "created_at": {"$gte": year_start_utc.isoformat(), "$lt": year_end_utc.isoformat()}
+        "payment_method": {"$ne": "prazo"},
+        "created_at": window,
     }
-    if store and store != "all":
-        orders_query["store"] = store
-
-    # Get all completed orders this year
-    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "store": 1, "payment_method": 1}).to_list(100000)
-    
-    # Group by month (in Brazil timezone)
+    pix_query = {**store_clause, "removed": {"$ne": True}, "created_at": window}
+    payment_query = {**store_clause, "created_at": window}
+    paid_orders, pix_adjustments, paid_prazo, partial_prazo = await asyncio.gather(
+        db.orders.find(paid_orders_query, {"_id": 0, "created_at": 1, "total": 1, "store": 1}).to_list(100000),
+        db.pix_adjustments.find(pix_query, {"_id": 0, "created_at": 1, "amount": 1, "store": 1}).to_list(100000),
+        db.prazo_payments.find(payment_query, {"_id": 0, "created_at": 1, "amount": 1, "store": 1}).to_list(100000),
+        db.prazo_partial_payments.find(payment_query, {"_id": 0, "created_at": 1, "amount": 1, "store": 1}).to_list(100000),
+    )
     month_names = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"]
-    monthly_data = {}
-    for month in range(1, 13):
-        monthly_data[month] = {"month": month, "month_name": month_names[month-1], "total": 0, "count": 0}
-    
-    for order in orders:
-        if order.get("payment_method") == "prazo":
-            continue
-        try:
-            order_time = datetime.fromisoformat(order.get("created_at", "").replace("Z", "+00:00"))
-            # Convert to Brazil timezone to get correct month
-            order_time_brazil = order_time.astimezone(brazil_tz)
-            month = order_time_brazil.month
-            monthly_data[month]["total"] += order.get("total", 0)
-            monthly_data[month]["count"] += 1
-        except:
-            pass
-    
-    for month in range(1, 13):
-        archive_revenue, archive_orders = archived_month(target_year, month, store)
-        monthly_data[month]["total"] += archive_revenue
-        monthly_data[month]["count"] += archive_orders
+    monthly_data = {
+        m: {
+            "month": m, "month_name": month_names[m - 1],
+            "total": 0.0, "count": 0,
+            "paid_order_revenue": 0.0, "pix_adjustments": 0.0,
+            "prazo_received": 0.0, "historical_report": 0.0,
+            "settlement_count": 0,
+        }
+        for m in range(1, 13)
+    }
 
-    # Convert to sorted list
-    chart_data = sorted(monthly_data.values(), key=lambda x: x["month"])
-    
+    def add_entry(entry, amount_key, component, is_order=False):
+        dt = _ganoh_recovery_live_entry(entry.get("created_at"), brazil_tz)
+        if dt is None or dt.year != target_year:
+            return
+        amount = float(entry.get(amount_key) or 0)
+        bucket = monthly_data[dt.month]
+        bucket["total"] += amount
+        bucket[component] += amount
+        if is_order:
+            bucket["count"] += 1
+        else:
+            bucket["settlement_count"] += 1
+
+    for entry in paid_orders:
+        add_entry(entry, "total", "paid_order_revenue", True)
+    for entry in pix_adjustments:
+        add_entry(entry, "amount", "pix_adjustments")
+    for entry in paid_prazo + partial_prazo:
+        add_entry(entry, "amount", "prazo_received")
+
+    for month in range(1, 13):
+        value, count = archived_month(target_year, month, store)
+        bucket = monthly_data[month]
+        bucket["total"] += value
+        bucket["count"] += count
+        bucket["historical_report"] = value
+
+    chart_data = [monthly_data[m] for m in range(1, 13)]
+    for bucket in chart_data:
+        for key in ("total", "paid_order_revenue", "pix_adjustments",
+                    "prazo_received", "historical_report"):
+            bucket[key] = round(bucket[key], 2)
+
     return {
         "year": target_year,
         "data": chart_data,
-        "archived_monthly_only": archived_month(target_year, 9, store)[1] > 0,
-        "total_year": sum(d["total"] for d in chart_data),
-        "total_orders": sum(d["count"] for d in chart_data)
+        "store_filter": store or "all",
+        "archived_monthly_only": any(b["historical_report"] > 0 for b in chart_data),
+        "total_year": round(sum(b["total"] for b in chart_data), 2),
+        "total_orders": sum(b["count"] for b in chart_data),
+        "total_settlements": sum(b["settlement_count"] for b in chart_data),
+        "components": {
+            "paid_orders": round(sum(b["paid_order_revenue"] for b in chart_data), 2),
+            "manual_pix": round(sum(b["pix_adjustments"] for b in chart_data), 2),
+            "prazo_received": round(sum(b["prazo_received"] for b in chart_data), 2),
+            "historical_report": round(sum(b["historical_report"] for b in chart_data), 2),
+        },
     }
+
 
 @api_router.get("/gestor/chart/weekly")
 async def get_weekly_chart_data(date: str = None, store: str = None, username: str = Depends(verify_gestor)):
@@ -5513,10 +5572,16 @@ async def get_financial_summary(username: str = Depends(verify_gestor)):
         return bool(dt and start <= dt < end)
 
     def summarize(start, end, archive_months=(), coverage_complete=True, coverage_note=None):
-        live_orders = [o for o in orders if in_window(o, start, end)]
+        # The PDF-only period predates the live sales ledger. Do not double
+        # count any imported/backdated paid rows already covered by the report.
+        def in_live_window(row):
+            return in_window(row, start, end) and bool(
+                _ganoh_recovery_live_entry(row.get("created_at"), brazil_tz)
+            )
+        live_orders = [o for o in orders if in_live_window(o)]
         live_expenses = [e for e in expenses if in_window(e, start, end)]
-        live_pix = [p for p in pix_adjustments if in_window(p, start, end)]
-        live_prazo = [p for p in (prazo_full + prazo_partial) if in_window(p, start, end)]
+        live_pix = [p for p in pix_adjustments if in_live_window(p)]
+        live_prazo = [p for p in (prazo_full + prazo_partial) if in_live_window(p)]
 
         archive_revenue = 0
         archive_orders = 0
@@ -5893,30 +5958,28 @@ async def get_yearly_chart_with_expenses(year: int = None, store: str = None, us
             "order_count": 0
         }
 
-    def _brazil_month(iso_str):
-        try:
-            dt = datetime.fromisoformat((iso_str or "").replace("Z", "+00:00"))
-            return dt.astimezone(brazil_tz).month
-        except Exception:
-            return None
+    def _brazil_month(iso_str, apply_recovery_cutoff=False):
+        dt = (_ganoh_recovery_live_entry(iso_str, brazil_tz)
+              if apply_recovery_cutoff else _ganoh_chart_local_date(iso_str, brazil_tz))
+        return dt.month if dt and dt.year == target_year else None
 
     for order in orders:
         if order.get("payment_method") == "prazo":
             continue
-        month = _brazil_month(order.get("created_at", ""))
+        month = _brazil_month(order.get("created_at", ""), True)
         if month is None:
             continue
         monthly_data[month]["revenue"] += order.get("total", 0)
         monthly_data[month]["order_count"] += 1
 
     for adj in pix_adjustments:
-        month = _brazil_month(adj.get("created_at", ""))
+        month = _brazil_month(adj.get("created_at", ""), True)
         if month is None:
             continue
         monthly_data[month]["revenue"] += adj.get("amount", 0)
 
     for payment in all_prazo_payments:
-        month = _brazil_month(payment.get("created_at", ""))
+        month = _brazil_month(payment.get("created_at", ""), True)
         if month is None:
             continue
         monthly_data[month]["revenue"] += payment.get("amount", 0)
