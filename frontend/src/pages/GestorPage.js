@@ -1747,7 +1747,7 @@ export const GestorPage = () => {
                   {chartPeriod === 'day' ? 'Vendas do Dia' :
                    chartPeriod === 'week' ? 'Vendas da Semana' :
                    chartPeriod === 'month' ? 'Vendas do Mês' :
-                   'Vendas do Ano'}
+                   'Recebimentos do Ano'}
                 </div>
                 <div className="gx-seg">
                   <button className={`gx-seg-btn ${chartPeriod === 'day' ? 'active' : ''}`} onClick={() => { setChartPeriod('day'); fetchChartData('day'); }} data-testid="chart-period-day">Dia</button>
@@ -1868,6 +1868,23 @@ export const GestorPage = () => {
                         Histórico recuperado do relatório: vendas pagas antigas disponíveis por mês. As barras diárias mostram apenas vendas registradas no banco novo.
                       </p>
                     )}
+                    {chartPeriod === 'year' && chartData.components && (
+                      <div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="annual-revenue-breakdown">
+                        {[
+                          ['Vendas recebidas', chartData.components.paid_orders],
+                          ['PIX adicionados', chartData.components.manual_pix],
+                          ['Prazo recebido', chartData.components.prazo_received],
+                          ['Histórico recuperado (PDF)', chartData.components.historical_report],
+                        ].map(([label, value]) => (
+                          <div key={label} className="gx-row" style={{ display: 'block', padding: '10px 12px' }}>
+                            <div className="text-[11px]" style={{ color: 'var(--gx-mute)' }}>{label}</div>
+                            <div className="text-sm font-semibold mt-1" style={{ color: 'var(--gx-ink)' }}>
+                              {formatPrice(value)}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {/* Sales chart — responsive and readable */}
                     <div className="gx-chart-shell overflow-x-auto" style={{ height: 300 }}>
                       <div style={{ minWidth: chartPeriod === 'month' ? 820 : chartPeriod === 'day' ? 760 : 620, height: 280 }}>
@@ -1940,7 +1957,7 @@ export const GestorPage = () => {
                       <div className="gx-kpi" style={{ padding: '14px 16px' }}>
                         <div className="gx-kpi-label" style={{ fontSize: 9.5, letterSpacing: 2 }}>
                           <span className="gx-kpi-icon cyan" style={{ height: 24, width: 24 }}><ShoppingBag className="h-3 w-3" /></span>
-                          Pedidos
+                          Pedidos pagos
                         </div>
                         <div className="gx-kpi-value cyan" style={{ marginTop: 8, fontSize: 22 }}>{chartData.total_orders}</div>
                       </div>
