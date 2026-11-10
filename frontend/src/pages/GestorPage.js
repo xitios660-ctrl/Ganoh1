@@ -1759,6 +1759,16 @@ export const GestorPage = () => {
               <div className="gx-card-body">
                 {/* Period Selectors */}
                 <div className="flex gap-2 mb-4 flex-wrap items-center">
+                  <Select value={chartStoreFilter} onValueChange={setChartStoreFilter}>
+                    <SelectTrigger className="w-44" data-testid="chart-store-filter">
+                      <SelectValue placeholder="Escolha a unidade" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas as unidades</SelectItem>
+                      <SelectItem value="runner">Runner</SelectItem>
+                      <SelectItem value="gym-londres">GYM Londres</SelectItem>
+                    </SelectContent>
+                  </Select>
                   {(chartPeriod === 'day' || chartPeriod === 'week') && (
                     <>
                       <Input
@@ -1772,19 +1782,7 @@ export const GestorPage = () => {
                         style={{ width: 180 }}
                         data-testid="chart-date-input"
                       />
-                      <Select
-                        value={chartStoreFilter}
-                        onValueChange={setChartStoreFilter}
-                      >
-                        <SelectTrigger className="w-36" data-testid="chart-store-filter">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">Todas Lojas</SelectItem>
-                          <SelectItem value="runner">🏃 Runner</SelectItem>
-                          <SelectItem value="gym-londres">🏋️ GYM Londres</SelectItem>
-                        </SelectContent>
-                      </Select>
+
                     </>
                   )}
                   {chartPeriod === 'month' && (
