@@ -1866,6 +1866,45 @@ export const GestorPage = () => {
                         Histórico recuperado do relatório: vendas pagas antigas disponíveis por mês. As barras diárias mostram apenas vendas registradas no banco novo.
                       </p>
                     )}
+                    {chartPeriod === 'month' && chartData.components && (
+                      <div className="mb-4" data-testid="monthly-receipts-audit">
+                        <p className="text-xs mb-3" style={{ color: 'var(--gx-mute)' }}>
+                          Recebimentos brutos registrados no Ganoh para {chartStoreFilter === 'gym-londres' ? 'GYM Londres' : chartStoreFilter === 'runner' ? 'Runner' : 'todas as unidades'}.
+                          Não representam, necessariamente, os depósitos do banco.
+                        </p>
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                          {[
+                            ['Vendas de pedidos', chartData.components.paid_orders],
+                            ['PIX manuais', chartData.components.manual_pix],
+                            ['Pagamentos a prazo', chartData.components.prazo_received],
+                            ['Histórico do relatório', chartData.components.historical_report],
+                          ].map(([label, value]) => (
+                            <div className="gx-row" key={label} style={{ display: 'block', padding: '10px 12px' }}>
+                              <div className="text-[11px]" style={{ color: 'var(--gx-mute)' }}>{label}</div>
+                              <div className="text-sm font-semibold mt-1" style={{ color: 'var(--gx-ink)' }}>{formatPrice(value)}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mt-2">
+                          {[
+                            ['PIX registrados', chartData.by_payment?.pix],
+                            ['Débito bruto', chartData.by_payment?.debito],
+                            ['Crédito bruto', chartData.by_payment?.credito],
+                            ['Dinheiro', chartData.by_payment?.dinheiro],
+                            ['Vale', chartData.by_payment?.voucher],
+                            ['Outros', chartData.by_payment?.outros]
+                          ].map(([label, value]) => (
+                            <div key={label} className="text-xs" style={{ color: 'var(--gx-mute)' }}>
+                              {label}: <strong style={{ color: 'var(--gx-ink)' }}>{formatPrice(value || 0)}</strong>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-xs mt-3" style={{ color: 'var(--gx-mute)' }}>
+                          PIX inseridos manualmente podem já constar em pedidos. Cartão pode cair em outra data e com taxas.
+                          Compare cada forma de pagamento com o extrato antes de considerar o valor conciliado.
+                        </p>
+                      </div>
+                    )}
                     {chartPeriod === 'year' && chartData.components && (
                       <div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-2" data-testid="annual-revenue-breakdown">
                         {[
@@ -1955,10 +1994,17 @@ export const GestorPage = () => {
                       <div className="gx-kpi" style={{ padding: '14px 16px' }}>
                         <div className="gx-kpi-label" style={{ fontSize: 9.5, letterSpacing: 2 }}>
                           <span className="gx-kpi-icon cyan" style={{ height: 24, width: 24 }}><ShoppingBag className="h-3 w-3" /></span>
-                          Pedidos pagos
+                          {chartPeriod === 'month' ? 'Pedidos registrados como pagos' : 'Pedidos pagos'}
                         </div>
                         <div className="gx-kpi-value cyan" style={{ marginTop: 8, fontSize: 22 }}>{chartData.total_orders}</div>
                       </div>
+                      {chartPeriod === 'month' && Number.isFinite(chartData.total_settlements) && (
+                        <div className="gx-kpi" style={{ padding: '14px 16px' }}>
+                          <div className="gx-kpi-label" style={{ fontSize: 9.5, letterSpacing: 2 }}>Acertos financeiros</div>
+                          <div className="gx-kpi-value" style={{ fontSize: 22 }}>{chartData.total_settlements}</div>
+                          <div className="text-xs" style={{ color: 'var(--gx-mute)' }}>PIX manuais e pagamentos de contas a prazo; não são novos pedidos</div>
+                        </div>
+                      )}
                       {chartData.by_store && (
                         <>
                           <div className="gx-kpi" style={{ padding: '14px 16px' }}>
