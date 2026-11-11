@@ -2630,211 +2630,184 @@ def _ganoh_recovery_live_entry(value, tz):
 
 @api_router.get("/gestor/chart/monthly")
 async def get_monthly_chart_data(month: int = None, year: int = None, store: str = None, username: str = Depends(verify_gestor)):
-    """Get daily sales data for a specific month for chart visualization.
-    Optionally filtered by `store` (runner / gym-londres). When `store` is
-    omitted or 'all', sums both stores."""
-    # Use Brazil timezone (Mogi das Cruzes, SP)
-    brazil_tz = pytz.timezone('America/Sao_Paulo')
-    now_brazil = datetime.now(brazil_tz)
+    """Read-only, timezone-accurate monthly RECEIPTS summary.
 
-    # Use provided month/year or current
-    target_month = month if month else now_brazil.month
-    target_year = year if year else now_brazil.year
-
-    # Create month start/end in Brazil timezone
-    month_start_brazil = brazil_tz.localize(datetime(target_year, target_month, 1))
-
-    # Calculate month end
-    if target_month == 12:
-        month_end_brazil = brazil_tz.localize(datetime(target_year + 1, 1, 1))
-    else:
-        month_end_brazil = brazil_tz.localize(datetime(target_year, target_month + 1, 1))
-
-    # Convert to UTC for database query
-    month_start_utc = month_start_brazil.astimezone(pytz.UTC)
-    month_end_utc = month_end_brazil.astimezone(pytz.UTC)
-
-    # Build orders query
-    orders_query = {
-        "status": {"$in": ["ready", "delivered", "received"]},
-        "created_at": {"$gte": month_start_utc.isoformat(), "$lt": month_end_utc.isoformat()},
-    }
-    if store and store != "all":
-        orders_query["store"] = store
-
-    # Get all completed orders this month
-    orders = await db.orders.find(orders_query, {"_id": 0, "created_at": 1, "total": 1, "store": 1, "payment_method": 1}).to_list(10000)
-    
-    # Get number of days in month
+    Separates completed paid sales, manual PIX entries, prazo settlements and
+    report-only imported history. Counts represent orders, not settlement
+    transactions. These values are NOT verified bank deposits.
+    """
     import calendar
-    days_in_month = calendar.monthrange(target_year, target_month)[1]
-    
-    # Payment methods breakdown (sem prazo)
-    by_payment = {"pix": 0, "debit": 0, "credit": 0, "cash": 0, "voucher": 0}
+    import math
+    brazil_tz = pytz.timezone("America/Sao_Paulo")
+    today = datetime.now(brazil_tz)
+    target_month = int(month or today.month)
+    target_year = int(year or today.year)
+    if not 1 <= target_month <= 12 or not 2000 <= target_year <= 2100:
+        raise HTTPException(status_code=400, detail="Mês ou ano inválido")
+    if store not in (None, "", "all", "runner", "gym-londres"):
+        raise HTTPException(status_code=400, detail="Unidade inválida")
 
-    # PIX adjustment / Prazo payment queries use UTC range for safety since
-    # records were stored with mixed timezone formats over time.
+    chosen_store = store if store in ("runner", "gym-londres") else None
+    start_local = brazil_tz.localize(datetime(target_year, target_month, 1))
+    end_local = brazil_tz.localize(
+        datetime(target_year + (1 if target_month == 12 else 0),
+                 1 if target_month == 12 else target_month + 1, 1)
+    )
+    # Legacy data uses UTC (+00:00 or Z), local offsets, and sometimes naive
+    # ISO strings. Widen the DB query then use one normalized local date
+    # check for all data sources, so period boundaries are not dropped.
+    padded_range = {
+        "$gte": (start_local - timedelta(days=2)).date().isoformat(),
+        "$lt": (end_local + timedelta(days=2)).date().isoformat(),
+    }
+    store_query = {"store": chosen_store} if chosen_store else {}
+    paid_query = {
+        **store_query,
+        "created_at": padded_range,
+        "status": {"$in": ["ready", "delivered", "received"]},
+        "payment_method": {"$ne": "prazo"},
+    }
     pix_query = {
+        **store_query,
+        "created_at": padded_range,
         "removed": {"$ne": True},
-        "created_at": {"$gte": month_start_utc.isoformat(), "$lt": month_end_utc.isoformat()}
     }
-    if store and store != "all":
-        pix_query["store"] = store
-    pix_adjustments = await db.pix_adjustments.find(pix_query, {"_id": 0}).to_list(10000)
+    settlement_query = {**store_query, "created_at": padded_range}
+    orders, manual_pix, full_payments, partial_payments = await asyncio.gather(
+        db.orders.find(paid_query, {"_id": 0, "created_at": 1, "total": 1,
+                                    "store": 1, "payment_method": 1, "id": 1}).to_list(100000),
+        db.pix_adjustments.find(pix_query, {"_id": 0, "created_at": 1,
+                                            "amount": 1, "store": 1}).to_list(100000),
+        db.prazo_payments.find(settlement_query, {"_id": 0, "created_at": 1,
+                                                  "amount": 1, "store": 1,
+                                                  "payment_method": 1}).to_list(100000),
+        db.prazo_partial_payments.find(settlement_query, {"_id": 0, "created_at": 1,
+                                                          "amount": 1, "store": 1,
+                                                          "payment_method": 1}).to_list(100000),
+    )
 
-    prazo_query = {
-        "created_at": {"$gte": month_start_utc.isoformat(), "$lt": month_end_utc.isoformat()}
-    }
-    if store and store != "all":
-        prazo_query["store"] = store
-    prazo_payments = await db.prazo_payments.find(prazo_query, {"_id": 0}).to_list(10000)
-    prazo_partial_payments = await db.prazo_partial_payments.find(prazo_query, {"_id": 0}).to_list(10000)
-    
-    # Combine prazo payments
-    all_prazo_payments = prazo_payments + prazo_partial_payments
-    
-    # Group PIX adjustments by day and store (use Brazil timezone to align days)
-    pix_by_day = {}
-    pix_total_runner = 0
-    pix_total_gym = 0
-    for adj in pix_adjustments:
-        try:
-            adj_time = datetime.fromisoformat(adj.get("created_at", "").replace("Z", "+00:00"))
-            adj_time_brazil = adj_time.astimezone(brazil_tz)
-            adj_date = adj_time_brazil.strftime("%Y-%m-%d")
-            adj_store = adj.get("store", "")
-            adj_amount = adj.get("amount", 0)
-
-            if adj_date not in pix_by_day:
-                pix_by_day[adj_date] = {"total": 0, "runner": 0, "gym_londres": 0}
-            pix_by_day[adj_date]["total"] += adj_amount
-
-            if adj_store == "runner":
-                pix_by_day[adj_date]["runner"] += adj_amount
-                pix_total_runner += adj_amount
-            elif adj_store == "gym-londres":
-                pix_by_day[adj_date]["gym_londres"] += adj_amount
-                pix_total_gym += adj_amount
-
-            by_payment["pix"] += adj_amount
-        except Exception:
-            pass
-    
-    # Group by day (in Brazil timezone) - with store separation
+    days = calendar.monthrange(target_year, target_month)[1]
     daily_data = {}
-    for i in range(days_in_month):
-        day_date = month_start_brazil + timedelta(days=i)
-        day_str = day_date.strftime("%Y-%m-%d")
-        daily_data[day_str] = {
-            "date": day_str, 
-            "day": i + 1, 
-            "total": 0, 
-            "count": 0,
-            "runner": 0,
-            "runner_count": 0,
-            "gym_londres": 0,
-            "gym_londres_count": 0
+    for day in range(1, days + 1):
+        key = f"{target_year:04d}-{target_month:02d}-{day:02d}"
+        daily_data[key] = {
+            "date": key, "day": day,
+            "total": 0.0, "count": 0, "settlement_count": 0,
+            "runner": 0.0, "runner_count": 0,
+            "gym_londres": 0.0, "gym_londres_count": 0,
         }
-    
-    for order in orders:
-        try:
-            order_time = datetime.fromisoformat(order.get("created_at", "").replace("Z", "+00:00"))
-            # Convert to Brazil timezone to get correct day
-            order_time_brazil = order_time.astimezone(brazil_tz)
-            date = order_time_brazil.strftime("%Y-%m-%d")
-            store = order.get("store", "")
-            order_total = order.get("total", 0)
-            payment_method = order.get("payment_method", "cash")
-            
-            # Prazo não soma nas vendas/gráficos
-            if payment_method == "prazo":
-                continue
-            
-            # Count by payment method
-            by_payment[payment_method] = by_payment.get(payment_method, 0) + order_total
-            
-            if date in daily_data:
-                daily_data[date]["total"] += order_total
-                daily_data[date]["count"] += 1
-                
-                # Separate by store
-                if store == "runner":
-                    daily_data[date]["runner"] += order_total
-                    daily_data[date]["runner_count"] += 1
-                elif store == "gym-londres":
-                    daily_data[date]["gym_londres"] += order_total
-                    daily_data[date]["gym_londres_count"] += 1
-        except:
-            pass
+    components = {
+        "paid_orders": 0.0, "manual_pix": 0.0,
+        "prazo_received": 0.0, "historical_report": 0.0,
+    }
+    payment_breakdown = {
+        "pix": 0.0, "debit": 0.0, "credit": 0.0,
+        "cash": 0.0, "voucher": 0.0, "other": 0.0,
+    }
+    unknown_payment_methods = set()
 
-    # Add PIX adjustments to daily totals
-    for day_str, pix_data in pix_by_day.items():
-        if day_str in daily_data:
-            daily_data[day_str]["total"] += pix_data["total"]
-            daily_data[day_str]["runner"] += pix_data["runner"]
-            daily_data[day_str]["gym_londres"] += pix_data["gym_londres"]
-    
-    # Add prazo payments to daily totals and payment method breakdown
-    for payment in all_prazo_payments:
+    def payment_key(method):
+        name = str(method or "cash").strip().lower()
+        mapping = {
+            "pix": "pix",
+            "debito": "debit", "débito": "debit", "debit": "debit",
+            "credito": "credit", "crédito": "credit", "credit": "credit",
+            "cash": "cash", "dinheiro": "cash",
+            "voucher": "voucher", "vale": "voucher",
+        }
+        if name not in mapping:
+            unknown_payment_methods.add(name)
+        return mapping.get(name, "other")
+
+    def place(row, source, is_order=False):
+        date = _ganoh_recovery_live_entry(row.get("created_at"), brazil_tz)
+        if date is None or not (start_local <= date < end_local):
+            return
+        amount_field = "total" if is_order else "amount"
         try:
-            payment_time = datetime.fromisoformat(payment.get("created_at", "").replace("Z", "+00:00"))
-            payment_time_brazil = payment_time.astimezone(brazil_tz)
-            date = payment_time_brazil.strftime("%Y-%m-%d")
-            store = payment.get("store", "runner")
-            amount = payment.get("amount", 0)
-            payment_method = payment.get("payment_method", "cash")
-            
-            # Add to payment method totals
-            by_payment[payment_method] = by_payment.get(payment_method, 0) + amount
-            
-            if date in daily_data:
-                daily_data[date]["total"] += amount
-                daily_data[date]["count"] += 1  # Count as a transaction
-                
-                if store == "runner":
-                    daily_data[date]["runner"] += amount
-                    daily_data[date]["runner_count"] += 1
-                elif store == "gym-londres":
-                    daily_data[date]["gym_londres"] += amount
-                    daily_data[date]["gym_londres_count"] += 1
-        except:
-            pass
-    
-    # Convert to sorted list
-    chart_data = sorted(daily_data.values(), key=lambda x: x["date"])
-    
-    month_names = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", 
+            amount = float(row.get(amount_field) or 0)
+        except (ValueError, TypeError):
+            return
+        if not math.isfinite(amount):
+            return
+        unit = row.get("store")
+        # Do not assign legacy untagged receipts to a unit by guessing.
+        if unit not in ("runner", "gym-londres"):
+            return
+        bucket = daily_data[date.strftime("%Y-%m-%d")]
+        bucket["total"] += amount
+        bucket[unit.replace("-", "_")] += amount
+        components[source] += amount
+        if is_order:
+            bucket["count"] += 1
+            bucket[f"{unit.replace('-', '_')}_count"] += 1
+        else:
+            bucket["settlement_count"] += 1
+        method = "pix" if source == "manual_pix" else payment_key(row.get("payment_method"))
+        payment_breakdown[method] += amount
+
+    for order in orders:
+        place(order, "paid_orders", True)
+    for item in manual_pix:
+        place(item, "manual_pix")
+    for item in full_payments + partial_payments:
+        place(item, "prazo_received")
+
+    archived_total, archived_count = archived_month(target_year, target_month, chosen_store)
+    components["historical_report"] = archived_total
+    archive_runner, archive_runner_count = (
+        archived_month(target_year, target_month, "runner")
+        if not chosen_store or chosen_store == "runner" else (0, 0)
+    )
+    archive_gym, archive_gym_count = (
+        archived_month(target_year, target_month, "gym-londres")
+        if not chosen_store or chosen_store == "gym-londres" else (0, 0)
+    )
+    chart_data = [daily_data[key] for key in sorted(daily_data)]
+    total_live = sum(day["total"] for day in chart_data)
+    order_count = sum(day["count"] for day in chart_data)
+    settlement_count = sum(day["settlement_count"] for day in chart_data)
+    for day in chart_data:
+        for key in ("total", "runner", "gym_londres"):
+            day[key] = round(day[key], 2)
+    month_names = ["", "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
                    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
-    
-    # Calculate totals by store (including PIX adjustments)
-    total_runner = sum(d["runner"] for d in chart_data)
-    total_gym = sum(d["gym_londres"] for d in chart_data)
-    archived_total, archived_count = archived_month(target_year, target_month, store)
-    archived_runner, archived_runner_count = archived_month(target_year, target_month, 'runner') if store in (None, 'all', 'runner') else (0, 0)
-    archived_gym, archived_gym_count = archived_month(target_year, target_month, 'gym-londres') if store in (None, 'all', 'gym-londres') else (0, 0)
-    
+
     return {
         "month": f"{month_names[target_month]} {target_year}",
-        "month_num": target_month,
-        "year": target_year,
-        "store_filter": store or "all",
-        "data": chart_data,
-        "total_month": sum(d["total"] for d in chart_data) + archived_total,
-        "total_orders": sum(d["count"] for d in chart_data) + archived_count,
-        "archived_month_revenue": archived_total,
+        "month_num": target_month, "year": target_year,
+        "store_filter": chosen_store or "all", "data": chart_data,
+        "total_month": round(total_live + archived_total, 2),
+        "total_orders": order_count + archived_count,
+        "total_settlements": settlement_count,
+        "archived_month_revenue": round(archived_total, 2),
         "archived_month_orders": archived_count,
+        "components": {key: round(value, 2) for key, value in components.items()},
         "by_store": {
-            "runner": {"total": total_runner + archived_runner, "orders": sum(d["runner_count"] for d in chart_data) + archived_runner_count},
-            "gym_londres": {"total": total_gym + archived_gym, "orders": sum(d["gym_londres_count"] for d in chart_data) + archived_gym_count}
+            "runner": {
+                "total": round(sum(d["runner"] for d in chart_data) + archive_runner, 2),
+                "orders": sum(d["runner_count"] for d in chart_data) + archive_runner_count,
+            },
+            "gym_londres": {
+                "total": round(sum(d["gym_londres"] for d in chart_data) + archive_gym, 2),
+                "orders": sum(d["gym_londres_count"] for d in chart_data) + archive_gym_count,
+            },
         },
         "by_payment": {
-            "pix": round(by_payment.get("pix", 0), 2),
-            "debito": round(by_payment.get("debit", 0), 2),
-            "credito": round(by_payment.get("credit", 0), 2),
-            "dinheiro": round(by_payment.get("cash", 0), 2),
-            "voucher": round(by_payment.get("voucher", 0), 2)
-        }
+            "pix": round(payment_breakdown["pix"], 2),
+            "debito": round(payment_breakdown["debit"], 2),
+            "credito": round(payment_breakdown["credit"], 2),
+            "dinheiro": round(payment_breakdown["cash"], 2),
+            "voucher": round(payment_breakdown["voucher"], 2),
+            "outros": round(payment_breakdown["other"], 2),
+        },
+        "unknown_payment_methods": sorted(unknown_payment_methods),
+        "note": ("Recebimentos brutos registrados no Ganoh, não depósitos conciliados. "
+                 "PIX manuais podem repetir vendas já cadastradas; "
+                 "cartão pode liquidar em outro dia e com taxas. "
+                 "Valores históricos do PDF não são transações bancárias."),
     }
+
 
 @api_router.get("/gestor/chart/daily")
 async def get_daily_chart_data(date: str = None, store: str = None, username: str = Depends(verify_gestor)):
