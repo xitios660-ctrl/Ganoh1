@@ -18,9 +18,8 @@ def outstanding(db):
 
 
 def project(db):
-    if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='catalog'").fetchone():
-        return []
-    entries = {r['sku']: json.loads(r['data']) for r in db.execute('SELECT * FROM catalog')}
+    has_catalog=db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='catalog'").fetchone() is not None
+    entries = {r['sku']: json.loads(r['data']) for r in db.execute('SELECT * FROM catalog')} if has_catalog else {}
     for entry in entries.values():
         entry.update(central_quantity=entry['quantity'], central_version=entry['version'], blocked=False)
     for _, payload, state in outstanding(db):

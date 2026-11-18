@@ -64,6 +64,9 @@ class LocalTests(unittest.TestCase):
         with TestClient(create_local_app(reopened, TOKEN, Transport(), interval=100)) as client:
             self.assertEqual(client.post('/api/local/sales', headers=HEADERS, json=body).json()['already_exists'], True)
             client.post('/api/local/sync', headers=HEADERS)
+            import time
+            deadline=time.monotonic()+5
+            while client.get('/api/local/status',headers=HEADERS).json()['synced']!=1 and time.monotonic()<deadline:time.sleep(.01)
             self.assertEqual(client.get('/api/local/status', headers=HEADERS).json()['synced'], 1)
             self.assertEqual(len(client.get('/api/local/sales', headers=HEADERS).json()['items']), 1)
             changed = {**body, 'items': [{'sku': 'lanche', 'quantity': 2}]}

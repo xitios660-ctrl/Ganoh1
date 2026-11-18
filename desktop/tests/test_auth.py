@@ -63,3 +63,17 @@ class AuthTests(unittest.TestCase):
             row=db.execute('SELECT * FROM event_actors WHERE operation_id=?',(operation,)).fetchone()
             self.assertEqual(row['role'],'owner')
         self.assertTrue(self.api.post('/api/local/commerce',json=body).json()['already_exists'])
+
+    def test_owner_disables_staff_and_cannot_remove_last_owner(self):
+        self.api.post('/api/local/auth/setup',json=self.owner)
+        owner_id=self.api.get('/api/local/auth').json()['actor']['actor_id']
+        staff={'username':'disable-staff','password':'Staff-Password-Fixture-2026','role':'cashier'}
+        actor_id=self.api.post('/api/local/auth/accounts',json=staff).json()['actor_id']
+        old=auth.login(self.journal,staff['username'],staff['password'])
+        self.assertEqual(self.api.post(f'/api/local/auth/accounts/{actor_id}/disable',json={}).status_code,200)
+        self.assertIsNone(auth.actor(self.journal,old))
+        with self.assertRaises(auth.AuthError):auth.login(self.journal,staff['username'],staff['password'])
+        self.assertEqual(self.api.post(f'/api/local/auth/accounts/{owner_id}/disable',json={}).status_code,409)
+        new='Fresh-Staff-Fixture-Password-2026'
+        self.assertEqual(self.api.post(f'/api/local/auth/accounts/{actor_id}/activate',json={'password':new}).status_code,200)
+        self.assertIsNotNone(auth.login(self.journal,staff['username'],new))

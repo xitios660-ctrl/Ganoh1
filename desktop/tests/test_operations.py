@@ -115,3 +115,24 @@ class OperationalTests(unittest.TestCase):
         self.assertTrue(row['reconcile_operation_id'])
         self.event('cash.open',shift_id=str(uuid.uuid4()),counted_cents=90)
         self.assertEqual(summary(self.journal)['cash_cents'],90)
+
+    def test_sale_does_not_wait_for_slow_sync_network(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        blocked=threading.Event();release=threading.Event()
+        saved=self.sale('before-network')
+        class SlowTransport:
+            def __call__(inner,item):
+                blocked.set();release.wait(10)
+                return {**{k:item[k] for k in ('unit','operation_id','fingerprint')},'status':'applied','receipt_id':'slow-receipt'}
+            def snapshot(inner,current):
+                return {'unit':'runner','generation':'slow','done':True,'next_cursor':None,'items':[{'sku':'lanche','quantity':4,'price_cents':100,'version':2}],
+                        'covered_operations':[{'operation_id':saved['operation_id'],'fingerprint':saved['fingerprint']}]}
+        token='x'*40;headers={'Authorization':'Bearer '+token}
+        with TestClient(create_local_app(self.journal,token,SlowTransport(),interval=100)) as api:
+            self.assertTrue(blocked.wait(2))
+            try:
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    job=pool.submit(lambda:api.post('/api/local/sales',headers=headers,json={'operation_id':str(uuid.uuid4()),'sale_id':'during-network','items':[{'sku':'lanche','quantity':1}]}))
+                    self.assertEqual(job.result(timeout=2).status_code,200)
+            finally:release.set()

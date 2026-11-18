@@ -92,6 +92,7 @@ def apply_page(journal, page, expected_cursor):
 def catalog(journal, *, projected=True):
     initialize(journal)
     with closing(journal._connect()) as db:
+        db.execute('BEGIN')
         if projected:
             from desktop.inventory import project
             return project(db)

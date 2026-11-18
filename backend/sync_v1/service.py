@@ -14,10 +14,14 @@ from desktop.business_rules import KINDS
 from backend.sync_v1.commerce import apply_business, post, cash_guard
 
 
-def create_app(db):
+def create_app(db, *, owner_origins=()):
     # Explicit allowlist: accidental production configuration fails before writes.
     if not db.name.startswith('ganoh_sync_test_'):
         raise ValueError('Only isolated ganoh_sync_test_* databases are permitted')
+    db.owner_stock_snapshots.create_index('expires_at',expireAfterSeconds=0)
+    db.owner_sessions.create_index('token_hash',unique=True)
+    db.owner_sessions.create_index('expires_at',expireAfterSeconds=0)
+    db.reviewers.create_index('username',unique=True,partialFilterExpression={'username':{'$type':'string'}})
     db.cash_shifts.create_index([('unit', 1), ('shift_id', 1)], unique=True)
     db.payment_refs.create_index([('unit', 1), ('reference', 1)], unique=True)
     db.ledger.create_index([('unit', 1), ('operation_id', 1), ('line', 1)], unique=True)
@@ -33,6 +37,14 @@ def create_app(db):
     db.reviewers.create_index('token_hash', unique=True)
     db.snapshots.create_index('expires_at', expireAfterSeconds=0)
     app = FastAPI(title='GANOH isolated sync validation')
+    if owner_origins:
+        from urllib.parse import urlsplit
+        from fastapi.middleware.cors import CORSMiddleware
+        for origin in owner_origins:
+            parsed=urlsplit(origin)
+            if parsed.scheme!='https' or not parsed.hostname or parsed.username or parsed.password or parsed.path not in ('','/') or parsed.query or parsed.fragment:
+                raise ValueError('Owner CORS origins must be explicit HTTPS origins')
+        app.add_middleware(CORSMiddleware,allow_origins=[origin.rstrip('/') for origin in owner_origins],allow_methods=['GET','POST'],allow_headers=['Authorization','Content-Type'])
 
     def apply(device, item):
         payload = item.get('payload', {})
@@ -211,11 +223,9 @@ def create_app(db):
     @app.post('/api/sync/v1/conflicts/review')
     def review(body: dict, authorization: str = Header(default='')):
         # Owner/support credentials are separate from store device credentials.
-        if not authorization.startswith('Bearer '):
-            raise HTTPException(401, 'Reviewer authentication required')
-        reviewer = db.reviewers.find_one({'token_hash': hashlib.sha256(authorization[7:].encode()).hexdigest(), 'revoked': False})
-        if not reviewer:
-            raise HTTPException(401, 'Reviewer authentication required')
+        from backend.sync_v1.owner_auth import resolve
+        reviewer=resolve(db,authorization)
+        if not reviewer: raise HTTPException(401,'Reviewer authentication required')
         unit = body.get('unit')
         if unit not in reviewer.get('units', []):
             raise HTTPException(403, 'Reviewer unit mismatch')
@@ -257,10 +267,23 @@ def create_app(db):
                 if attempt == 2:
                     raise HTTPException(503, 'Retry same review ID')
 
+    @app.post('/api/sync/v1/owner/login')
+    def owner_login(body:dict):
+        from backend.sync_v1.owner_auth import login
+        token=login(db,body.get('username'),body.get('password'))
+        if not token:raise HTTPException(401,'Credenciais inválidas ou acesso temporariamente bloqueado')
+        return {'access_token':token,'token_type':'bearer','expires_in':8*3600}
+
+    @app.post('/api/sync/v1/owner/logout')
+    def owner_logout(authorization:str=Header(default='')):
+        from backend.sync_v1.owner_auth import logout
+        logout(db,authorization)
+        return {'authenticated':False}
+
     @app.get('/api/sync/v1/owner/overview')
     def owner_overview(authorization: str = Header(default='')):
-        if not authorization.startswith('Bearer ') or len(authorization)>1024:raise HTTPException(401,'Owner authentication required')
-        reviewer=db.reviewers.find_one({'token_hash':hashlib.sha256(authorization[7:].encode()).hexdigest(),'revoked':False})
+        from backend.sync_v1.owner_auth import resolve
+        reviewer=resolve(db,authorization)
         if not reviewer:raise HTTPException(401,'Owner authentication required')
         units=sorted(set(reviewer.get('units',[])) & UNITS)
         def collect(session):
@@ -287,6 +310,33 @@ def create_app(db):
                     'includes_unsynced_local_data':False,'legacy_production_integrated':False}
         with db.client.start_session() as session:
             return session.with_transaction(collect,read_concern=ReadConcern('snapshot'),write_concern=WriteConcern('majority'))
+
+    @app.get('/api/sync/v1/owner/stock')
+    def owner_stock(unit:str,cursor:str='',authorization:str=Header(default='')):
+        from backend.sync_v1.owner_auth import resolve
+        reviewer=resolve(db,authorization)
+        if not reviewer:raise HTTPException(401,'Owner authentication required')
+        if unit not in UNITS or unit not in reviewer.get('units',[]):raise HTTPException(403,'Owner unit mismatch')
+        if cursor:
+            try:
+                generation,offset_text=cursor.split(':');offset=int(offset_text)
+                if str(uuid.UUID(generation))!=generation or offset<0 or offset%100:raise ValueError()
+            except (ValueError,TypeError,AttributeError):raise HTTPException(422,'Invalid stock cursor')
+            saved=db.owner_stock_snapshots.find_one({'_id':generation,'unit':unit,'owner_id':reviewer['_id']})
+            if not saved or saved['expires_at'].replace(tzinfo=timezone.utc)<=datetime.now(timezone.utc):raise HTTPException(410,'Owner stock snapshot expired')
+            if offset>=len(saved['items']):raise HTTPException(422,'Stock cursor outside snapshot')
+        else:
+            generation,offset=str(uuid.uuid4()),0
+            def capture(session):
+                items=list(db.stock.find({'unit':unit},{'_id':0},session=session).sort('sku',1).limit(1001))
+                if len(items)>1000:raise HTTPException(413,'Owner stock snapshot limit exceeded')
+                now=datetime.now(timezone.utc)
+                saved={'_id':generation,'owner_id':reviewer['_id'],'unit':unit,'items':items,'created_at':now.isoformat(),'expires_at':now+timedelta(days=1)}
+                db.owner_stock_snapshots.insert_one(saved,session=session);return saved
+            with db.client.start_session() as session:saved=session.with_transaction(capture,read_concern=ReadConcern('snapshot'),write_concern=WriteConcern('majority'))
+        done=offset+100>=len(saved['items'])
+        return {'unit':unit,'generation':generation,'items':saved['items'][offset:offset+100],'done':done,
+                'next_cursor':None if done else generation+':'+str(offset+100),'created_at':saved['created_at'],'includes_unsynced_local_data':False}
 
     @app.post('/api/sync/v1/batch')
     def batch(body: dict, authorization: str = Header(default='')):

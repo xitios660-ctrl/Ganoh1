@@ -182,6 +182,9 @@ class Integration(unittest.TestCase):
                 return parent.client.get('/api/sync/v1/snapshot', params={'cursor': cursor or ''}, headers={'Authorization': 'Bearer runner'}).json()
         with TestClient(create_local_app(reopened, token, Transport(), interval=100)) as pc:
             pc.post('/api/local/sync', headers=headers)
+            import time
+            deadline=time.monotonic()+5
+            while pc.get('/api/local/status',headers=headers).json()['synced']!=1 and time.monotonic()<deadline:time.sleep(.01)
             self.assertEqual(pc.get('/api/local/status', headers=headers).json()['synced'], 1)
         self.assertEqual(self.db.sales.count_documents({}), 1)
         self.assertEqual(self.db.stock.find_one({'unit': 'runner'})['quantity'], 9)
@@ -386,6 +389,58 @@ class Integration(unittest.TestCase):
         scoped=self.client.get(url,headers={'Authorization':'Bearer owner-report-fixture'}).json()
         self.assertEqual([r['unit'] for r in scoped['units']],['runner'])
         self.assertEqual(scoped['consolidated']['cash_cents'],800)
+
+    def test_owner_password_session_scope_logout_and_revocation(self):
+        from backend.sync_v1.owner_auth import provision
+        owner_id=provision(self.db,'owner-password','Fixture-Owner-Password-2026',['runner'])
+        response=self.client.post('/api/sync/v1/owner/login',json={'username':'owner-password','password':'Fixture-Owner-Password-2026'})
+        self.assertEqual(response.status_code,200)
+        token=response.json()['access_token'];headers={'Authorization':'Bearer '+token}
+        self.assertEqual(self.client.get('/api/sync/v1/owner/overview',headers=headers).status_code,200)
+        self.assertEqual([u['unit'] for u in self.client.get('/api/sync/v1/owner/overview',headers=headers).json()['units']],['runner'])
+        self.client.post('/api/sync/v1/owner/logout',headers=headers)
+        self.assertEqual(self.client.get('/api/sync/v1/owner/overview',headers=headers).status_code,401)
+        token=self.client.post('/api/sync/v1/owner/login',json={'username':'owner-password','password':'Fixture-Owner-Password-2026'}).json()['access_token']
+        self.db.reviewers.update_one({'_id':owner_id},{'$set':{'revoked':True}})
+        self.assertEqual(self.client.get('/api/sync/v1/owner/overview',headers={'Authorization':'Bearer '+token}).status_code,401)
+
+    def test_owner_password_lockout_and_https_cors(self):
+        from backend.sync_v1.owner_auth import provision
+        provision(self.db,'owner-lockout','Fixture-Owner-Password-2026',['runner'])
+        for _ in range(5):self.assertEqual(self.client.post('/api/sync/v1/owner/login',json={'username':'owner-lockout','password':'wrong'}).status_code,401)
+        self.assertEqual(self.client.post('/api/sync/v1/owner/login',json={'username':'owner-lockout','password':'Fixture-Owner-Password-2026'}).status_code,401)
+        with TestClient(create_app(self.db,owner_origins=['https://owner.example'])) as api:
+            allowed=api.options('/api/sync/v1/owner/login',headers={'Origin':'https://owner.example','Access-Control-Request-Method':'POST','Access-Control-Request-Headers':'Content-Type'})
+            self.assertEqual(allowed.headers.get('access-control-allow-origin'),'https://owner.example')
+            denied=api.options('/api/sync/v1/owner/login',headers={'Origin':'https://unknown.example','Access-Control-Request-Method':'POST'})
+            self.assertNotIn('access-control-allow-origin',denied.headers)
+        with self.assertRaises(ValueError):create_app(self.db,owner_origins=['http://insecure.example'])
+
+    def test_new_catalog_product_stock_and_sale_sync_in_order(self):
+        from desktop.business_rules import KINDS
+        from desktop.commerce import record
+        self.db.devices.update_one({'_id':'runner'},{'$set':{'permissions':list(KINDS)}})
+        journal=OfflineJournal(Path(self.temp.name)/'new-product.sqlite','runner')
+        record(journal,operation_id=str(uuid.uuid4()),kind='catalog.upsert',data={'business_id':str(uuid.uuid4()),'sku':'new-sku','name':'Produto fictício','description':'Exemplo','category':'Lanches','price_cents':200,'prep_time':10,'available':True,'base_version':0})
+        record(journal,operation_id=str(uuid.uuid4()),kind='stock.adjust',data={'business_id':str(uuid.uuid4()),'sku':'new-sku','delta':5,'base_version':1,'description':'Entrada fictícia'})
+        journal.record_sale(sale_id='new-catalog-sale',total_cents=200,payment_method='cash',items=[{'sku':'new-sku','quantity':1,'base_version':2}])
+        self.assertEqual(sync_once(journal,lambda e:self.send(e).json()['results'][0])['synced'],3)
+        item=self.db.stock.find_one({'unit':'runner','sku':'new-sku'})
+        self.assertEqual(item['quantity'],4);self.assertEqual(item['version'],3);self.assertEqual(item['price_cents'],200)
+
+    def test_owner_stock_scope_and_immutable_pagination(self):
+        from backend.sync_v1.owner_auth import provision
+        provision(self.db,'owner-stock','Fixture-Owner-Password-2026',['runner'])
+        token=self.client.post('/api/sync/v1/owner/login',json={'username':'owner-stock','password':'Fixture-Owner-Password-2026'}).json()['access_token']
+        headers={'Authorization':'Bearer '+token}
+        self.db.stock.insert_many([{'unit':'runner','sku':f'new-{i:03}','quantity':2,'price_cents':100,'version':1} for i in range(101)])
+        first=self.client.get('/api/sync/v1/owner/stock',params={'unit':'runner'},headers=headers)
+        self.assertEqual(first.status_code,200);self.assertEqual(len(first.json()['items']),100)
+        self.db.stock.update_many({'unit':'runner'},{'$inc':{'quantity':10,'version':1}})
+        second=self.client.get('/api/sync/v1/owner/stock',params={'unit':'runner','cursor':first.json()['next_cursor']},headers=headers)
+        self.assertEqual(second.status_code,200);self.assertTrue(second.json()['done'])
+        self.assertEqual({r['version'] for r in second.json()['items']},{1})
+        self.assertEqual(self.client.get('/api/sync/v1/owner/stock',params={'unit':'gym-londres'},headers=headers).status_code,403)
 
     def test_production_database_rejected(self):
         with self.assertRaises(ValueError):

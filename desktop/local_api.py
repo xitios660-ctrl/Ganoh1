@@ -20,7 +20,9 @@ def create_local_app(journal: OfflineJournal, session_token: str, transport=None
         with closing(journal._connect()) as db:
             db.execute("UPDATE metadata SET value='1' WHERE key='cash_control_enabled'")
     lock = threading.Lock()
+    sync_lock=threading.Lock()
     stop = threading.Event()
+    wake=threading.Event()
     state = {'connection': 'offline', 'last_error': None}
 
     def remember():
@@ -30,7 +32,8 @@ def create_local_app(journal: OfflineJournal, session_token: str, transport=None
                        (datetime.now(timezone.utc).isoformat(), state['connection'], state['last_error']))
 
     def synchronize():
-        with lock:
+        if not sync_lock.acquire(blocking=False):return
+        try:
             if transport is None:
                 state.update(connection='offline', last_error='Dispositivo sem servidor de homologação configurado')
                 return
@@ -49,10 +52,14 @@ def create_local_app(journal: OfflineJournal, session_token: str, transport=None
                 state.update(connection='offline', last_error='Sincronização interrompida; dados preservados para nova tentativa')
             remember()
 
+        finally:
+            sync_lock.release()
+
     def worker():
         while not stop.is_set():
             synchronize()
-            stop.wait(interval)
+            wake.wait(interval)
+            wake.clear()
 
     @asynccontextmanager
     async def lifespan(app):
@@ -60,6 +67,7 @@ def create_local_app(journal: OfflineJournal, session_token: str, transport=None
         thread.start()
         yield
         stop.set()
+        wake.set()
         thread.join(timeout=20)
 
     app = FastAPI(lifespan=lifespan)
@@ -128,7 +136,7 @@ def create_local_app(journal: OfflineJournal, session_token: str, transport=None
     def account(body:dict,request:Request):
         identity=auth.actor(journal,request.cookies.get('ganoh_operator'))
         if not identity or identity['role']!='owner': raise HTTPException(403,'Somente o proprietário cadastra usuários')
-        try: actor_id=auth.create(journal,body.get('username'),body.get('password'),body.get('role'))
+        try: actor_id=auth.create(journal,body.get('username'),body.get('password'),body.get('role'),authorized_by=identity['actor_id'])
         except auth.AuthError as exc: raise HTTPException(409,str(exc))
         return {'actor_id':actor_id}
 
@@ -142,6 +150,19 @@ def create_local_app(journal: OfflineJournal, session_token: str, transport=None
         identity=auth.actor(journal,request.cookies.get('ganoh_operator'))
         if not identity or identity['role']!='owner': raise HTTPException(403,'Somente o proprietário gerencia backup e acesso')
         return identity
+
+    @app.get('/api/local/auth/accounts')
+    def accounts(request:Request):
+        owner(request)
+        with closing(journal._connect()) as db:
+            return {'items':[dict(row) for row in db.execute('SELECT actor_id,username,role,active FROM operators ORDER BY username')]}
+
+    @app.post('/api/local/auth/accounts/{target_id}/{action}')
+    def manage_account(target_id:str,action:str,body:dict,request:Request):
+        identity=owner(request)
+        try:auth.manage(journal,identity['actor_id'],target_id,action,body.get('password'))
+        except auth.AuthError as exc:raise HTTPException(409,str(exc))
+        return {'updated':True}
 
     @app.post('/api/local/backup/export')
     def backup_export(body:dict,request:Request):
@@ -290,10 +311,10 @@ def create_local_app(journal: OfflineJournal, session_token: str, transport=None
             except OfflineError as exc:
                 raise HTTPException(409, str(exc))
 
-    @app.post('/api/local/sync')
+    @app.post('/api/local/sync',status_code=202)
     def sync(request:Request):
-        synchronize()
-        return status(request)
+        wake.set()
+        return {'requested':True,'sync_in_progress':sync_lock.locked()}
 
     if frontend:
         root = Path(frontend).resolve()

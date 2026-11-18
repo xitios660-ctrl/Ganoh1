@@ -191,6 +191,9 @@ class OfflineJournal:
                     result = {"operation_id": operation_key, "state": existing["state"],
                               "fingerprint": fingerprint, "already_exists": True}
                 else:
+                    if actor:
+                        from desktop.auth import check_actor
+                        check_actor(db,actor,'sale.create')
                     from desktop.operations import enabled, current
                     if enabled(db):
                         active = current(db)

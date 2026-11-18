@@ -91,6 +91,9 @@ def record(journal, *, operation_id, kind, data, actor=None):
                         raise BusinessError('UUID reutilizado com dados diferentes')
                     db.execute('COMMIT')
                     return {'operation_id': operation_id, 'fingerprint': fingerprint, 'state': prior['state'], 'already_exists': True}
+                if actor:
+                    from desktop.auth import check_actor
+                    check_actor(db,actor,kind)
                 customer_id = payload.get('customer_id')
                 exists = db.execute('SELECT 1 FROM customers WHERE customer_id=?', (customer_id,)).fetchone() is not None
                 if kind=='prazo.receive' and exists:
@@ -125,6 +128,7 @@ def record(journal, *, operation_id, kind, data, actor=None):
 
 def summary(journal):
     with closing(journal._connect()) as db:
+        db.execute('BEGIN')
         accounts = {row['account']: row['amount'] for row in db.execute('SELECT account,SUM(amount_cents) amount FROM ledger GROUP BY account')}
         clients = [dict(row) for row in db.execute('SELECT customer_id,name,credit_limit_cents,version,approval_operation_id FROM customers ORDER BY name')]
         for customer in clients:
