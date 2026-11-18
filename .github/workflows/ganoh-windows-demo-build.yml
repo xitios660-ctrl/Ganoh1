@@ -1,5 +1,12 @@
 name: Build GANOH Windows demonstration (unsigned)
 on:
+  push:
+    branches: [feature/windows-offline-ganoh-2026]
+    paths:
+      - '.github/workflows/ganoh-windows-demo-build.yml'
+      - 'desktop/electron/**'
+      - 'desktop/launcher.py'
+      - 'desktop/requirements.txt'
   workflow_dispatch:
 permissions:
   contents: read
