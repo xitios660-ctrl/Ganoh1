@@ -5,6 +5,7 @@ on:
     branches:
       - feature/windows-offline-ganoh-2026
     paths:
+      - "frontend/**"
       - "desktop/**"
       - "backend/sync_v1/**"
       - "frontend/src/pages/DesktopDemoPage*"
@@ -15,6 +16,7 @@ on:
       - ".github/workflows/ganoh-offline-tests.yml"
   pull_request:
     paths:
+      - "frontend/**"
       - "desktop/**"
       - "backend/sync_v1/**"
       - "frontend/src/pages/DesktopDemoPage*"
@@ -83,6 +85,8 @@ jobs:
           node-version: '22'
       - run: npm ci --legacy-peer-deps --no-audit --no-fund
         working-directory: frontend
+      - run: node --test plugins/isolated-resources.test.cjs
+        working-directory: frontend
       - run: npm test -- --watch=false --runInBand --testPathPattern="Desktop|desktopMoney|OwnerOverview"
         working-directory: frontend
         env:
@@ -91,5 +95,14 @@ jobs:
         working-directory: frontend
         env:
           REACT_APP_DESKTOP_DEMO: 'true'
+          GENERATE_SOURCEMAP: 'false'
+          CI: 'false'
+      - name: Compile isolated owner panel without deployment
+        run: npm run build
+        working-directory: frontend
+        env:
+          REACT_APP_OWNER_PANEL: 'true'
+          REACT_APP_SYNC_ORIGIN: 'https://central.example'
+          BUILD_PATH: 'build-owner'
           GENERATE_SOURCEMAP: 'false'
           CI: 'false'

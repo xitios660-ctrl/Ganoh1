@@ -77,12 +77,14 @@ def main():
                 with sync_playwright() as p:
                     browser = p.chromium.launch(executable_path='/usr/bin/chromium', headless=True, args=['--no-sandbox'])
                     try:
+                        unexpected_network=[]
                         def open_page(url):
                             page = browser.new_page(viewport={'width': 1200, 'height': 1000})
                             def route(request):
                                 if urlsplit(request.request.url).netloc == urlsplit(url).netloc:
                                     request.continue_(headers={**request.request.all_headers(), 'Authorization': 'Bearer ' + token})
                                 else:
+                                    unexpected_network.append(urlsplit(request.request.url).netloc)
                                     request.abort()
                             page.route('**/*', route)
                             page.goto(url + '/desktop-demo')
@@ -163,6 +165,7 @@ def main():
                         assert balance(db,None,'runner','receivable/'+customer_id)==600
                         assert balance(db,None,'runner','revenue')==-2000
                         assert db.stock.find_one({'unit': 'runner'})['quantity'] == 8
+                        assert not unexpected_network,unexpected_network
                         page.screenshot(path='/tmp/ganoh-desktop-demo.png', full_page=True)
                         page.close()
                     finally:

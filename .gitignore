@@ -103,3 +103,5 @@ frontend/node_modules/.cache/default-development/18.pack
 frontend/node_modules/.cache/default-development/19.pack
 
 /frontend/build-owner/
+
+/frontend/build-webcheck/

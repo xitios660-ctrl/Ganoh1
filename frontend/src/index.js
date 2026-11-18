@@ -3,6 +3,10 @@ import ReactDOM from "react-dom/client";
 import "@/index.css";
 import App from "@/App";
 
+if (process.env.REACT_APP_DESKTOP_DEMO === 'true' || process.env.REACT_APP_OWNER_PANEL === 'true') {
+  require('./offline-fonts.css');
+}
+
 const root = ReactDOM.createRoot(document.getElementById("root"));
 root.render(
   <React.StrictMode>
@@ -11,7 +15,7 @@ root.render(
 );
 
 // Register Service Worker
-if (process.env.REACT_APP_DESKTOP_DEMO !== 'true' && 'serviceWorker' in navigator) {
+if (process.env.REACT_APP_DESKTOP_DEMO !== 'true' && process.env.REACT_APP_OWNER_PANEL !== 'true' && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js')
       .then((registration) => {
