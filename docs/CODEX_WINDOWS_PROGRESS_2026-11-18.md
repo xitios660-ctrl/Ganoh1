@@ -34,3 +34,13 @@ Fases 3–7 não concluídas. Hospedagem alternativa ainda requer comparação a
 Produção, Render, `main` e `ganoh_production` permanecem intocados. Nenhum segredo foi copiado para o código. Não é necessário acesso à produção para continuar a implementação isolada.
 
 PR de revisão: https://github.com/xitios660-ctrl/Ganoh1/pull/6
+
+## Incremento seguinte — demonstração local e snapshots
+
+Implementado na continuação: snapshots imutáveis e paginados de catálogo/estoque com versões, staging/cursor duráveis e retomada no SQLite; revisão auditável `reject`/`retain` com autenticação separada do proprietário; FastAPI local com sessão/origem/host protegidos, tarefa automática de sync, venda em dinheiro e histórico persistente de erros sem segredos; suporte SQLCipher, chave/token via DPAPI Windows, launcher e shell Electron/NSIS de demonstração.
+
+Arquivos principais: `desktop/snapshots.py`, `desktop/local_api.py`, `desktop/windows_secrets.py`, `desktop/launcher.py`, `desktop/electron/*`, `desktop/requirements.txt`, `desktop/DEMONSTRATION.md`, `frontend/src/pages/DesktopDemoPage*`; atualizados `desktop/offline_store.py`, `desktop/sync_transport.py`, `backend/sync_v1/service.py`, testes e workflows. `frontend/src/App.js` seleciona a demonstração somente com flag explícita de build; `index.js` evita o service worker legado nesse modo; `craco.config.js` faz o Jest reconhecer o alias já usado pelo webpack.
+
+Validação local até este registro: 25 testes desktop executados (24 aprovados, DPAPI pulado em Linux), 11 testes MongoDB reais aprovados, 2 testes React aprovados; build React demonstrativo compilado com avisos de hooks preexistentes nas telas legadas. CI Windows e build do instalador serão registrados após execução. `npm ci` padrão encontrou conflito de peers preexistente (React/date-fns/day-picker); instalação com `--legacy-peer-deps` funcionou, sem modificar o lockfile existente.
+
+Limitações explícitas: só snapshot de catálogo/estoque, limite de 1.000 SKUs; revisão rejeita ou mantém conflito sem aplicação financeira; várias vendas no mesmo SKU offline podem exigir revisão por versão. Não há integração local de caixa/prazo/clientes/despesas, revisão visual do proprietário, distribuição assinada, recuperação de chave nem homologação física. Não declarar fases completas. Produção e acesso remoto atual preservados. Procedimento e detalhes em `desktop/DEMONSTRATION.md`.

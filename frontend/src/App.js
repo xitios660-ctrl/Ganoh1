@@ -17,7 +17,12 @@ import { BackgroundMusic } from "./components/BackgroundMusic";
 
 import { BillingAccess } from "./components/BillingAccess";
 
+import DesktopDemoPage from './pages/DesktopDemoPage';
+
 function App() {
+  if (process.env.REACT_APP_DESKTOP_DEMO === 'true') {
+    return <ThemeProvider><DesktopDemoPage /></ThemeProvider>;
+  }
   return (
     <ThemeProvider>
       <CartProvider>

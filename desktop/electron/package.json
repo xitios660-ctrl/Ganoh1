@@ -1,0 +1,13 @@
+{
+  "name": "ganoh-desktop-demo", "version": "0.2.0", "private": true,
+  "main": "main.cjs", "description": "GANOH offline demonstration",
+  "scripts": {"start": "electron .", "dist": "electron-builder --win nsis"},
+  "devDependencies": {"electron": "^39.0.0", "electron-builder": "^26.0.0"},
+  "build": {
+    "appId": "com.ganoh.desktop.demo", "productName": "GANOH Demonstração",
+    "files": ["main.cjs", "package.json"],
+    "extraResources": [{"from": "../../dist/ganoh-local", "to": "backend"}],
+    "win": {"target": "nsis"},
+    "nsis": {"oneClick": false, "perMachine": false, "deleteAppDataOnUninstall": false}
+  }
+}

@@ -7,11 +7,15 @@ on:
     paths:
       - "desktop/**"
       - "backend/sync_v1/**"
+      - "frontend/src/pages/DesktopDemoPage*"
+      - "frontend/src/App.js"
       - ".github/workflows/ganoh-offline-tests.yml"
   pull_request:
     paths:
       - "desktop/**"
       - "backend/sync_v1/**"
+      - "frontend/src/pages/DesktopDemoPage*"
+      - "frontend/src/App.js"
       - ".github/workflows/ganoh-offline-tests.yml"
 
 permissions:
@@ -31,9 +35,12 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install transport dependency
-        run: python -m pip install httpx==0.28.1
+        run: python -m pip install -r desktop/requirements.txt
       - name: Compile offline module
         run: python -m py_compile desktop/offline_store.py
+      - name: Windows launcher restart smoke test
+        if: runner.os == 'Windows'
+        run: python desktop/tests/windows_packaged_smoke.py
       - name: Run durable journal regression tests
         run: python -m unittest discover -s desktop/tests -p "test_*.py" -v
 
@@ -60,3 +67,23 @@ jobs:
       - run: python -m unittest discover -s backend/sync_v1/tests -v
       - if: always()
         run: docker rm -f ganoh-sync-test
+
+  react-demo:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --legacy-peer-deps --no-audit --no-fund
+        working-directory: frontend
+      - run: npm test -- --watch=false --runInBand --runTestsByPath src/pages/DesktopDemoPage.test.jsx
+        working-directory: frontend
+        env:
+          CI: 'true'
+      - run: npm run build
+        working-directory: frontend
+        env:
+          REACT_APP_DESKTOP_DEMO: 'true'
+          GENERATE_SOURCEMAP: 'false'
+          CI: 'false'

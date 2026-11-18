@@ -11,7 +11,7 @@ root.render(
 );
 
 // Register Service Worker
-if ('serviceWorker' in navigator) {
+if (process.env.REACT_APP_DESKTOP_DEMO !== 'true' && 'serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/service-worker.js')
       .then((registration) => {
