@@ -130,7 +130,7 @@ class CommerceTests(unittest.TestCase):
             self.assertEqual(row['fingerprint'], saved['fingerprint'])
             self.assertEqual(row['central_receipt_id'], 'original-receipt')
             self.assertEqual(row['state'], 'synced')
-            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 2)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 3)
 
     def test_same_uuid_across_sale_and_business_cannot_duplicate(self):
         operation = str(uuid.uuid4())
@@ -139,3 +139,12 @@ class CommerceTests(unittest.TestCase):
             record(self.journal, operation_id=operation, kind='cash.deposit',
                    data={'business_id': str(uuid.uuid4()), 'amount_cents': 500, 'description': 'Entrada teste'})
         self.assertEqual(summary(self.journal)['cash_cents'], 500)
+
+    def test_csv_is_balanced_provisional_and_escapes_spreadsheet_formulas(self):
+        from desktop.reports import ledger_csv
+        import csv,io
+        event(self.journal,'cash.deposit',amount_cents=100,description='=untrusted spreadsheet formula')
+        rows=list(csv.DictReader(io.StringIO(ledger_csv(self.journal).lstrip('\ufeff'))))
+        self.assertEqual(sum(int(row['amount_cents']) for row in rows),0)
+        self.assertTrue(all(row['scope']=='LOCAL_PROVISIONAL' for row in rows))
+        self.assertTrue(all(row['description'].startswith("'=") for row in rows))

@@ -42,8 +42,26 @@ def apply_page(journal, page, expected_cursor):
                 raise OfflineError('Snapshot is older than published catalog')
             if expected_cursor is None:
                 db.execute('DELETE FROM snapshot_staging')
+                db.execute('DELETE FROM inventory_coverage_staging')
             elif state['generation'] != page['generation']:
                 raise OfflineError('Snapshot generation changed')
+            coverage = page.get('covered_operations', [])
+            from desktop.business_rules import identifier, BusinessError
+            if not isinstance(coverage, list) or len(coverage) > 100:
+                raise OfflineError('Invalid snapshot coverage')
+            try:
+                for receipt in coverage:
+                    if not isinstance(receipt, dict):
+                        raise OfflineError('Invalid coverage receipt')
+                    operation = identifier(receipt.get('operation_id'))
+                    table = journal._operation_table(db, operation)
+                    local = db.execute(f'SELECT fingerprint FROM {table} WHERE operation_id=?', (operation,)).fetchone()
+                    if local:
+                        if local['fingerprint'] != receipt.get('fingerprint'):
+                            raise OfflineError('Coverage fingerprint mismatch')
+                        db.execute('INSERT OR IGNORE INTO inventory_coverage_staging VALUES(?)', (operation,))
+            except BusinessError as exc:
+                raise OfflineError(str(exc)) from exc
             for item in page['items']:
                 if (not isinstance(item, dict) or not isinstance(item.get('sku'), str)
                         or any(type(item.get(k)) is not int or item[k] < 0
@@ -59,7 +77,10 @@ def apply_page(journal, page, expected_cursor):
                         raise OfflineError('Catalog version downgrade rejected')
                 db.execute('DELETE FROM catalog')
                 db.execute('INSERT INTO catalog SELECT * FROM snapshot_staging')
+                db.execute('INSERT OR IGNORE INTO inventory_coverage SELECT * FROM inventory_coverage_staging')
+                db.execute('DELETE FROM inventory_coverage_staging')
                 db.execute('DELETE FROM snapshot_staging')
+            db.execute('DELETE FROM inventory_coverage_staging')
             db.execute('UPDATE snapshot_state SET generation=?,cursor=?,published_at=CASE WHEN ? THEN ? ELSE published_at END WHERE id=1',
                        (page['generation'], page.get('next_cursor'), page['done'], page.get('created_at')))
             db.execute('COMMIT')
@@ -68,9 +89,12 @@ def apply_page(journal, page, expected_cursor):
             raise
 
 
-def catalog(journal):
+def catalog(journal, *, projected=True):
     initialize(journal)
     with closing(journal._connect()) as db:
+        if projected:
+            from desktop.inventory import project
+            return project(db)
         return [json.loads(r[0]) for r in db.execute('SELECT data FROM catalog ORDER BY sku')]
 
 
@@ -88,6 +112,7 @@ def restart(journal):
         db.execute('BEGIN IMMEDIATE')
         try:
             db.execute('DELETE FROM snapshot_staging')
+            db.execute('DELETE FROM inventory_coverage_staging')
             db.execute('UPDATE snapshot_state SET generation=NULL,cursor=NULL WHERE id=1')
             db.execute('COMMIT')
         except Exception:

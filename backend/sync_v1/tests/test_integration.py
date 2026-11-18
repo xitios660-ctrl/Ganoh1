@@ -32,8 +32,13 @@ class Integration(unittest.TestCase):
 
     def event(self, unit='runner', sale='sale-a', payment='cash'):
         journal = OfflineJournal(Path(self.temp.name) / (uuid.uuid4().hex + '.sqlite'), unit)
-        journal.record_sale(sale_id=sale, total_cents=1000, payment_method=payment, items=[{'sku': 'lanche', 'quantity': 1, 'base_version': 1}])
-        return journal, journal.pending()[0]
+        journal.record_sale(sale_id=sale, total_cents=1000, payment_method=('cash' if payment=='prazo' else payment), items=[{'sku': 'lanche', 'quantity': 1, 'base_version': 1}])
+        item=journal.pending()[0]
+        if payment=='prazo':
+            # Malformed/unapproved incoming event for API-boundary tests.
+            item['payload']['payment_method']='prazo'
+            item['fingerprint']=hashlib.sha256(_canonical(item['payload']).encode()).hexdigest()
+        return journal,item
 
     def send(self, item, token=None):
         return self.client.post('/api/sync/v1/batch', headers={'Authorization': 'Bearer ' + (token or item['unit'])}, json={'operations': [item]})
@@ -134,7 +139,7 @@ class Integration(unittest.TestCase):
         self.assertFalse(pull_once(journal, fetch))
         self.assertTrue(pull_once(journal, fetch))
         self.assertEqual(len(catalog(journal)), 202)
-        self.assertEqual({i['version'] for i in catalog(journal)}, {1})
+        self.assertEqual({i['version'] for i in catalog(journal, projected=False)}, {1})
         self.assertIsNone(cursor(journal))
 
     def test_conflict_review_is_authorized_audited_and_idempotent(self):
@@ -186,6 +191,9 @@ class Integration(unittest.TestCase):
         from desktop.commerce import record
         self.db.devices.update_one({'_id': unit}, {'$set': {'permissions': list(KINDS)}})
         journal = OfflineJournal(Path(self.temp.name) / (uuid.uuid4().hex + '.sqlite'), unit)
+        if kind=='prazo.receive' and 'customer_version' not in data:
+            customer=self.db.customers.find_one({'unit':unit,'customer_id':data.get('customer_id')})
+            data['customer_version']=customer.get('version',1) if customer else 1
         if kind in ('cash.withdraw', 'expense.create', 'prazo.receive'):
             # The caller supplies complete payloads for conflict scenarios.
             payload = {'operation_id': str(uuid.uuid4()), 'unit': unit, 'kind': kind,
@@ -265,6 +273,119 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.db.ledger.count_documents({}), 0)
         self.assertEqual(self.db.inbox.count_documents({}), 0)
         self.assertEqual(self.send(event).json()['results'][0]['status'], 'applied')
+
+    def test_offline_shift_three_sales_close_and_snapshot_do_not_duplicate_stock(self):
+        from desktop.commerce import record
+        from desktop.business_rules import KINDS
+        from desktop.snapshots import apply_page, catalog, pull_once
+        from desktop.local_api import create_local_app
+        from backend.sync_v1.commerce import balance
+        self.db.devices.update_one({'_id': 'runner'}, {'$set': {'permissions': list(KINDS)}})
+        journal = OfflineJournal(Path(self.temp.name) / 'operational.sqlite', 'runner')
+        headers = {'Authorization': 'Bearer runner'}
+        apply_page(journal, self.client.get('/api/sync/v1/snapshot', headers=headers).json(), None)
+        shift_id = str(uuid.uuid4())
+        record(journal, operation_id=str(uuid.uuid4()), kind='cash.open',
+               data={'business_id': str(uuid.uuid4()), 'shift_id': shift_id, 'counted_cents': 0})
+        local_headers = {'Authorization': 'Bearer ' + 'x'*40}
+        with TestClient(create_local_app(journal, 'x'*40, require_shift=True)) as pc:
+            for i in range(3):
+                response = pc.post('/api/local/sales', headers=local_headers, json={
+                    'operation_id': str(uuid.uuid4()), 'sale_id': f'offline-{i}', 'items': [{'sku': 'lanche', 'quantity': 1}]})
+                self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(catalog(journal)[0]['quantity'], 7)
+        self.assertEqual([e['payload']['items'][0]['base_version'] for e in journal.pending() if e['kind']=='sale.create'], [1,2,3])
+        record(journal, operation_id=str(uuid.uuid4()), kind='cash.close', data={
+            'business_id': str(uuid.uuid4()), 'shift_id': shift_id, 'expected_cents': 3000, 'counted_cents': 3000})
+        self.assertEqual(sync_once(journal, lambda e: self.send(e).json()['results'][0])['synced'], 5)
+        self.assertEqual(balance(self.db, None, 'runner', 'cash'), 3000)
+        self.assertEqual(self.db.cash_shifts.find_one({'unit':'runner'})['status'], 'closed')
+        pull_once(journal, lambda c: self.client.get('/api/sync/v1/snapshot', headers=headers, params={'cursor':c or ''}).json())
+        self.assertEqual(catalog(journal)[0]['quantity'], 7)
+        self.assertEqual(catalog(journal)[0]['version'], 4)
+        self.assertEqual(self.db.sales.count_documents({}), 3)
+
+    def test_stock_adjustment_sync_conflict_is_visible_and_never_overwrites(self):
+        from desktop.commerce import record
+        from desktop.business_rules import KINDS
+        from desktop.snapshots import apply_page, catalog, pull_once
+        self.db.devices.update_one({'_id':'runner'}, {'$set':{'permissions':list(KINDS)}})
+        journal = OfflineJournal(Path(self.temp.name) / 'stock-adjust.sqlite', 'runner')
+        headers={'Authorization':'Bearer runner'}
+        apply_page(journal,self.client.get('/api/sync/v1/snapshot',headers=headers).json(),None)
+        record(journal,operation_id=str(uuid.uuid4()),kind='stock.adjust',data={
+            'business_id':str(uuid.uuid4()),'sku':'lanche','delta':3,'base_version':1,'description':'Entrada fictícia'})
+        self.assertEqual(catalog(journal)[0]['quantity'],13)
+        self.assertEqual(sync_once(journal,lambda e:self.send(e).json()['results'][0])['synced'],1)
+        pull_once(journal,lambda c:self.client.get('/api/sync/v1/snapshot',headers=headers,params={'cursor':c or ''}).json())
+        self.assertEqual(catalog(journal)[0]['quantity'],13)
+        record(journal,operation_id=str(uuid.uuid4()),kind='stock.adjust',data={
+            'business_id':str(uuid.uuid4()),'sku':'lanche','delta':-1,'base_version':2,'description':'Saída fictícia'})
+        self.db.stock.update_one({'unit':'runner'},{'$inc':{'version':1}})
+        self.assertEqual(sync_once(journal,lambda e:self.send(e).json()['results'][0])['conflicts'],1)
+        self.assertTrue(catalog(journal)[0]['blocked'])
+        self.assertEqual(self.db.stock.find_one({'unit':'runner'})['quantity'],13)
+
+    def test_approved_prazo_sale_and_cash_receipt_do_not_duplicate_revenue(self):
+        from desktop.commerce import record,summary
+        from desktop.business_rules import KINDS
+        from desktop.snapshots import apply_page,catalog
+        from backend.sync_v1.commerce import balance
+        self.db.devices.update_one({'_id':'runner'},{'$set':{'permissions':list(KINDS)}})
+        journal=OfflineJournal(Path(self.temp.name)/'prazo-cycle.sqlite','runner')
+        customer_id=str(uuid.uuid4())
+        record(journal,operation_id=str(uuid.uuid4()),kind='customer.create',data={'business_id':str(uuid.uuid4()),'customer_id':customer_id,'name':'Cliente fictício prazo'})
+        limit=record(journal,operation_id=str(uuid.uuid4()),kind='customer.limit',data={'business_id':str(uuid.uuid4()),'customer_id':customer_id,'limit_cents':2000,'base_version':1,'description':'Limite autorizado em teste'})
+        apply_page(journal,self.client.get('/api/sync/v1/snapshot',headers={'Authorization':'Bearer runner'}).json(),None)
+        item={'sku':'lanche','quantity':1,'base_version':1}
+        with self.assertRaises(ValueError):journal.record_sale(sale_id='not-approved',total_cents=1000,payment_method='prazo',items=[item],customer_id=customer_id,customer_version=2)
+        self.assertEqual(sync_once(journal,lambda e:self.send(e).json()['results'][0])['synced'],2)
+        saved=journal.record_sale(sale_id='prazo-sale',total_cents=1000,payment_method='prazo',items=[item],customer_id=customer_id,customer_version=2)
+        self.assertEqual(summary(journal)['cash_cents'],0)
+        self.assertEqual(summary(journal)['customers'][0]['debt_cents'],1000)
+        with self.assertRaises(ValueError):journal.record_sale(sale_id='over-limit',total_cents=2000,payment_method='prazo',items=[{'sku':'lanche','quantity':2,'base_version':2}],customer_id=customer_id,customer_version=3)
+        record(journal,operation_id=str(uuid.uuid4()),kind='prazo.receive',data={'business_id':str(uuid.uuid4()),'customer_id':customer_id,'amount_cents':400,'description':'Recebimento parcial','payment_reference':'receipt-prazo-cycle','payment_method':'cash'})
+        self.assertEqual(sync_once(journal,lambda e:self.send(e).json()['results'][0])['synced'],2)
+        self.assertEqual(balance(self.db,None,'runner','cash'),400)
+        self.assertEqual(balance(self.db,None,'runner','receivable/'+customer_id),600)
+        self.assertEqual(balance(self.db,None,'runner','revenue'),-1000)
+        self.assertEqual(summary(journal)['revenue_cents'],1000)
+        self.assertEqual(self.db.stock.find_one({'unit':'runner'})['quantity'],9)
+
+    def test_kitchen_status_sync_is_versioned_without_financial_effect(self):
+        from desktop.commerce import record
+        from desktop.business_rules import KINDS
+        from backend.sync_v1.commerce import balance
+        self.db.devices.update_one({'_id':'runner'},{'$set':{'permissions':list(KINDS)}})
+        journal,event=self.event()
+        self.assertEqual(sync_once(journal,lambda e:self.send(e).json()['results'][0])['synced'],1)
+        for version,status in enumerate(('preparing','ready','delivered'),1):
+            record(journal,operation_id=str(uuid.uuid4()),kind='order.status',data={'business_id':str(uuid.uuid4()),'sale_id':event['payload']['sale_id'],'base_version':version,'status':status})
+        self.assertEqual(sync_once(journal,lambda e:self.send(e).json()['results'][0])['synced'],3)
+        order=self.db.sales.find_one({'unit':'runner'})
+        self.assertEqual(order['status'],'delivered');self.assertEqual(order['order_version'],4)
+        self.assertEqual(balance(self.db,None,'runner','cash'),1000)
+        self.assertEqual(self.db.stock.find_one({'unit':'runner'})['quantity'],9)
+
+    def test_owner_overview_only_counts_confirmed_units_and_marks_unknown_pending(self):
+        self.send(self.event()[1]);self.send(self.event('gym-londres')[1])
+        expense=self.financial_event('expense.create',amount_cents=200,description='Despesa fictícia')
+        self.assertEqual(self.send(expense).json()['results'][0]['status'],'applied')
+        # Local-only draft must never affect the central consolidated overview.
+        self.event(sale='not-synced')
+        self.db.reviewers.insert_one({'_id':'owner-report','units':['runner','gym-londres'],'revoked':False,'token_hash':hashlib.sha256(b'owner-report-fixture').hexdigest()})
+        url='/api/sync/v1/owner/overview'
+        self.assertEqual(self.client.get(url,headers={'Authorization':'Bearer runner'}).status_code,401)
+        report=self.client.get(url,headers={'Authorization':'Bearer owner-report-fixture'}).json()
+        self.assertEqual(report['consolidated']['revenue_cents'],2000)
+        self.assertEqual(report['consolidated']['cash_cents'],1800)
+        self.assertEqual(report['consolidated']['expense_cents'],200)
+        self.assertFalse(report['includes_unsynced_local_data'])
+        self.assertTrue(all(row['local_pending'] is None for row in report['units']))
+        self.db.reviewers.update_one({'_id':'owner-report'},{'$set':{'units':['runner']}})
+        scoped=self.client.get(url,headers={'Authorization':'Bearer owner-report-fixture'}).json()
+        self.assertEqual([r['unit'] for r in scoped['units']],['runner'])
+        self.assertEqual(scoped['consolidated']['cash_cents'],800)
 
     def test_production_database_rejected(self):
         with self.assertRaises(ValueError):

@@ -24,8 +24,11 @@ class SyncTransport:
             raise ValueError('Invalid sync response')
         return results[0]
 
+    def set_snapshot_operations(self, operation_ids):
+        self._snapshot_operations = list(operation_ids)
+
     def snapshot(self, cursor=None):
-        response = self._client.get('/api/sync/v1/snapshot', params={'cursor': cursor or ''})
+        response = self._client.get('/api/sync/v1/snapshot', params={'cursor': cursor or '', 'operation_ids': ','.join(getattr(self, '_snapshot_operations', []))})
         response.raise_for_status()
         return response.json()
 

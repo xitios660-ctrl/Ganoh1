@@ -76,7 +76,7 @@ class OfflineJournal:
             db.execute("BEGIN IMMEDIATE")
             try:
                 schema_version = db.execute('PRAGMA user_version').fetchone()[0]
-                if schema_version not in (0, 1, 2):
+                if schema_version not in (0, 1, 2, 3):
                     raise OfflineError('Versão do banco mais recente; atualização compatível necessária')
                 db.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
                 db.execute("""
@@ -118,7 +118,7 @@ class OfflineJournal:
                 from desktop.commerce import initialize
                 try:
                     initialize(db)
-                    db.execute("PRAGMA user_version = 2")
+                    db.execute("PRAGMA user_version = 3")
                 except Exception:
                     db.execute('ROLLBACK')
                     raise
@@ -132,6 +132,11 @@ class OfflineJournal:
         payment_method: str,
         items: list[dict[str, Any]],
         operation_id: str | None = None,
+        cash_shift_id: str | None = None,
+        actor: dict | None = None,
+        customer_name: str | None = None,
+        customer_id: str | None = None,
+        customer_version: int | None = None,
     ) -> dict[str, Any]:
         """Record a local draft and the exact retryable outbox event atomically.
 
@@ -162,6 +167,15 @@ class OfflineJournal:
             "payment_method": payment_method,
             "items": items,
         }
+        if payment_method=='prazo':
+            payload['customer_id']=customer_id
+            payload['customer_version']=customer_version
+        if customer_name is not None:
+            if not isinstance(customer_name,str) or len(customer_name)>120:
+                raise OfflineError('Nome do cliente inválido')
+            payload['customer_name'] = customer_name
+        if cash_shift_id is not None:
+            payload['cash_shift_id'] = cash_shift_id
         raw = _canonical(payload)
         fingerprint = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         with closing(self._connect()) as db:
@@ -177,6 +191,29 @@ class OfflineJournal:
                     result = {"operation_id": operation_key, "state": existing["state"],
                               "fingerprint": fingerprint, "already_exists": True}
                 else:
+                    from desktop.operations import enabled, current
+                    if enabled(db):
+                        active = current(db)
+                        if not active or active['status'] != 'open' or cash_shift_id != active['shift_id']:
+                            raise OfflineError('Venda exige caixa aberto e vínculo com o turno atual')
+                    if payment_method=='prazo':
+                        from desktop.business_rules import identifier,BusinessError
+                        try: identifier(customer_id)
+                        except BusinessError as exc: raise OfflineError(str(exc)) from exc
+                        customer=db.execute('SELECT * FROM customers WHERE customer_id=?',(customer_id,)).fetchone()
+                        approval=db.execute('SELECT state FROM business_operations WHERE operation_id=?',
+                            ((customer['approval_operation_id'] if customer else None),)).fetchone()
+                        from desktop.commerce import balance
+                        if (not customer or not approval or approval['state']!='synced' or customer['version']!=customer_version
+                                or balance(db,'receivable/'+customer_id)+total_cents>customer['credit_limit_cents']):
+                            raise OfflineError('Prazo exige limite confirmado pelo servidor, versão válida e saldo disponível')
+                    from desktop.inventory import project
+                    projected = {entry['sku']: entry for entry in project(db)}
+                    for item in items:
+                        entry = projected.get(item.get('sku'))
+                        if entry and 'base_version' in item:
+                            if entry['blocked'] or entry['version'] != item['base_version'] or type(item.get('quantity')) is not int or not 1 <= item['quantity'] <= entry['quantity']:
+                                raise OfflineError('Estoque local alterado ou insuficiente')
                     timestamp = _utc_now()
                     db.execute('INSERT INTO event_order(operation_id,kind) VALUES(?,?)', (operation_key, 'sale.create'))
                     db.execute(
@@ -191,9 +228,14 @@ class OfflineJournal:
                         VALUES (?,?,?,?,?,?)""",
                         (sale_id, operation_key, self.unit, total_cents, payment_method, timestamp),
                     )
-                    if payment_method == 'cash':
+                    db.execute("INSERT INTO order_progress VALUES(?,'received',1,?,?)",(sale_id,timestamp,operation_key))
+                    if actor:
+                        db.execute('INSERT INTO event_actors VALUES(?,?,?)',(operation_key,actor['actor_id'],actor['role']))
+                    if payment_method in ('cash','prazo'):
                         from desktop.commerce import post
-                        post(db, operation_key, [('cash', total_cents), ('revenue', -total_cents)])
+                        account='cash' if payment_method=='cash' else 'receivable/'+customer_id
+                        post(db,operation_key,[(account,total_cents),('revenue',-total_cents)])
+                        if payment_method=='prazo': db.execute('UPDATE customers SET version=version+1 WHERE customer_id=?',(customer_id,))
                     result = {"operation_id": operation_key, "state": "pending",
                               "fingerprint": fingerprint, "already_exists": False}
             except self._driver.IntegrityError as exc:

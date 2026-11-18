@@ -11,13 +11,14 @@ from pymongo.write_concern import WriteConcern
 
 from desktop.offline_store import _canonical, UNITS
 from desktop.business_rules import KINDS
-from backend.sync_v1.commerce import apply_business, post
+from backend.sync_v1.commerce import apply_business, post, cash_guard
 
 
 def create_app(db):
     # Explicit allowlist: accidental production configuration fails before writes.
     if not db.name.startswith('ganoh_sync_test_'):
         raise ValueError('Only isolated ganoh_sync_test_* databases are permitted')
+    db.cash_shifts.create_index([('unit', 1), ('shift_id', 1)], unique=True)
     db.payment_refs.create_index([('unit', 1), ('reference', 1)], unique=True)
     db.ledger.create_index([('unit', 1), ('operation_id', 1), ('line', 1)], unique=True)
     db.ledger.create_index([('unit', 1), ('account', 1)])
@@ -84,8 +85,18 @@ def create_app(db):
                 return reply
             reason = None
             items = payload.get('items')
-            if payload.get('payment_method') != 'cash':
+            if payload.get('payment_method') not in ('cash','prazo'):
                 reason = 'Payment requires financial review; settlement is not implemented'
+            credit_customer=None
+            if payload.get('payment_method')=='prazo':
+                from desktop.business_rules import identifier,BusinessError
+                from backend.sync_v1.commerce import balance
+                try: identifier(payload.get('customer_id'))
+                except BusinessError: reason='Prazo exige cliente identificado e aprovado'
+                else:
+                    credit_customer=db.customers.find_one({'unit':device['unit'],'customer_id':payload['customer_id']},session=session)
+                    if (not credit_customer or not credit_customer.get('approved_limit') or credit_customer.get('version',1)!=payload.get('customer_version')):
+                        reason='Limite ou versão do cliente exige revisão'
             if not isinstance(payload.get('sale_id'), str) or not payload['sale_id'].strip():
                 raise HTTPException(422, 'Invalid sale ID')
             if type(payload.get('total_cents')) is not int or payload['total_cents'] < 0:
@@ -100,13 +111,18 @@ def create_app(db):
                     raise HTTPException(422, 'Duplicate SKU')
                 seen.add(line['sku'])
                 stock = db.stock.find_one({'unit': device['unit'], 'sku': line['sku']}, session=session)
+                if stock and stock.get('available') is False:reason='Produto indisponível; revisão obrigatória'
                 if not stock or type(line.get('base_version')) is not int or stock['version'] != line['base_version'] or stock['quantity'] < line['quantity']:
                     reason = 'Stock missing, insufficient or version changed; manual review required'
                 else:
                     total += stock['price_cents'] * line['quantity']
                     stocks.append((stock, line['quantity']))
+            if credit_customer and payload.get('payment_method')=='prazo':
+                if balance(db,session,device['unit'],'receivable/'+payload['customer_id'])+total>credit_customer.get('credit_limit_cents',0):
+                    reason='Limite a prazo excedido; revisão financeira obrigatória'
             if total != payload['total_cents']:
                 reason = reason or 'Catalog total differs; manual review required'
+            reason = reason or cash_guard(db, session, device['unit'], payload)
             if db.sales.find_one({'unit': device['unit'], 'sale_id': payload['sale_id']}, session=session):
                 reason = 'Sale ID already recorded by another operation'
             reply = {**identity, 'status': 'conflict' if reason else 'applied', 'receipt_id': str(uuid.uuid4())}
@@ -117,8 +133,10 @@ def create_app(db):
                     updated = db.stock.update_one({'_id': stock['_id'], 'version': stock['version']}, {'$inc': {'quantity': -quantity, 'version': 1}}, session=session)
                     if updated.modified_count != 1:
                         raise RuntimeError('Concurrent stock change')
-                post(db, session, device['unit'], operation, [('cash', total), ('revenue', -total)])
-                db.sales.insert_one({**key, 'sale_id': payload['sale_id'], 'payload': payload, 'receipt_id': reply['receipt_id'], 'total_cents': total}, session=session)
+                account='cash' if payload['payment_method']=='cash' else 'receivable/'+payload['customer_id']
+                post(db,session,device['unit'],operation,[(account,total),('revenue',-total)])
+                if credit_customer:db.customers.update_one({'_id':credit_customer['_id']},{'$inc':{'version':1}},session=session)
+                db.sales.insert_one({**key, 'sale_id': payload['sale_id'], 'payload': payload, 'receipt_id': reply['receipt_id'], 'total_cents': total, 'status':'received','order_version':1}, session=session)
             db.inbox.insert_one({**key, 'device_id': device['_id'], 'fingerprint': digest, 'payload': payload, 'reply': reply, 'created_at': datetime.now(timezone.utc)}, session=session)
             return reply
 
@@ -140,10 +158,11 @@ def create_app(db):
         device = db.devices.find_one({'token_hash': token_hash, 'revoked': False})
         if not device or device.get('unit') not in UNITS:
             raise HTTPException(401, 'Invalid device')
+        db.devices.update_one({'_id':device['_id'],'revoked':False},{'$set':{'last_seen_at':datetime.now(timezone.utc)}})
         return device
 
     @app.get('/api/sync/v1/snapshot')
-    def snapshot(cursor: str = '', authorization: str = Header(default='')):
+    def snapshot(cursor: str = '', operation_ids: str = '', authorization: str = Header(default='')):
         device = authenticate(authorization)
         if cursor:
             try:
@@ -162,12 +181,22 @@ def create_app(db):
         else:
             generation, offset = str(uuid.uuid4()), 0
             def capture(session):
-                items = list(db.stock.find({'unit': device['unit']}, {'_id': 0, 'sku': 1, 'name': 1, 'quantity': 1, 'price_cents': 1, 'version': 1}, session=session).sort('sku', 1).limit(1001))
+                items = list(db.stock.find({'unit': device['unit']}, {'_id': 0, 'sku': 1, 'name': 1, 'quantity': 1, 'price_cents': 1, 'version': 1,'description':1,'category':1,'available':1,'prep_time':1}, session=session).sort('sku', 1).limit(1001))
                 if len(items) > 1000:
                     raise HTTPException(413, 'Demo snapshot limit exceeded')
+                try:
+                    requested = operation_ids.split(',') if operation_ids else []
+                    if len(requested) > 100 or any(str(uuid.UUID(value)) != value for value in requested):
+                        raise ValueError()
+                except (ValueError, TypeError, AttributeError):
+                    raise HTTPException(422, 'Invalid operation coverage request')
+                selector = {'unit': device['unit'], 'reply.status': 'applied', 'payload.kind': {'$in': ['sale.create', 'stock.adjust','catalog.upsert']}}
+                if requested:
+                    selector['operation_id'] = {'$in': requested}
+                covered = [{'operation_id': row['operation_id'], 'fingerprint': row['fingerprint']} for row in db.inbox.find(selector, {'operation_id': 1, 'fingerprint': 1}, session=session).sort('created_at', -1).limit(100)]
                 now = datetime.now(timezone.utc)
                 saved = {'_id': generation, 'unit': device['unit'], 'device_id': device['_id'],
-                         'items': items, 'created_at': now.isoformat(), 'expires_at': now + timedelta(days=1)}
+                         'items': items, 'covered_operations': covered, 'created_at': now.isoformat(), 'expires_at': now + timedelta(days=1)}
                 db.snapshots.insert_one(saved, session=session)
                 return saved
             with db.client.start_session() as session:
@@ -177,7 +206,7 @@ def create_app(db):
         done = end >= len(saved['items'])
         return {'unit': device['unit'], 'generation': generation, 'items': saved['items'][offset:end],
                 'next_cursor': None if done else generation + ':' + str(end),
-                'done': done, 'created_at': saved['created_at']}
+                'done': done, 'created_at': saved['created_at'], 'covered_operations': saved.get('covered_operations', [])}
 
     @app.post('/api/sync/v1/conflicts/review')
     def review(body: dict, authorization: str = Header(default='')):
@@ -227,6 +256,37 @@ def create_app(db):
             except DuplicateKeyError:
                 if attempt == 2:
                     raise HTTPException(503, 'Retry same review ID')
+
+    @app.get('/api/sync/v1/owner/overview')
+    def owner_overview(authorization: str = Header(default='')):
+        if not authorization.startswith('Bearer ') or len(authorization)>1024:raise HTTPException(401,'Owner authentication required')
+        reviewer=db.reviewers.find_one({'token_hash':hashlib.sha256(authorization[7:].encode()).hexdigest(),'revoked':False})
+        if not reviewer:raise HTTPException(401,'Owner authentication required')
+        units=sorted(set(reviewer.get('units',[])) & UNITS)
+        def collect(session):
+            result=[];now=datetime.now(timezone.utc)
+            for unit in units:
+                from backend.sync_v1.commerce import balance
+                accounts=list(db.ledger.aggregate([{'$match':{'unit':unit}},{'$group':{'_id':'$account','amount':{'$sum':'$amount_cents'}}}],session=session))
+                values={r['_id']:r['amount'] for r in accounts}
+                device=db.devices.find_one({'unit':unit,'revoked':False},sort=[('last_seen_at',-1)],session=session) or {}
+                last=db.inbox.find_one({'unit':unit,'reply.status':'applied'},sort=[('created_at',-1)],session=session) or {}
+                seen=device.get('last_seen_at');committed=last.get('created_at')
+                if seen and seen.tzinfo is None:seen=seen.replace(tzinfo=timezone.utc)
+                if committed and committed.tzinfo is None:committed=committed.replace(tzinfo=timezone.utc)
+                stale=not seen or (now-seen).total_seconds()>120
+                result.append({'unit':unit,'cash_cents':values.get('cash',0),'revenue_cents':-values.get('revenue',0),
+                    'expense_cents':values.get('expense',0),'cash_variance_cents':values.get('cash_variance',0),'receivable_cents':sum(v for k,v in values.items() if k.startswith('receivable/')),
+                    'last_seen_at':seen.isoformat() if seen else None,'last_sync_at':committed.isoformat() if committed else None,
+                    'stale':stale,'connection':'stale_or_offline' if stale else 'recent_contact','local_pending':None,
+                    'conflicts':db.inbox.count_documents({'unit':unit,'reply.status':'conflict','review_state':{'$ne':'rejected'}},session=session),
+                    'cash_reviews':db.cash_shifts.count_documents({'unit':unit,'status':'needs_review'},session=session)})
+            total={field:sum(row[field] for row in result) for field in ('cash_cents','revenue_cents','expense_cents','receivable_cents','cash_variance_cents')}
+            total['result_cents']=total['revenue_cents']-total['expense_cents']-total['cash_variance_cents']
+            return {'scope':'CONFIRMED_ISOLATED_V1_LEDGER','generated_at':now.isoformat(),'units':result,'consolidated':total,
+                    'includes_unsynced_local_data':False,'legacy_production_integrated':False}
+        with db.client.start_session() as session:
+            return session.with_transaction(collect,read_concern=ReadConcern('snapshot'),write_concern=WriteConcern('majority'))
 
     @app.post('/api/sync/v1/batch')
     def batch(body: dict, authorization: str = Header(default='')):
