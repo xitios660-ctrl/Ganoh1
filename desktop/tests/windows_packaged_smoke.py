@@ -82,7 +82,9 @@ def main():
         if args.installer:
             uninstallers = list(install_dir.glob('Uninstall*.exe'))
             assert len(uninstallers) == 1
-            subprocess.run([str(uninstallers[0]), '/S'], env=env, check=True, timeout=180)
+            # NSIS _?= disables the asynchronous temporary uninstaller copy;
+            # wait() then waits for the actual uninstall before checking data/cleanup.
+            subprocess.run([str(uninstallers[0]), '/S', '_?=' + str(install_dir)], env=env, check=True, timeout=180)
             assert dbfile.exists() and dbfile.with_name('database-key.dpapi').exists()
         print('PASS: encrypted Windows backend, DPAPI, hard restart, idempotent retry and data preservation')
 
