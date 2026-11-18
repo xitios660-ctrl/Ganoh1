@@ -21,7 +21,7 @@ Arquivos:
 
 A transação confirma venda em dinheiro, estoque e inbox juntos. Falha intermediária desfaz todos. Reenvio conserva recibo e não duplica efeitos; outro UUID para a mesma venda também não duplica. Preços são validados pelo catálogo e versões de estoque divergentes exigem revisão. PIX/cartão/prazo são preservados como conflito sem liquidação. Não existem recebimentos implementados: bloquear pagamento não equivale a validar módulo financeiro.
 
-Resultados locais Linux: **17 testes desktop e 8 testes de integração MongoDB aprovados**; compilação Python e diff check aprovados. Banco usado: nomes aleatórios `ganoh_sync_test_*`, MongoDB 7 em container local, sem dados reais. Os testes removem seus próprios bancos. GitHub Actions Windows ainda precisa ser observado no commit publicado. Não houve teste físico de instalação/atualização ou dos dois PCs.
+Resultados locais Linux: **17 testes desktop e 8 testes de integração MongoDB aprovados**; compilação Python e diff check aprovados. Banco usado: nomes aleatórios `ganoh_sync_test_*`, MongoDB 7 em container local, sem dados reais. Os testes removem seus próprios bancos. GitHub Actions também passou no commit `94484a0`: núcleo/transportes em Windows e Linux, e integração central em Linux com replica set real. Evidência: https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44206906350 . Não houve teste físico de instalação/atualização ou dos dois PCs.
 
 ## Limites e próximas entregas
 
