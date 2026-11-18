@@ -20,5 +20,14 @@ test('owner sees confirmed totals, unknown offline count and scoped stock after 
   const stock=Array.from(box.querySelectorAll('button')).find(b=>b.textContent==='Ver estoque de RUNNER');
   await act(async()=>stock.click());expect(box.textContent).toContain('Lanche: 3');
   const login=global.fetch.mock.calls.find(([url])=>url.endsWith('/login'));expect(login[1].credentials).toBe('omit');expect(login[1].redirect).toBe('error');
+  // An older response must not repopulate another owner's cleared session.
+  let finish;global.fetch.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  await act(async()=>Array.from(box.querySelectorAll('button')).find(b=>b.textContent==='Atualizar dados').click());
+  await act(async()=>Array.from(box.querySelectorAll('button')).find(b=>b.textContent==='Sair').click());
+  await act(async()=>finish({ok:true,status:200,json:async()=>({units:[],consolidated:{revenue_cents:999999},generated_at:'2026-11-18T00:00:00Z'})}));
+  global.fetch.mockImplementation(async url=>url.endsWith('/login')?({ok:true,json:async()=>({access_token:'different-owner-session'})}):new Promise(()=>{}));
+  await act(async()=>box.querySelector('form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+  expect(box.textContent).not.toContain('Somente operações confirmadas');
+
  }finally{await act(async()=>root.unmount());box.remove();delete process.env.REACT_APP_SYNC_ORIGIN;}
 });

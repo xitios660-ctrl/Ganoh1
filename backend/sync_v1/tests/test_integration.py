@@ -308,6 +308,35 @@ class Integration(unittest.TestCase):
         self.assertEqual(catalog(journal)[0]['version'], 4)
         self.assertEqual(self.db.sales.count_documents({}), 3)
 
+    def test_cash_difference_reconciliation_is_atomic_and_idempotent_centrally(self):
+        from desktop.commerce import record
+        from desktop.business_rules import KINDS
+        from backend.sync_v1.commerce import balance
+        self.db.devices.update_one({'_id':'runner'},{'$set':{'permissions':list(KINDS)}})
+        journal=OfflineJournal(Path(self.temp.name)/'reconcile.sqlite','runner')
+        shift=str(uuid.uuid4())
+        def add(kind,**data):
+            record(journal,operation_id=str(uuid.uuid4()),kind=kind,data={'business_id':str(uuid.uuid4()),**data})
+        add('cash.open',shift_id=shift,counted_cents=0)
+        journal.record_sale(sale_id='cash-difference-sale',total_cents=1000,payment_method='cash',
+                            items=[{'sku':'lanche','quantity':1,'base_version':1}],cash_shift_id=shift)
+        add('cash.close',shift_id=shift,expected_cents=1000,counted_cents=900)
+        self.assertEqual(sync_once(journal,lambda e:self.send(e).json()['results'][0])['synced'],3)
+        self.assertEqual(balance(self.db,None,'runner','cash'),1000)
+        self.assertEqual(self.db.cash_shifts.find_one({'unit':'runner'})['status'],'needs_review')
+        add('cash.reconcile',shift_id=shift,expected_cents=1000,counted_cents=900,description='Falta confirmada pelo proprietário')
+        event=journal.pending()[0]
+        receipts=[self.send(event).json()['results'][0] for _ in range(3)]
+        self.assertEqual([r['status'] for r in receipts],['applied','already_applied','already_applied'])
+        self.assertEqual(len({r['receipt_id'] for r in receipts}),1)
+        self.assertEqual(balance(self.db,None,'runner','cash'),900)
+        self.assertEqual(balance(self.db,None,'runner','cash_variance'),100)
+        self.assertEqual(balance(self.db,None,'runner','revenue'),-1000)
+        row=self.db.cash_shifts.find_one({'unit':'runner'})
+        self.assertEqual(row['status'],'closed');self.assertEqual(row['counted_cents'],900)
+        self.assertEqual(row['reconciled_cents'],900)
+        self.assertEqual(self.db.sales.count_documents({}),1)
+
     def test_stock_adjustment_sync_conflict_is_visible_and_never_overwrites(self):
         from desktop.commerce import record
         from desktop.business_rules import KINDS
