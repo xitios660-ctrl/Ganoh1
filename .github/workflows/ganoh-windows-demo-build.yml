@@ -5,7 +5,8 @@ on:
     paths:
       - '.github/workflows/ganoh-windows-demo-build.yml'
       - 'desktop/electron/**'
-      - 'desktop/launcher.py'
+      - 'desktop/*.py'
+      - 'desktop/tests/**'
       - 'desktop/requirements.txt'
   workflow_dispatch:
 permissions:
