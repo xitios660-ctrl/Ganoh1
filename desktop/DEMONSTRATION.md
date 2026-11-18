@@ -1,3 +1,5 @@
+> Versão demonstrativa mais recente: **0.3.0**, com caixa básico, despesas e cadastro de clientes. [Artefato .exe em ZIP, sem assinatura](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44214639909/artifacts/14387553487), retenção de 7 dias. [Build/testes aprovados](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44214639909). Somente homologação com dados fictícios; não substitui o site. Links de versões anteriores abaixo são históricos.
+
 # GANOH Windows — demonstração offline, somente dados fictícios
 
 O modo desktop é selecionado **no build** com `REACT_APP_DESKTOP_DEMO=true`. O build web normal mantém todas as rotas/telas atuais. A demonstração reutiliza o tema e os componentes React do projeto, mas é uma tela de demonstração dedicada: não constitui paridade visual/funcional completa com o cardápio, cozinha e gestor. O acesso remoto atual do proprietário permanece no sistema existente.

@@ -37,3 +37,9 @@ Manter Electron como escolha inicial: reutiliza React/CRA e permite gerenciar o 
 `POST /api/sync/v1/conflicts/review` usa credencial independente de `reviewers`, permitida por unidade e revogável; exige `review_id`, `operation_id`, `unit`, `expected_revision`, `reason` e `decision` (`reject` ou `retain`). Revisão de inbox + evento auditável são atômicos. Não aplica pagamentos/estoque e não altera recibos originais. A UI de revisão do proprietário e a transmissão dessas revisões ao desktop continuam pendentes.
 
 Demonstração local, criptografia e estrutura Windows: `desktop/DEMONSTRATION.md`. Os testes de integração agora incluem o ciclo API local → reinício → API central real e retomada de três páginas com alteração concorrente do catálogo.
+
+## Livro comercial 0.3.0
+
+Além de venda em dinheiro, o batch aceita `cash.deposit`, `cash.withdraw`, `expense.create`, `customer.create` e `prazo.receive` quando autorizados explicitamente em `devices.permissions`. A autorização é reconferida na transação. Inbox, recibo, lançamentos balanceados e efeito comercial confirmam juntos; um guard por unidade impede write-skew de saldo entre dispositivos. `payment_reference` de recebimento é único por unidade (normalizado por casefold/trim), mesmo com outro UUID/business_id. Recebimento exige dívida existente e não concede crédito nem liquida PIX/cartão.
+
+Coleções adicionais são exclusivas do ensaio: ledger, business_events, customers, payment_refs e unit_state. Não há backfill automático de saldos de demonstrações anteriores nem integração com o dashboard legado. Os testes usam dívidas históricas fictícias para recebimentos; snapshots de clientes/dívidas e venda a prazo ainda faltam. Ver detalhes e limitações em `desktop/DEMONSTRATION.md` e `docs/DESKTOP_PARITY.md`.
