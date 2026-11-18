@@ -49,7 +49,7 @@ def main():
     if len(token) < 32:
         raise RuntimeError('Desktop session missing')
     root = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parents[1])) / 'frontend' / 'build'
-    app = create_local_app(journal, token, transport=transport, frontend=root)
+    app = create_local_app(journal, token, transport=transport, frontend=root, require_shift=True, require_operator=True)
     listener = socket.socket()
     listener.bind(('127.0.0.1', 0))
     listener.listen(128)

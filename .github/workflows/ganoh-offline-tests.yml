@@ -8,8 +8,9 @@ on:
       - "desktop/**"
       - "backend/sync_v1/**"
       - "frontend/src/pages/DesktopDemoPage*"
+      - "frontend/src/pages/OwnerOverviewPage*"
       - "frontend/src/App.js"
-      - "frontend/src/components/DesktopCommercePanel*"
+      - "frontend/src/components/Desktop*"
       - "frontend/src/utils/desktopMoney*"
       - ".github/workflows/ganoh-offline-tests.yml"
   pull_request:
@@ -17,8 +18,9 @@ on:
       - "desktop/**"
       - "backend/sync_v1/**"
       - "frontend/src/pages/DesktopDemoPage*"
+      - "frontend/src/pages/OwnerOverviewPage*"
       - "frontend/src/App.js"
-      - "frontend/src/components/DesktopCommercePanel*"
+      - "frontend/src/components/Desktop*"
       - "frontend/src/utils/desktopMoney*"
       - ".github/workflows/ganoh-offline-tests.yml"
 
@@ -81,7 +83,7 @@ jobs:
           node-version: '22'
       - run: npm ci --legacy-peer-deps --no-audit --no-fund
         working-directory: frontend
-      - run: npm test -- --watch=false --runInBand --runTestsByPath src/pages/DesktopDemoPage.test.jsx src/components/DesktopCommercePanel.test.jsx src/utils/desktopMoney.test.js
+      - run: npm test -- --watch=false --runInBand --testPathPattern="Desktop|desktopMoney|OwnerOverview"
         working-directory: frontend
         env:
           CI: 'true'

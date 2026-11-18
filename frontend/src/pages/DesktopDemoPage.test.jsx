@@ -20,7 +20,7 @@ it('shows unit, offline pending and conflict counts without claiming remote tota
 });
 it('reuses the exact sale request after a lost local response', async () => {
   await act(async () => root.render(<DesktopDemoPage />));
-  const select = container.querySelector('select');
+  const select = container.querySelector('select[aria-label="Produto da venda"]');
   await act(async () => {select.value = 'lanche'; select.dispatchEvent(new Event('change', {bubbles: true}));});
   const original = global.fetch.getMockImplementation();
   const requests = [];
@@ -28,7 +28,7 @@ it('reuses the exact sale request after a lost local response', async () => {
     if (url.endsWith('/sales') && options?.method === 'POST') {requests.push(options.body); throw new Error('ACK lost');}
     return original(url, options);
   });
-  const form = container.querySelector('form');
+  const form = Array.from(container.querySelectorAll('button')).find(b => b.textContent.includes('Salvar venda em dinheiro')).closest('form');
   await act(async () => form.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true})));
   await act(async () => form.dispatchEvent(new Event('submit', {bubbles: true, cancelable: true})));
   expect(requests).toHaveLength(2);

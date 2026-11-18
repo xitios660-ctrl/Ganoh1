@@ -1,4 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import {useDesktopActor} from '../components/DesktopAuthBoundary';
+import DesktopKitchenPanel from '../components/DesktopKitchenPanel';
+import DesktopSecurityPanel from '../components/DesktopSecurityPanel';
+import DesktopOperationsPanel from '../components/DesktopOperationsPanel';
 import DesktopCommercePanel from '../components/DesktopCommercePanel';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -15,6 +19,12 @@ async function api(path, options) {
   return response.json();
 }
 export default function DesktopDemoPage() {
+  const actor=useDesktopActor();
+  const [view,setView]=useState('commerce');
+  const [paymentMethod,setPaymentMethod]=useState('cash');
+  const [creditCustomer,setCreditCustomer]=useState('');
+  const [creditCustomers,setCreditCustomers]=useState([]);
+  const [customerName,setCustomerName]=useState('');
   const [status, setStatus] = useState(null);
   const [catalog, setCatalog] = useState([]);
   const [sales, setSales] = useState([]);
@@ -26,17 +36,17 @@ export default function DesktopDemoPage() {
   const retry = useRef(null);
   const refresh = useCallback(async () => {
     try {
-      const [s, c, orders, events] = await Promise.all([api('status'), api('catalog'), api('sales'), api('sync-history')]);
-      setStatus(s); setCatalog(c.items); setSales(orders.items); setHistory(events.items);
+      const [s, c, orders, events,finance] = await Promise.all([api('status'), api('catalog'), api('sales'), api('sync-history'),api('commerce')]);
+      setStatus(s); setCatalog(c.items); setSales(orders.items); setHistory(events.items); setCreditCustomers(finance.customers||[]);
     } catch (e) { setError(e.message); }
   }, []);
-  useEffect(() => { refresh(); const id = setInterval(refresh, 5000); return () => clearInterval(id); }, [refresh]);
+  useEffect(() => { if(actor?.role==='kitchen') return; refresh(); const id = setInterval(refresh, 5000); return () => clearInterval(id); }, [refresh,actor?.role]);
   const product = catalog.find(i => i.sku === selected);
   async function sell(event) {
     event.preventDefault(); if (busy) return;
     setBusy(true); setError('');
     try {
-      if (!retry.current) retry.current = {operation_id: crypto.randomUUID(), sale_id: crypto.randomUUID(), items: [{sku: selected, quantity: Number(quantity)}]};
+      if (!retry.current) retry.current = {operation_id: crypto.randomUUID(), sale_id: crypto.randomUUID(), customer_name:customerName,payment_method:paymentMethod,...(paymentMethod==='prazo'?{customer_id:creditCustomer}:{}), items: [{sku: selected, quantity: Number(quantity)}]};
       await api('sales', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(retry.current)});
       retry.current = null; await refresh();
     } catch (e) { if (e.status >= 400 && e.status < 500 && e.status !== 408) retry.current = null; setError(`${e.message} Repetir usará o mesmo identificador; confira o histórico antes de iniciar outra venda.`); }
@@ -54,10 +64,11 @@ export default function DesktopDemoPage() {
     catch (e) { setError(e.message); }
     finally { setBusy(false); }
   }
+  if(actor?.role==='kitchen'||view==='kitchen') return <DesktopKitchenPanel request={api} onBack={actor?.role==='kitchen'?null:()=>setView('commerce')} />;
   return <main className="min-h-screen bg-background text-foreground p-6 max-w-5xl mx-auto space-y-6">
-    <header><h1 className="text-3xl font-bold text-orange-500">GANOH</h1>
+    <header><Button variant="outline" onClick={()=>setView('kitchen')}>Abrir cozinha local</Button><h1 className="text-3xl font-bold text-orange-500">GANOH</h1>
       <p>Demonstração local • {status?.unit === 'runner' ? 'RUNNER' : status?.unit === 'gym-londres' ? 'GYM LONDRES' : 'Carregando unidade'}</p>
-      <p className="text-sm">Somente dados fictícios e vendas em dinheiro. Esta demonstração não substitui o atendimento das lojas.</p></header>
+      <p className="text-sm">Somente dados fictícios. Dinheiro e prazo com limite confirmado. Esta demonstração não substitui o atendimento das lojas.</p></header>
     <Card><CardContent className="pt-6 space-y-2" aria-live="polite">
       <p>{status?.connection === 'online' ? 'Servidor de homologação conectado' : 'Offline / servidor indisponível'} • Pendentes: {status?.pending ?? '—'} • Conflitos: {status?.conflicts ?? '—'}</p>
       <p>Última operação sincronizada: {status?.last_synced_at ? new Date(status.last_synced_at).toLocaleString('pt-BR') : 'Nenhuma'}</p>
@@ -67,18 +78,24 @@ export default function DesktopDemoPage() {
       <Button variant="ghost" onClick={reloadCatalog} disabled={busy}>Reiniciar download do catálogo</Button>
     </CardContent></Card>
     {error && <p role="alert" className="text-red-500">{error}</p>}
+    <DesktopOperationsPanel request={api} onChange={refresh} revision={`${status?.pending}:${status?.synced}:${status?.conflicts}`} />
     <Card><CardHeader><CardTitle>Registrar venda local</CardTitle></CardHeader><CardContent>
       <form onSubmit={sell} className="flex flex-wrap gap-4 items-end">
-        <label>Produto<select className="block border rounded p-2 bg-background" value={selected} disabled={busy || !!retry.current} onChange={e => setSelected(e.target.value)} required>
+        <label>Nome do cliente (opcional)<input className="block border rounded p-2 bg-background" value={customerName} maxLength={120} disabled={busy||!!retry.current||paymentMethod==='prazo'} onChange={e=>setCustomerName(e.target.value)} /></label>
+        <label>Forma de pagamento<select className="block border rounded p-2 bg-background" value={paymentMethod} disabled={busy||!!retry.current} onChange={e=>{setPaymentMethod(e.target.value);setCreditCustomer('');}}><option value="cash">Dinheiro</option><option value="prazo">Prazo — limite confirmado</option></select></label>
+        {paymentMethod==='prazo'&&<label>Cliente para prazo<select className="block border rounded p-2 bg-background" value={creditCustomer} required disabled={busy||!!retry.current} onChange={e=>{setCreditCustomer(e.target.value);setCustomerName(creditCustomers.find(c=>c.customer_id===e.target.value)?.name||'');}}><option value="">Selecione cliente aprovado</option>{creditCustomers.filter(c=>c.credit_approved&&c.credit_available_cents>0).map(c=><option key={c.customer_id} value={c.customer_id}>{c.name} — disponível {money(c.credit_available_cents)}</option>)}</select></label>}
+        <label>Produto<select aria-label="Produto da venda" className="block border rounded p-2 bg-background" value={selected} disabled={busy || !!retry.current} onChange={e => setSelected(e.target.value)} required>
           <option value="">Selecione</option>{catalog.map(i => <option key={i.sku} value={i.sku}>{i.name || i.sku} — {money(i.price_cents)}</option>)}
         </select></label>
         <label>Quantidade<input className="block border rounded p-2 bg-background w-24" type="number" min="1" max="100" value={quantity} disabled={busy || !!retry.current} onChange={e => setQuantity(e.target.value)} required /></label>
         <p>Total: {money((product?.price_cents || 0) * Number(quantity))}</p>
-        <Button type="submit" disabled={busy || !product}>{retry.current ? 'Repetir mesma venda' : 'Salvar venda em dinheiro'}</Button>
+        <Button type="submit" disabled={busy || !product || (paymentMethod==='prazo'&&!creditCustomer) || (status?.cash_control_enabled && status?.active_shift?.status !== 'open')}>{retry.current ? 'Repetir mesma venda' : paymentMethod==='prazo'?'Salvar venda a prazo':'Salvar venda em dinheiro'}</Button>
       </form>
+      {status?.cash_control_enabled && status?.active_shift?.status !== 'open' && <p>Abra o caixa para registrar vendas.</p>}
       {!catalog.length && <p>O catálogo precisa ser carregado na primeira sincronização ou preparado pelo modo de demonstração.</p>}
     </CardContent></Card>
     <DesktopCommercePanel request={api} onChange={refresh} />
+    {actor?.role==='owner'&&<DesktopSecurityPanel onChange={refresh} />}
     <details><summary>Histórico de sincronização</summary>
       <ul>{history.slice(0, 10).map(e => <li key={e.sequence}>{e.created_at} • {e.connection} {e.message}</li>)}</ul>
     </details>

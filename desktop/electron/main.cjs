@@ -44,14 +44,14 @@ else app.whenReady().then(async () => {
       callback({requestHeaders: details.requestHeaders});
     });
     session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
-    const window = new BrowserWindow({width: 1200, height: 850, webPreferences: {contextIsolation: true, nodeIntegration: false, sandbox: true}});
+    const window = new BrowserWindow({width: 1200, height: 850, webPreferences: {contextIsolation: true, nodeIntegration: false, sandbox: true, devTools: !app.isPackaged}});
     window.webContents.setWindowOpenHandler(() => ({action: 'deny'}));
     window.webContents.on('will-navigate', (event, url) => {if (new URL(url).origin !== origin) event.preventDefault();});
     backend.once('exit', () => {if (!closing) {dialog.showErrorBox('GANOH', 'Serviço local interrompido. Reabra o aplicativo; as vendas salvas permanecem no computador.'); app.quit();}});
     // Readiness endpoint requires a fresh session; bounded retry handles socket startup.
     let ready = false;
     for (let i = 0; i < 50; i++) {
-      try { const response = await fetch(origin + '/api/local/status', {headers: {Authorization: 'Bearer ' + token}}); if (response.ok) {ready = true; break;} } catch {}
+      try { const response = await fetch(origin + '/api/local/auth', {headers: {Authorization: 'Bearer ' + token}}); if (response.ok) {ready = true; break;} } catch {}
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     if (!ready) throw new Error('Serviço local indisponível.');
