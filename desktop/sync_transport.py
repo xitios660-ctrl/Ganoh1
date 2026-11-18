@@ -24,5 +24,10 @@ class SyncTransport:
             raise ValueError('Invalid sync response')
         return results[0]
 
+    def snapshot(self, cursor=None):
+        response = self._client.get('/api/sync/v1/snapshot', params={'cursor': cursor or ''})
+        response.raise_for_status()
+        return response.json()
+
     def close(self):
         self._client.close()

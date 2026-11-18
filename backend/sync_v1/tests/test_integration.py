@@ -116,6 +116,71 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.db.sales.count_documents({}), 0)
         self.assertEqual(self.db.stock.find_one({'unit': 'runner'})['quantity'], 10)
 
+    def test_snapshot_immutable_pagination_unit_binding_and_resume(self):
+        from desktop.snapshots import pull_once, catalog, cursor
+        self.db.stock.insert_many([{'unit': 'runner', 'sku': f'item-{i:03}', 'quantity': 3, 'price_cents': 10, 'version': 1} for i in range(201)])
+        journal, _ = self.event()
+        def fetch(current):
+            response = self.client.get('/api/sync/v1/snapshot', params={'cursor': current or ''}, headers={'Authorization': 'Bearer runner'})
+            self.assertEqual(response.status_code, 200)
+            return response.json()
+        self.assertFalse(pull_once(journal, fetch))
+        saved_cursor = cursor(journal)
+        self.assertEqual(catalog(journal), [])
+        self.db.stock.update_many({'unit': 'runner'}, {'$inc': {'version': 1, 'quantity': 10}})
+        other = self.client.get('/api/sync/v1/snapshot', params={'cursor': saved_cursor}, headers={'Authorization': 'Bearer gym-londres'})
+        self.assertEqual(other.status_code, 410)
+        journal = OfflineJournal(journal.path, 'runner')
+        self.assertFalse(pull_once(journal, fetch))
+        self.assertTrue(pull_once(journal, fetch))
+        self.assertEqual(len(catalog(journal)), 202)
+        self.assertEqual({i['version'] for i in catalog(journal)}, {1})
+        self.assertIsNone(cursor(journal))
+
+    def test_conflict_review_is_authorized_audited_and_idempotent(self):
+        _, item = self.event(payment='prazo')
+        self.send(item)
+        body = {'unit': 'runner', 'operation_id': item['operation_id'], 'review_id': str(uuid.uuid4()),
+                'expected_revision': 0, 'decision': 'reject', 'reason': 'Pagamento não confirmado; análise do proprietário'}
+        endpoint = '/api/sync/v1/conflicts/review'
+        self.assertEqual(self.client.post(endpoint, json=body, headers={'Authorization': 'Bearer runner'}).status_code, 401)
+        self.db.reviewers.insert_one({'_id': 'owner-demo', 'units': ['runner'], 'revoked': False,
+                                     'token_hash': hashlib.sha256(b'owner-test').hexdigest()})
+        headers = {'Authorization': 'Bearer owner-test'}
+        first = self.client.post(endpoint, json=body, headers=headers)
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(first.json(), self.client.post(endpoint, json=body, headers=headers).json())
+        self.assertEqual(self.db.review_events.count_documents({}), 1)
+        self.assertEqual(self.db.sales.count_documents({}), 0)
+        changed = {**body, 'review_id': str(uuid.uuid4())}
+        self.assertEqual(self.client.post(endpoint, json=changed, headers=headers).status_code, 409)
+        self.assertEqual(self.client.post(endpoint, json={**body, 'unit': 'gym-londres'}, headers=headers).status_code, 403)
+        self.assertEqual(self.send(item).json()['results'][0]['status'], 'conflict')
+
+    def test_local_api_restart_then_real_central_sync(self):
+        from desktop.local_api import create_local_app
+        from desktop.snapshots import apply_page
+        local = OfflineJournal(Path(self.temp.name) / 'local-api.sqlite', 'runner')
+        snapshot = self.client.get('/api/sync/v1/snapshot', headers={'Authorization': 'Bearer runner'}).json()
+        apply_page(local, snapshot, None)
+        token = 'local-test-' + 'x' * 32
+        headers = {'Authorization': 'Bearer ' + token}
+        body = {'operation_id': str(uuid.uuid4()), 'sale_id': 'real-central-test', 'items': [{'sku': 'lanche', 'quantity': 1}]}
+        with TestClient(create_local_app(local, token)) as pc:
+            self.assertEqual(pc.post('/api/local/sales', json=body, headers=headers).status_code, 200)
+        reopened = OfflineJournal(local.path, 'runner')
+        parent = self
+        class Transport:
+            def __call__(self, event):
+                return parent.send(event).json()['results'][0]
+            def snapshot(self, cursor):
+                return parent.client.get('/api/sync/v1/snapshot', params={'cursor': cursor or ''}, headers={'Authorization': 'Bearer runner'}).json()
+        with TestClient(create_local_app(reopened, token, Transport(), interval=100)) as pc:
+            pc.post('/api/local/sync', headers=headers)
+            self.assertEqual(pc.get('/api/local/status', headers=headers).json()['synced'], 1)
+        self.assertEqual(self.db.sales.count_documents({}), 1)
+        self.assertEqual(self.db.stock.find_one({'unit': 'runner'})['quantity'], 9)
+
     def test_production_database_rejected(self):
         with self.assertRaises(ValueError):
             create_app(self.mongo['ganoh_production'])

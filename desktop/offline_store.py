@@ -39,17 +39,29 @@ class OfflineJournal:
     An operation_id is never regenerated on a retry or after a reboot.
     """
 
-    def __init__(self, path: str | Path, unit: str):
+    def __init__(self, path: str | Path, unit: str, *, encryption_key: bytes | None = None):
         if unit not in UNITS:
             raise OfflineError("Unidade inválida")
+        self._driver = sqlite3
+        self._key = encryption_key
+        if encryption_key is not None:
+            if not isinstance(encryption_key, bytes) or len(encryption_key) != 32:
+                raise OfflineError('SQLCipher requires a 32-byte key')
+            from sqlcipher3 import dbapi2
+            self._driver = dbapi2
         self.unit = unit
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._initialize()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(str(self.path), timeout=5, isolation_level=None)
-        connection.row_factory = sqlite3.Row
+        connection = self._driver.connect(str(self.path), timeout=5, isolation_level=None)
+        connection.row_factory = self._driver.Row
+        if self._key is not None:
+            connection.execute('PRAGMA key = "x\'' + self._key.hex() + '\'"')
+            if not connection.execute('PRAGMA cipher_version').fetchone():
+                connection.close()
+                raise OfflineError('SQLCipher unavailable; refusing plaintext fallback')
         connection.execute("PRAGMA busy_timeout = 5000")
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA synchronous = FULL")
@@ -167,7 +179,7 @@ class OfflineJournal:
                     )
                     result = {"operation_id": operation_key, "state": "pending",
                               "fingerprint": fingerprint, "already_exists": False}
-            except sqlite3.IntegrityError as exc:
+            except self._driver.IntegrityError as exc:
                 db.execute("ROLLBACK")
                 raise OfflineError("Venda ou operação já registrada com identificador diferente") from exc
             except Exception:

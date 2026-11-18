@@ -2,7 +2,7 @@
 import hashlib
 import hmac
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from fastapi import FastAPI, Header, HTTPException
 from pymongo.errors import DuplicateKeyError
@@ -20,10 +20,15 @@ def create_app(db):
     db.sales.create_index([('unit', 1), ('sale_id', 1)], unique=True)
     db.devices.create_index('token_hash', unique=True)
     db.stock.create_index([('unit', 1), ('sku', 1)], unique=True)
+    db.review_events.create_index([('unit', 1), ('review_id', 1)], unique=True)
+    db.reviewers.create_index('token_hash', unique=True)
+    db.snapshots.create_index('expires_at', expireAfterSeconds=0)
     app = FastAPI(title='GANOH isolated sync validation')
 
     def apply(device, item):
         payload = item.get('payload', {})
+        if not isinstance(payload, dict):
+            raise HTTPException(422, 'Invalid payload')
         identity = {key: item.get(key) for key in ('unit', 'operation_id', 'fingerprint')}
         if item.get('unit') != device['unit'] or payload.get('unit') != device['unit']:
             raise HTTPException(403, 'Unit mismatch')
@@ -103,14 +108,104 @@ def create_app(db):
                 if attempt == 2:
                     raise HTTPException(503, 'Retry same operation ID')
 
-    @app.post('/api/sync/v1/batch')
-    def batch(body: dict, authorization: str = Header(default='')):
+    def authenticate(authorization):
         if not authorization.startswith('Bearer ') or len(authorization) > 1024:
             raise HTTPException(401, 'Device authentication required')
         token_hash = hashlib.sha256(authorization[7:].encode()).hexdigest()
         device = db.devices.find_one({'token_hash': token_hash, 'revoked': False})
         if not device:
             raise HTTPException(401, 'Invalid device')
+        return device
+
+    @app.get('/api/sync/v1/snapshot')
+    def snapshot(cursor: str = '', authorization: str = Header(default='')):
+        device = authenticate(authorization)
+        if cursor:
+            try:
+                generation, offset_text = cursor.split(':')
+                offset = int(offset_text)
+                if str(uuid.UUID(generation)) != generation or offset < 0 or offset % 100:
+                    raise ValueError()
+            except (ValueError, AttributeError):
+                raise HTTPException(422, 'Invalid cursor')
+            saved = db.snapshots.find_one({'_id': generation, 'unit': device['unit'],
+                                          'device_id': device['_id']})
+            if not saved or saved['expires_at'].replace(tzinfo=timezone.utc) <= datetime.now(timezone.utc):
+                raise HTTPException(410, 'Snapshot expired; restart explicitly')
+            if offset >= len(saved['items']):
+                raise HTTPException(422, 'Cursor outside snapshot')
+        else:
+            generation, offset = str(uuid.uuid4()), 0
+            def capture(session):
+                items = list(db.stock.find({'unit': device['unit']}, {'_id': 0, 'sku': 1, 'name': 1, 'quantity': 1, 'price_cents': 1, 'version': 1}, session=session).sort('sku', 1).limit(1001))
+                if len(items) > 1000:
+                    raise HTTPException(413, 'Demo snapshot limit exceeded')
+                now = datetime.now(timezone.utc)
+                saved = {'_id': generation, 'unit': device['unit'], 'device_id': device['_id'],
+                         'items': items, 'created_at': now.isoformat(), 'expires_at': now + timedelta(days=1)}
+                db.snapshots.insert_one(saved, session=session)
+                return saved
+            with db.client.start_session() as session:
+                saved = session.with_transaction(capture, read_concern=ReadConcern('snapshot'),
+                                                 write_concern=WriteConcern('majority'))
+        end = offset + 100
+        done = end >= len(saved['items'])
+        return {'unit': device['unit'], 'generation': generation, 'items': saved['items'][offset:end],
+                'next_cursor': None if done else generation + ':' + str(end),
+                'done': done, 'created_at': saved['created_at']}
+
+    @app.post('/api/sync/v1/conflicts/review')
+    def review(body: dict, authorization: str = Header(default='')):
+        # Owner/support credentials are separate from store device credentials.
+        if not authorization.startswith('Bearer '):
+            raise HTTPException(401, 'Reviewer authentication required')
+        reviewer = db.reviewers.find_one({'token_hash': hashlib.sha256(authorization[7:].encode()).hexdigest(), 'revoked': False})
+        if not reviewer:
+            raise HTTPException(401, 'Reviewer authentication required')
+        unit = body.get('unit')
+        if unit not in reviewer.get('units', []):
+            raise HTTPException(403, 'Reviewer unit mismatch')
+        try:
+            review_id = str(uuid.UUID(body['review_id']))
+            operation_id = str(uuid.UUID(body['operation_id']))
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise HTTPException(422, 'Invalid review identity')
+        if body.get('decision') not in ('reject', 'retain') or not isinstance(body.get('reason'), str) or not 5 <= len(body['reason'].strip()) <= 500 or type(body.get('expected_revision')) is not int:
+            raise HTTPException(422, 'Explicit decision, reason and revision required')
+        digest = hashlib.sha256(_canonical(body).encode()).hexdigest()
+        def commit(session):
+            active = db.reviewers.update_one({'_id': reviewer['_id'], 'revoked': False}, {'$inc': {'review_attempts': 1}}, session=session)
+            if not active.matched_count:
+                raise HTTPException(401, 'Reviewer revoked')
+            prior = db.review_events.find_one({'unit': unit, 'review_id': review_id}, session=session)
+            if prior:
+                if prior['fingerprint'] != digest:
+                    raise HTTPException(409, 'Review ID reused')
+                return prior['result']
+            conflict = db.inbox.find_one({'unit': unit, 'operation_id': operation_id}, session=session)
+            if not conflict or conflict['reply']['status'] != 'conflict':
+                raise HTTPException(404, 'Conflict not found')
+            revision = conflict.get('review_revision', 0)
+            if revision != body['expected_revision'] or conflict.get('review_state') == 'rejected':
+                raise HTTPException(409, 'Conflict already reviewed or revision changed')
+            result = {'unit': unit, 'operation_id': operation_id, 'review_id': review_id,
+                      'revision': revision + 1, 'state': 'rejected' if body['decision'] == 'reject' else 'needs_review'}
+            db.inbox.update_one({'_id': conflict['_id']}, {'$set': {'review_revision': revision + 1, 'review_state': result['state']}}, session=session)
+            db.review_events.insert_one({'unit': unit, 'review_id': review_id, 'operation_id': operation_id,
+                'reviewer_id': reviewer['_id'], 'fingerprint': digest, 'decision': body['decision'],
+                'reason': body['reason'].strip(), 'created_at': datetime.now(timezone.utc), 'result': result}, session=session)
+            return result
+        for attempt in range(3):
+            try:
+                with db.client.start_session() as session:
+                    return session.with_transaction(commit, read_concern=ReadConcern('snapshot'), write_concern=WriteConcern('majority'))
+            except DuplicateKeyError:
+                if attempt == 2:
+                    raise HTTPException(503, 'Retry same review ID')
+
+    @app.post('/api/sync/v1/batch')
+    def batch(body: dict, authorization: str = Header(default='')):
+        device = authenticate(authorization)
         items = body.get('operations')
         if not isinstance(items, list) or not 1 <= len(items) <= 100 or not all(isinstance(i, dict) for i in items):
             raise HTTPException(422, 'Invalid batch')
