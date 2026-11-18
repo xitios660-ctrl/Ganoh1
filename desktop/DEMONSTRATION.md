@@ -1,67 +1,50 @@
-> Versão demonstrativa mais recente: **0.3.0**, com caixa básico, despesas e cadastro de clientes. [Artefato .exe em ZIP, sem assinatura](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44214639909/artifacts/14387553487), retenção de 7 dias. [Build/testes aprovados](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44214639909). Somente homologação com dados fictícios; não substitui o site. Links de versões anteriores abaixo são históricos.
+# GANOH Windows — demonstração 0.4.0
 
-# GANOH Windows — demonstração offline, somente dados fictícios
+Somente dados fictícios e ambiente isolado. Não substitui o site das lojas nem está homologado para atendimento real. O build normal do site continua com as telas originais.
 
-O modo desktop é selecionado **no build** com `REACT_APP_DESKTOP_DEMO=true`. O build web normal mantém todas as rotas/telas atuais. A demonstração reutiliza o tema e os componentes React do projeto, mas é uma tela de demonstração dedicada: não constitui paridade visual/funcional completa com o cardápio, cozinha e gestor. O acesso remoto atual do proprietário permanece no sistema existente.
+## Uso local
 
-## Fluxo demonstrável
+1. Instalar o artefato DEMO UNSIGNED do workflow da branch de desenvolvimento.
+2. Escolher RUNNER ou GYM LONDRES na primeira abertura. Vínculo permanente por dispositivo/unidade; dados em `%LOCALAPPDATA%/GANOH-Demo/<unidade>/`.
+3. Criar o primeiro proprietário local com senha forte (mínimo 12 caracteres). Não existe senha padrão. Criar perfis de caixa ou cozinha conforme necessidade.
+4. Abrir o caixa com contagem igual ao saldo do livro. Proprietário pode cadastrar produtos e lançar entrada de estoque; catálogo também pode vir de snapshot de homologação.
+5. Registrar venda em dinheiro, despesa ou cliente offline. Fechar/reabrir conserva operações e saldo. Cozinha pode atualizar preparação/entrega sem visualizar finanças.
+6. Para prazo: cadastrar cliente, autorizar limite como proprietário e sincronizar essa aprovação com a central antes de usar o crédito. Recebimento em dinheiro exige recibo único; não conta receita novamente.
+7. Fechar caixa com contagem. Diferença bloqueia nova abertura e exige reconciliação explícita do proprietário com motivo, mantendo contagem original e lançamento de diferença.
 
-1. Instalar o artefato **DEMO / UNSIGNED** gerado pelo workflow manual `Build GANOH Windows demonstration (unsigned)` na branch de desenvolvimento. Não instalar como substituto do GANOH das lojas.
-2. Abrir o atalho, escolher RUNNER ou GYM LONDRES **na primeira abertura**; o vínculo é conservado para próximas aberturas. O banco cifrado também mantém a unidade e um UUID de dispositivo permanente.
-3. Selecionar o lanche fictício e salvar venda em dinheiro. Sem servidor configurado, aparece pendente.
-4. Fechar e reabrir: a venda continua no histórico local. Nenhum terminal é necessário para o funcionário.
-5. Com homologação HTTPS configurada pelo suporte e catálogo correspondente, a tarefa automática tenta a sincronização a cada 10 segundos e ao clicar no botão. Após confirmação autenticada, a venda fica sincronizada. O catálogo fictício precisa existir na homologação com a mesma versão/preço; divergência gera conflito, não uma aprovação silenciosa.
+A interface é operacional dedicada com tema/componentes existentes, sem paridade integral de todas as telas do site. PIX/cartão não são liquidados offline. Cancelamentos/estornos e download de clientes/saldos centrais ainda faltam.
 
-O instalador é gerado por Electron/NSIS e inclui backend PyInstaller + build React. O processo Python fica oculto e somente em `127.0.0.1` numa porta efêmera; a sessão secreta fica no processo principal Electron, enviada ao backend por stdin e adicionada aos pedidos locais. Renderer sem Node, com sandbox/contextIsolation, sem novas janelas/navegação externa. O backend exige sessão, host loopback e origem compatível. Nenhuma credencial Atlas é empacotada.
+## Persistência e segurança
 
-Os arquivos persistem em `%LOCALAPPDATA%/GANOH-Demo/<unidade>/`. Instalação/atualização não escreve nesse diretório. A chave de 32 bytes e o token central ficam protegidos por **DPAPI do usuário Windows**; o SQLite usa SQLCipher, incluindo WAL. Não há fallback em texto simples no launcher. Se a chave sumir, a inicialização falha sem substituir o banco. Copiar apenas o `.sqlite3` para outro usuário/PC não permite recuperação: política de backup cifrado com recuperação de chaves ainda precisa ser implementada. Não converter automaticamente os protótipos plaintext antigos.
+Electron isolado/sandbox/contextIsolation, sem Node no renderer, backend PyInstaller oculto em loopback com porta efêmera, token no processo principal e credencial por stdin. API valida bearer, origem/host e sessão de operador. Sessões HttpOnly SameSite strict expiram e são revogadas ao desativar/resetar conta. Auditoria local associa operador aos eventos. Nenhuma credencial Atlas é distribuída.
 
-Configuração de suporte (não destinada ao funcionário): `sync.json` contém somente `{"origin":"https://servidor-de-homologacao"}`; `device-token.dpapi` deve ser provisionado com `desktop.windows_secrets.save_secret` na mesma conta Windows. A API central desta branch continua restrita a `ganoh_sync_test_*`. Não configurar o endpoint legado ou produção.
+SQLite usa SQLCipher inclusive WAL; chave e token do dispositivo usam DPAPI do usuário Windows. Não há fallback plaintext nem substituição de banco ao perder chave. Instalador não escreve no diretório dos dados. Schema 3 faz evolução aditiva e recusa versões futuras; restauração/rollback reais precisam de homologação.
 
-## Snapshots e conflitos
+Proprietário pode exportar backup cifrado consistente, protegido por frase de recuperação com pelo menos 16 caracteres. Guardar frase separadamente. A opção verificar restaura em diretório novo e revoga sessões copiadas, sem trocar o banco ativo. Não basta copiar o arquivo SQLite sem a chave. Recuperação ativa e backups automáticos ainda pendentes. CSV do livro é provisório, em centavos, com escape de fórmulas.
 
-Snapshots de catálogo/estoque são capturados em transação snapshot no MongoDB, imutáveis por geração, paginados em 100 itens, vinculados ao dispositivo/unidade e com expiração de 24h. Limite demonstrativo: 1.000 SKUs. Página + cursor são gravados juntos no SQLite, com staging; o catálogo publicado só muda na última página. Reabertura retoma o cursor. Versões inferiores e snapshots anteriores são rejeitados. O botão de reiniciar download descarta apenas staging/cursor, preservando catálogo publicado, vendas e fila. Não existe CDC incremental completo para todas as coleções.
+## Sincronização de homologação
 
-Operações locais permanecem separadas do snapshot. Múltiplas vendas offline no mesmo SKU ainda podem ter a mesma versão-base e gerar conflitos conservadores após a primeira sincronização; **não há reserva/projeção de estoque operacional completa**. Não alterar UUID para contornar conflitos.
+Suporte configura `sync.json` com `{"origin":"https://servidor-de-homologacao"}` e provisiona `device-token.dpapi` pela mesma conta Windows. Central desta branch aceita somente `ganoh_sync_test_*`, nunca produção. Cada dispositivo precisa de permissões explícitas por operação/unidade. Não configurar endpoint legado.
 
-`POST /api/sync/v1/conflicts/review` usa credencial de proprietário separada (`reviewers`, token hash, unidades permitidas, revogável). Exige UUID da revisão, versão esperada, motivo e decisão `reject`/`retain`. Evento auditável e revisão da inbox confirmam juntos; repetir a mesma revisão não cria outro evento. Rejeitar não apaga operação nem altera saldo/estoque. A aprovação com reaplicação financeira, a UI do proprietário para revisar e o download das revisões ao desktop ainda faltam. O recibo de conflito original continua imutável.
+Worker automático e botão manual não seguram o bloqueio de gravações durante chamadas de rede. Fila persistente global preserva causalidade e para em confirmação desconhecida. UUID e fingerprint imutáveis, índices únicos e transação central unem inbox, estoque e livro; reenvio após resposta perdida devolve o recibo sem duplicar efeito.
 
-## Testes e limites
+Snapshots imutáveis por geração, páginas de 100, cursor por dispositivo/unidade, expiração 24h e limite de 1.000 SKUs. Staging só publica ao finalizar; interrupção retoma cursor. Cobertura com UUID+hash distingue reservas já aplicadas para não descontar estoque duas vezes. Até 100 UUIDs pendentes por solicitação. Versão/regressão inválida não substitui catálogo publicado. Estoque insuficiente ou versão divergente gera conflito visível.
+
+Revisão central exige proprietário, unidade autorizada, UUID, versão e motivo; decisões retain/reject são auditadas e não apagam venda nem ajustam dinheiro silenciosamente. UI de revisão e download de resoluções ainda faltam. Caixa/recebíveis locais são provisórios enquanto pendentes ou conflitantes.
+
+## Painel separado do proprietário
+
+Build `REACT_APP_OWNER_PANEL=true REACT_APP_SYNC_ORIGIN=https://central-de-homologacao`. Sem origem HTTPS não faz conexão; não existe fallback para produção. Provisionamento de conta usa `backend.sync_v1.owner_auth.provision` exclusivamente no banco descartável e lista explícita de unidades. CORS exige origem HTTPS autorizada em `create_app(..., owner_origins=...)`. Não há cadastro público de proprietário.
+
+Login, sessão em memória, logout/revogação e unidades autorizadas; mostra somente lançamentos centrais confirmados, estoque paginado, última comunicação/sincronização e aviso de atraso. Pendências ainda nos PCs são desconhecidas. Não existe implantação HTTPS pronta; o painel financeiro atual segue intacto. GitHub Pages pode servir interface, mas exige backend autenticado em outra hospedagem.
+
+## Validação
 
 - `python -m unittest discover -s desktop/tests -v`
-- Replica set descartável em 27028: `python -m unittest discover -s backend/sync_v1/tests -v`
-- `npm --prefix frontend test -- --watch=false --runInBand --runTestsByPath src/pages/DesktopDemoPage.test.jsx`
-- Windows: `python desktop/tests/windows_packaged_smoke.py` (isola LOCALAPPDATA, executa backend, grava, encerra forçado, reabre e verifica dedupe/criptografia).
-- Workflow manual também executa smoke sobre o `.exe` PyInstaller antes de montar o instalador.
+- MongoDB replica set descartável em loopback 27028: `python -m unittest discover -s backend/sync_v1/tests -v`
+- `CI=true npm --prefix frontend test -- --watch=false --runInBand --testPathPattern="Desktop|desktopMoney|OwnerOverview"`
+- Build desktop: `REACT_APP_DESKTOP_DEMO=true GENERATE_SOURCEMAP=false npm --prefix frontend run build`
+- Chromium real: `python -m desktop.tests.browser_demo_smoke` (transporte central TestClient, não HTTPS externo).
+- Windows: `python desktop/tests/windows_packaged_smoke.py`; CI também executa sobre PyInstaller e NSIS, com restart forçado, reinstalação, backup/recuperação e preservação de chave/dados.
 
-Instalador sem assinatura: somente homologação. Instalação, reinstalação e desinstalação silenciosas passaram na CI Windows com preservação de dados/chave. Ainda faltam testes interativos da UI Electron, instalação/atualização/desinstalação em Windows 10/11 e nos dois PCs, assinatura, recuperação de chave/backup e atualização assinada com rollback. Caixa, clientes, recebimentos a prazo, despesas e estornos não foram adaptados; PIX/cartão/prazo continuam bloqueados para liquidação. Não liberar atendimento real.
-
-### Ensaio no navegador real
-
-Com dependências Playwright/Chromium disponíveis, build React desktop pronto e o replica set descartável em 27028:
-
-```sh
-python -m desktop.tests.browser_demo_smoke
-```
-
-Esse ensaio executa Chromium, API local HTTP, SQLCipher e API central com MongoDB real; simula rede indisponível, salva pela UI, encerra/reabre o backend e reconecta. Verifica uma única venda central e baixa única do estoque. A captura usa somente dados fictícios (`/tmp/ganoh-desktop-demo.png`). O transporte central nesse ensaio é injetado com TestClient; não comprova um deploy HTTPS real. Foi executado com sucesso em Linux. Não equivale ao teste da janela Electron no Windows.
-
-O workflow Windows também testa instalação silenciosa, reinstalação da mesma versão e desinstalação preservando dados. A atualização entre versões diferentes e o uso interativo em Windows 10/11 continuam sujeitos à homologação física.
-
-### Artefato validado deste incremento
-
-[Baixar ZIP com instalador `.exe` DEMO sem assinatura](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44210464162/artifacts/14385298998) (retenção de 7 dias, acesso conforme permissões GitHub). [Build e testes aprovados](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44210464162), commit `1bceeb3`. Usar somente em máquina de homologação com dados fictícios. Não é a versão operacional completa e não inclui um servidor HTTPS central já implantado.
-
-## Incremento 0.3.0 — livro financeiro local (parcial)
-
-A tela demonstrativa agora inclui suprimento, retirada, despesa em dinheiro e cadastro de clientes. Os lançamentos usam centavos inteiros, partidas balanceadas, UUID estável e identificação comercial única. Venda em dinheiro alimenta caixa e receita na mesma transação local; despesas/retiradas não podem deixar o saldo negativo. Suprimentos e retiradas não são faturamento. Resumos locais são provisórios, inclusive quando há conflitos centrais: não são extratos bancários nem consolidação do proprietário.
-
-O motor de recebimentos em dinheiro exige cliente/dívida existentes e número de recibo único por unidade, inclusive quando outro UUID é enviado. Não cria dívida ou concede crédito. Clientes novos começam sem dívida; ainda faltam vendas a prazo e snapshots de clientes/dívidas, portanto esse fluxo só é validado com fixtures fictícias nesta etapa. PIX/cartão continuam sem liquidação offline.
-
-API local: `GET/POST /api/local/commerce`; eventos `cash.deposit`, `cash.withdraw`, `expense.create`, `customer.create`, `prazo.receive`. O corpo de escrita exige `operation_id`, `kind` e `data` (com `business_id` estável e campos da operação). As filas de venda e financeiras compartilham ordem durável; o worker para se a confirmação anterior é desconhecida.
-
-O servidor central só aceita cada tipo financeiro se estiver explicitamente na lista `permissions` do dispositivo, e confere isso novamente dentro da transação. Todos os efeitos financeiros por unidade são serializados para evitar retiradas concorrentes acima do saldo. Recibo, lançamentos e inbox confirmam juntos. Conflitos permanecem para revisão, sem sobrescrever saldo. A lista de permissões de dispositivo não substitui os papéis individuais de funcionário/gestor, ainda necessários antes de qualquer uso real.
-
-Schema SQLite 2: migração aditiva, preservando vendas, payloads, hashes e recibos. Lançamentos de vendas em dinheiro dos protótipos antigos são reconstruídos **localmente**, de forma idempotente. A central não inventa saldos históricos nem faz backfill financeiro automático: homologações antigas precisam de reconciliação/fixtures consistentes; divergências geram conflito. Um executável antigo deve recusar abrir o schema novo. Ainda não há plano de rollback entre versões homologado com backup.
-
-Matriz de todas as áreas a adaptar: [DESKTOP_PARITY.md](../docs/DESKTOP_PARITY.md). Abertura/fechamento por turno, relatórios do gestor, permissões individuais, estoque projetado, cancelamentos/estornos e demais módulos continuam pendentes. O site usado pelas lojas permanece intacto.
+CI não equivale a homologação interativa Electron em Windows 10/11 ou dois computadores. Upgrade entre versões distintas, assinatura, servidor HTTPS, provisionamento real, restauração ativa e paridade financeira completa continuam obrigatórios antes do uso real. Histórico de resultados/artefatos em [relatório técnico](../docs/CODEX_WINDOWS_PROGRESS_2026-11-18.md).

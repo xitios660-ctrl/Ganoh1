@@ -22,20 +22,24 @@ O aplicativo deve atingir as funções do site antes de substituir qualquer aten
 | `stores` | 1 |
 | `whatsapp` | 15 |
 
-## Matriz de implementação local
+## Matriz atual — incremento 0.4.0
 
-| Área | Implementação local atual | Pendente para paridade |
+| Área | Implementado e testado em ambiente isolado | Pendente para paridade |
 | --- | --- | --- |
-| Cardápio e vendas | Snapshot de catálogo, venda em dinheiro, fila/recibo idempotentes | Cardápio original completo, adicionais/categorias, cancelamentos/estornos e formas de pagamento |
-| Caixa | Livro em centavos, venda em dinheiro, suprimento, retirada e bloqueio de saldo insuficiente | Abertura/fechamento por turno, conferência, diferenças auditadas, permissões individuais e relatórios legados |
-| Despesas | Registro de despesa em dinheiro com lançamento/outbox atômicos | Categorias e demais meios, ajustes/estornos e telas do gestor original |
-| Clientes | Cadastro local e sync por unidade, dedupe de UUID e nome normalizado | Edição versionada, telefones/demais campos, snapshots e busca compatíveis com legado |
-| Prazo | Motor de recebimento em dinheiro contra dívida existente, recibo único e bloqueio de excedente | Vendas a prazo, limites aprovados, crédito/estornos, snapshots históricos e conciliação; clientes novos começam sem dívida |
-| Estoque | Snapshot/versionamento e conflitos centrais | Reserva/projeção offline de múltiplas vendas, ajustes/entradas/perdas, revisão/reversões e tela original |
-| Cozinha | Interface web preservada | Endpoints locais para fila/status/tempo/histórico e testes de paridade |
-| Gestor/relatórios | Site remoto atual preservado; resumo local demonstrativo provisório | Integração do livro financeiro com relatórios, gráficos/PDF/CSV, consolidado e indicador remoto de atraso |
-| Autenticação | Sessão loopback, dispositivo revogável, DPAPI/SQLCipher | Papéis individuais/credenciais offline, provisionamento e recuperação segura |
-| PIX/cartão/WhatsApp | Integrações do site preservadas, sem liquidação automática offline | Adaptadores online seguros e confirmação válida, sem prometer banco/WhatsApp offline |
-| Windows | Electron/PyInstaller/NSIS, persistência e testes de reinstalação | Homologação interativa Win10/11, atualização entre versões, assinatura, backup/restauração e recuperação de chave |
+| Vendas/cardápio | Dinheiro e prazo aprovado, catálogo local editável, reservas e UUID estável | Telas originais completas, adicionais, categorias, cancelamento/estorno |
+| Caixa | Abertura, fechamento, diferença bloqueada para revisão, reconciliação com motivo e conta de diferença | Relatórios legados e homologação financeira física |
+| Despesas/clientes | Despesa em dinheiro, cadastro, limite versionado e permissão de proprietário | Demais campos, edição completa e download de clientes/saldos centrais |
+| Prazo | Aprovação central obrigatória do limite, venda, recebimento parcial, recibo único | Estornos, demais meios e histórico legado |
+| Estoque | Projeção/reserva offline, entrada/ajuste versionado, snapshot paginado com cobertura por hash | Revisão visual e reversões completas; limite demonstrativo 1.000 SKUs |
+| Cozinha | Fila local e transições versionadas até entrega, perfil sem valores financeiros | Paridade visual/tempos/histórico da cozinha original |
+| Proprietário | Painel separado com login, valores centrais confirmados por unidade, atraso e estoque paginado | Hospedagem HTTPS de homologação, relatórios legados e UI de revisão de conflitos |
+| Segurança | SQLCipher, DPAPI, contas owner/cashier/kitchen, scrypt, sessões revogáveis e auditoria local | Provisionamento real e validação externa; identidade do operador não atestada centralmente |
+| Backup/relatórios | Backup cifrado consistente, chave recuperável por frase, restauração isolada, CSV provisório | Ativação segura da recuperação, retenção automática e relatório/PDF legado |
+| PIX/cartão/WhatsApp | Sistema web existente preservado | Adaptadores online e confirmação válida; sem liquidação offline simulada |
+| Windows | Electron/PyInstaller/NSIS, atalho, backend oculto e dados fora da instalação | Testes físicos Win10/11, dois PCs, upgrade entre versões, assinatura e rollback |
 
-Cada módulo exige testes de regras e equivalência antes de ser marcado pronto. A nova demonstração não importa dados reais, não substitui as telas web atuais e não alimenta os relatórios de produção. Recebimentos contra dívida só podem ser demonstrados com fixtures fictícias enquanto snapshots de clientes/dívidas ainda não estiverem implementados. Não fabricar saldo nem copiar dados de produção sem backup/restauração e autorização.
+A tela operacional reutiliza tema/componentes, mas não é a reprodução integral das telas originais. Não importar dados reais nem substituir o site. Snapshots atuais cobrem catálogo/estoque; clientes e saldos alterados remotamente não são baixados automaticamente. Divergências financeiras exigem revisão; não há aprovação silenciosa.
+
+O painel novo lê somente o livro da central isolada `ganoh_sync_test_*`. Não recebe dados de produção, e não conhece vendas ainda offline: pendências locais remotas são explicitamente desconhecidas. O acesso atual pelo celular permanece no site existente.
+
+Evidências e contagens atualizadas: [relatório técnico](CODEX_WINDOWS_PROGRESS_2026-11-18.md). Não declarar paridade completa ou homologação comercial com base apenas na CI.
