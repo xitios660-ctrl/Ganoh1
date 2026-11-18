@@ -56,16 +56,19 @@ class OfflineJournal:
 
     def _connect(self) -> sqlite3.Connection:
         connection = self._driver.connect(str(self.path), timeout=5, isolation_level=None)
-        connection.row_factory = self._driver.Row
-        if self._key is not None:
-            connection.execute('PRAGMA key = "x\'' + self._key.hex() + '\'"')
-            if not connection.execute('PRAGMA cipher_version').fetchone():
-                connection.close()
-                raise OfflineError('SQLCipher unavailable; refusing plaintext fallback')
-        connection.execute("PRAGMA busy_timeout = 5000")
-        connection.execute("PRAGMA foreign_keys = ON")
-        connection.execute("PRAGMA synchronous = FULL")
-        return connection
+        try:
+            connection.row_factory = self._driver.Row
+            if self._key is not None:
+                connection.execute('PRAGMA key = "x\'' + self._key.hex() + '\'"')
+                if not connection.execute('PRAGMA cipher_version').fetchone():
+                    raise OfflineError('SQLCipher unavailable; refusing plaintext fallback')
+            connection.execute("PRAGMA busy_timeout = 5000")
+            connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA synchronous = FULL")
+            return connection
+        except Exception:
+            connection.close()
+            raise
 
     def _initialize(self) -> None:
         with closing(self._connect()) as db:

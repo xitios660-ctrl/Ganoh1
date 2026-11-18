@@ -1,4 +1,5 @@
 import os
+from contextlib import closing
 import sqlite3
 import tempfile
 import unittest
@@ -109,7 +110,7 @@ class LocalTests(unittest.TestCase):
         with self.assertRaises(Exception):
             OfflineJournal(path, 'runner', encryption_key=b'z'*32)
         with self.assertRaises(sqlite3.DatabaseError):
-            with sqlite3.connect(path) as db:
+            with closing(sqlite3.connect(path)) as db:
                 db.execute('SELECT * FROM operations').fetchall()
         for file in path.parent.glob('encrypted.sqlite*'):
             self.assertNotIn(b'secret-sale', file.read_bytes())
