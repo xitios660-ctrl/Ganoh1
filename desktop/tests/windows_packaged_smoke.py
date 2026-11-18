@@ -65,6 +65,14 @@ def main():
             response = client.post('/api/local/sales', json=operation)
             assert response.status_code == 200, response.text
             assert client.get('/api/local/status').json()['pending'] == 1
+            expense = {'operation_id': str(uuid.uuid4()), 'kind': 'expense.create', 'data': {
+                'business_id': str(uuid.uuid4()), 'amount_cents': 200, 'description': 'Despesa fictícia smoke'}}
+            customer_id = str(uuid.uuid4())
+            customer = {'operation_id': str(uuid.uuid4()), 'kind': 'customer.create', 'data': {
+                'business_id': str(uuid.uuid4()), 'customer_id': customer_id, 'name': 'Cliente fictício smoke'}}
+            assert client.post('/api/local/commerce', json=expense).status_code == 200
+            assert client.post('/api/local/commerce', json=customer).status_code == 200
+            assert client.get('/api/local/status').json()['pending'] == 3
         finally:
             stop(child, client)
         if args.installer:
@@ -72,9 +80,14 @@ def main():
         child, client = run()
         try:
             status = client.get('/api/local/status').json()
-            assert status['pending'] == 1 and status['sqlite_integrity'] == 'ok', status
+            assert status['pending'] == 3 and status['sqlite_integrity'] == 'ok', status
             assert client.post('/api/local/sales', json=operation).json()['already_exists']
             assert len(client.get('/api/local/sales').json()['items']) == 1
+            assert client.post('/api/local/commerce', json=expense).json()['already_exists']
+            commercial = client.get('/api/local/commerce').json()
+            assert commercial['cash_cents'] == 800 and commercial['balanced']
+            assert commercial['customers'][0]['customer_id'] == customer_id
+            assert len(commercial['events']) == 2
         finally:
             stop(child, client)
         dbfile = Path(folder) / 'GANOH-Demo' / 'runner' / 'journal.sqlite3'
@@ -86,7 +99,7 @@ def main():
             # wait() then waits for the actual uninstall before checking data/cleanup.
             subprocess.run([str(uninstallers[0]), '/S', '_?=' + str(install_dir)], env=env, check=True, timeout=180)
             assert dbfile.exists() and dbfile.with_name('database-key.dpapi').exists()
-        print('PASS: encrypted Windows backend, DPAPI, hard restart, idempotent retry and data preservation')
+        print('PASS: encrypted Windows backend, DPAPI, hard restart, idempotent retry and commercial data preservation')
 
 
 if __name__ == '__main__':

@@ -20,6 +20,7 @@ from backend.sync_v1.service import create_app
 from desktop.local_api import create_local_app
 from desktop.offline_store import OfflineJournal
 from desktop.snapshots import apply_page
+from desktop.business_rules import KINDS
 
 
 def main():
@@ -30,7 +31,7 @@ def main():
     try:
         central = TestClient(create_app(db))
         db.devices.insert_one({'_id': 'runner-browser-test', 'unit': 'runner', 'revoked': False,
-                               'token_hash': hashlib.sha256(b'fixture-only').hexdigest()})
+                               'permissions': list(KINDS), 'token_hash': hashlib.sha256(b'fixture-only').hexdigest()})
         db.stock.insert_one({'unit': 'runner', 'sku': 'lanche', 'name': 'Lanche demonstração', 'quantity': 10, 'price_cents': 1000, 'version': 1})
         online = threading.Event()
         class Transport:
@@ -90,6 +91,16 @@ def main():
                         page.get_by_label('Produto').select_option('lanche')
                         page.get_by_role('button', name='Salvar venda em dinheiro').click()
                         page.locator('li').filter(has_text='• Pendente').wait_for()
+                        page.get_by_label('Operação').select_option('expense.create')
+                        page.get_by_label('Valor (R$)', exact=True).fill('2,50')
+                        page.get_by_label('Descrição', exact=True).fill('Despesa fictícia')
+                        page.get_by_role('button', name='Salvar lançamento local', exact=True).click()
+                        page.get_by_label('Valor (R$)', exact=True).wait_for()
+                        page.get_by_text('Saldo local:').filter(has_text='7,50').wait_for()
+                        page.get_by_label('Operação').select_option('customer.create')
+                        page.get_by_label('Nome do cliente', exact=True).fill('Cliente demonstração')
+                        page.get_by_role('button', name='Salvar lançamento local', exact=True).click()
+                        page.get_by_text('Clientes cadastrados (1)', exact=True).wait_for()
                         page.close()
                         stop(server, thread, listener)
                         server, thread, listener, origin = start()
@@ -99,6 +110,10 @@ def main():
                         page.get_by_role('button', name='Sincronizar agora', exact=True).click()
                         page.locator('li').filter(has_text='• Sincronizada').wait_for()
                         assert db.sales.count_documents({}) == 1
+                        assert db.business_events.count_documents({}) == 2
+                        assert db.customers.count_documents({}) == 1
+                        from backend.sync_v1.commerce import balance
+                        assert balance(db, None, 'runner', 'cash') == 750
                         assert db.stock.find_one({'unit': 'runner'})['quantity'] == 9
                         page.screenshot(path='/tmp/ganoh-desktop-demo.png', full_page=True)
                         page.close()
@@ -106,7 +121,7 @@ def main():
                         browser.close()
             finally:
                 stop(server, thread, listener)
-        print('PASS Chromium: save offline, stop/reopen backend, restore network, sync exactly one sale; screenshot /tmp/ganoh-desktop-demo.png')
+        print('PASS Chromium: save offline, stop/reopen backend, restore network, sync exactly one sale, expense and customer; screenshot /tmp/ganoh-desktop-demo.png')
     finally:
         if central:
             central.close()

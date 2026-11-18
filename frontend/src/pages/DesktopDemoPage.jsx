@@ -1,11 +1,17 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import DesktopCommercePanel from '../components/DesktopCommercePanel';
 import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 
 const money = cents => (cents / 100).toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'});
 async function api(path, options) {
   const response = await fetch(`/api/local/${path}`, options);
-  if (!response.ok) throw new Error(`Serviço local recusou a operação (${response.status}).`);
+  if (!response.ok) {
+    const detail = await response.json().catch(() => ({}));
+    const error = new Error(typeof detail.detail === 'string' ? detail.detail : `Serviço local recusou a operação (${response.status}).`);
+    error.status = response.status;
+    throw error;
+  }
   return response.json();
 }
 export default function DesktopDemoPage() {
@@ -33,7 +39,7 @@ export default function DesktopDemoPage() {
       if (!retry.current) retry.current = {operation_id: crypto.randomUUID(), sale_id: crypto.randomUUID(), items: [{sku: selected, quantity: Number(quantity)}]};
       await api('sales', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(retry.current)});
       retry.current = null; await refresh();
-    } catch (e) { setError(`${e.message} Repetir usará o mesmo identificador; confira o histórico antes de iniciar outra venda.`); }
+    } catch (e) { if (e.status >= 400 && e.status < 500 && e.status !== 408) retry.current = null; setError(`${e.message} Repetir usará o mesmo identificador; confira o histórico antes de iniciar outra venda.`); }
     finally { setBusy(false); }
   }
   async function reloadCatalog() {
@@ -72,6 +78,7 @@ export default function DesktopDemoPage() {
       </form>
       {!catalog.length && <p>O catálogo precisa ser carregado na primeira sincronização ou preparado pelo modo de demonstração.</p>}
     </CardContent></Card>
+    <DesktopCommercePanel request={api} onChange={refresh} />
     <details><summary>Histórico de sincronização</summary>
       <ul>{history.slice(0, 10).map(e => <li key={e.sequence}>{e.created_at} • {e.connection} {e.message}</li>)}</ul>
     </details>

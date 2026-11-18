@@ -49,3 +49,17 @@ O workflow Windows também testa instalação silenciosa, reinstalação da mesm
 ### Artefato validado deste incremento
 
 [Baixar ZIP com instalador `.exe` DEMO sem assinatura](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44210464162/artifacts/14385298998) (retenção de 7 dias, acesso conforme permissões GitHub). [Build e testes aprovados](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44210464162), commit `1bceeb3`. Usar somente em máquina de homologação com dados fictícios. Não é a versão operacional completa e não inclui um servidor HTTPS central já implantado.
+
+## Incremento 0.3.0 — livro financeiro local (parcial)
+
+A tela demonstrativa agora inclui suprimento, retirada, despesa em dinheiro e cadastro de clientes. Os lançamentos usam centavos inteiros, partidas balanceadas, UUID estável e identificação comercial única. Venda em dinheiro alimenta caixa e receita na mesma transação local; despesas/retiradas não podem deixar o saldo negativo. Suprimentos e retiradas não são faturamento. Resumos locais são provisórios, inclusive quando há conflitos centrais: não são extratos bancários nem consolidação do proprietário.
+
+O motor de recebimentos em dinheiro exige cliente/dívida existentes e número de recibo único por unidade, inclusive quando outro UUID é enviado. Não cria dívida ou concede crédito. Clientes novos começam sem dívida; ainda faltam vendas a prazo e snapshots de clientes/dívidas, portanto esse fluxo só é validado com fixtures fictícias nesta etapa. PIX/cartão continuam sem liquidação offline.
+
+API local: `GET/POST /api/local/commerce`; eventos `cash.deposit`, `cash.withdraw`, `expense.create`, `customer.create`, `prazo.receive`. O corpo de escrita exige `operation_id`, `kind` e `data` (com `business_id` estável e campos da operação). As filas de venda e financeiras compartilham ordem durável; o worker para se a confirmação anterior é desconhecida.
+
+O servidor central só aceita cada tipo financeiro se estiver explicitamente na lista `permissions` do dispositivo, e confere isso novamente dentro da transação. Todos os efeitos financeiros por unidade são serializados para evitar retiradas concorrentes acima do saldo. Recibo, lançamentos e inbox confirmam juntos. Conflitos permanecem para revisão, sem sobrescrever saldo. A lista de permissões de dispositivo não substitui os papéis individuais de funcionário/gestor, ainda necessários antes de qualquer uso real.
+
+Schema SQLite 2: migração aditiva, preservando vendas, payloads, hashes e recibos. Lançamentos de vendas em dinheiro dos protótipos antigos são reconstruídos **localmente**, de forma idempotente. A central não inventa saldos históricos nem faz backfill financeiro automático: homologações antigas precisam de reconciliação/fixtures consistentes; divergências geram conflito. Um executável antigo deve recusar abrir o schema novo. Ainda não há plano de rollback entre versões homologado com backup.
+
+Matriz de todas as áreas a adaptar: [DESKTOP_PARITY.md](../docs/DESKTOP_PARITY.md). Abertura/fechamento por turno, relatórios do gestor, permissões individuais, estoque projetado, cancelamentos/estornos e demais módulos continuam pendentes. O site usado pelas lojas permanece intacto.
