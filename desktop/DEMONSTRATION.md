@@ -44,6 +44,7 @@ Login, sessão em memória, logout/revogação e unidades autorizadas; mostra so
 - MongoDB replica set descartável em loopback 27028: `python -m unittest discover -s backend/sync_v1/tests -v`
 - `CI=true npm --prefix frontend test -- --watch=false --runInBand --testPathPattern="Desktop|desktopMoney|OwnerOverview"`
 - Build desktop: `REACT_APP_DESKTOP_DEMO=true GENERATE_SOURCEMAP=false npm --prefix frontend run build`
+- Painel mobile Chromium: `python -m backend.sync_v1.tests.browser_owner_smoke` após compilar em `frontend/build-owner` com origem `https://central.example` (interceptada somente pelo teste).
 - Chromium real: `python -m desktop.tests.browser_demo_smoke` (transporte central TestClient, não HTTPS externo).
 - Windows: `python desktop/tests/windows_packaged_smoke.py`; CI também executa sobre PyInstaller e NSIS, com restart forçado, reinstalação, backup/recuperação e preservação de chave/dados.
 
