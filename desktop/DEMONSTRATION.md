@@ -32,7 +32,7 @@ Operações locais permanecem separadas do snapshot. Múltiplas vendas offline n
 - Windows: `python desktop/tests/windows_packaged_smoke.py` (isola LOCALAPPDATA, executa backend, grava, encerra forçado, reabre e verifica dedupe/criptografia).
 - Workflow manual também executa smoke sobre o `.exe` PyInstaller antes de montar o instalador.
 
-Instalador sem assinatura: somente homologação. Ainda faltam testes reais da UI Electron, instalação/atualização/desinstalação em Windows 10/11 e nos dois PCs, assinatura, recuperação de chave/backup e atualização assinada com rollback. Caixa, clientes, recebimentos a prazo, despesas e estornos não foram adaptados; PIX/cartão/prazo continuam bloqueados para liquidação. Não liberar atendimento real.
+Instalador sem assinatura: somente homologação. Instalação, reinstalação e desinstalação silenciosas passaram na CI Windows com preservação de dados/chave. Ainda faltam testes interativos da UI Electron, instalação/atualização/desinstalação em Windows 10/11 e nos dois PCs, assinatura, recuperação de chave/backup e atualização assinada com rollback. Caixa, clientes, recebimentos a prazo, despesas e estornos não foram adaptados; PIX/cartão/prazo continuam bloqueados para liquidação. Não liberar atendimento real.
 
 ### Ensaio no navegador real
 
@@ -45,3 +45,7 @@ python -m desktop.tests.browser_demo_smoke
 Esse ensaio executa Chromium, API local HTTP, SQLCipher e API central com MongoDB real; simula rede indisponível, salva pela UI, encerra/reabre o backend e reconecta. Verifica uma única venda central e baixa única do estoque. A captura usa somente dados fictícios (`/tmp/ganoh-desktop-demo.png`). O transporte central nesse ensaio é injetado com TestClient; não comprova um deploy HTTPS real. Foi executado com sucesso em Linux. Não equivale ao teste da janela Electron no Windows.
 
 O workflow Windows também testa instalação silenciosa, reinstalação da mesma versão e desinstalação preservando dados. A atualização entre versões diferentes e o uso interativo em Windows 10/11 continuam sujeitos à homologação física.
+
+### Artefato validado deste incremento
+
+[Baixar ZIP com instalador `.exe` DEMO sem assinatura](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44210464162/artifacts/14385298998) (retenção de 7 dias, acesso conforme permissões GitHub). [Build e testes aprovados](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44210464162), commit `1bceeb3`. Usar somente em máquina de homologação com dados fictícios. Não é a versão operacional completa e não inclui um servidor HTTPS central já implantado.

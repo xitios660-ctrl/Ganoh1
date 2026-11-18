@@ -54,3 +54,17 @@ Ensaio adicional `desktop/tests/browser_demo_smoke.py` passou em Chromium real n
 Commits principais: `6e335b5` (núcleo), `6fb823a` (React/Electron), `3abe644` (fechamento de conexões). Builds de instalador são disparados apenas na branch isolada; o workflow novo não pôde ser disparado manualmente enquanto ausente da default branch, então foi habilitado por push restrito à branch, sem tocar em main.
 
 Último endurecimento do núcleo: schema local identificado como versão 1, abertura de versão futura recusada sem apagar dados; API local exige UUID canônico explícito para impedir geração acidental em retries. Testes locais atualizados: 27 desktop executados (26 aprovados + DPAPI específico de Windows), 11 MongoDB aprovados e 2 React aprovados. Smoke do executável verifica também HTML/JavaScript React empacotados e CSP.
+
+### Resultado final deste incremento — validado em CI
+
+- Commit de código/testes: [`1bceeb3`](https://github.com/xitios660-ctrl/Ganoh1/commit/1bceeb3).
+- [CI Windows/Linux, MongoDB e React aprovada](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44210473042): 27 testes desktop no Windows (incluindo DPAPI/SQLCipher), 26 + 1 skip específico de plataforma no Linux, 11 testes MongoDB e 2 testes React/build.
+- [Build Windows e ensaio de instalador aprovados](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44210464162): executável PyInstaller com React empacotado, restart com venda pendente, instalação NSIS silenciosa, reinstalação da mesma versão preservando venda/chave, reabertura e desinstalação mantendo banco/chave.
+- [Artefato GANOH-Windows-DEMO-UNSIGNED](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44210464162/artifacts/14385298998): ZIP com instalador `.exe` de demonstração **sem assinatura**, retenção de 7 dias. SHA-256 do artefato ZIP registrado pelo GitHub: `61f4bf4ee1cb74300d39f900f3be11b0a06599af506a54bb6c2eeee7ec33e98c`.
+- Ensaio Chromium real repetido com sucesso no código final. SQLite local cifrado, venda offline pela UI, encerramento/reabertura do backend, reconexão e exatamente uma venda/baixa central.
+
+O ensaio NSIS anterior havia concluído a preservação de dados, mas falhou ao limpar a pasta temporária porque a desinstalação ainda rodava em outro processo. A chamada agora usa `_?=` do NSIS para aguardar a desinstalação efetiva; o teste inteiro passou sem ignorar erros de limpeza.
+
+**Estado de entrega:** demonstração local instalável validada por automação, não aplicativo comercial homologado. A CI não substitui interação com Electron em Windows 10/11, teste nos dois PCs, upgrade entre versões distintas, assinatura, backup/recuperação de chaves, provisionamento HTTPS real, caixa/prazo/clientes/despesas e revisão financeira completa. Snapshots e resolução de conflitos continuam parciais conforme limites acima. Nenhuma fase comercial foi declarada concluída; produção permanece intocada e PR #6 em rascunho.
+
+Próximo incremento recomendado: projeção/reserva local de estoque com reconciliação auditável e integração de caixa/recebimentos a prazo com livro financeiro e testes de saldo; em paralelo, homologação interativa do instalador em máquinas de teste, sem substituir as instalações das lojas.
