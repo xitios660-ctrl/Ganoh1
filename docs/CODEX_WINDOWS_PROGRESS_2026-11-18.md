@@ -44,3 +44,11 @@ Arquivos principais: `desktop/snapshots.py`, `desktop/local_api.py`, `desktop/wi
 Validação local até este registro: 25 testes desktop executados (24 aprovados, DPAPI pulado em Linux), 11 testes MongoDB reais aprovados, 2 testes React aprovados; build React demonstrativo compilado com avisos de hooks preexistentes nas telas legadas. CI Windows e build do instalador serão registrados após execução. `npm ci` padrão encontrou conflito de peers preexistente (React/date-fns/day-picker); instalação com `--legacy-peer-deps` funcionou, sem modificar o lockfile existente.
 
 Limitações explícitas: só snapshot de catálogo/estoque, limite de 1.000 SKUs; revisão rejeita ou mantém conflito sem aplicação financeira; várias vendas no mesmo SKU offline podem exigir revisão por versão. Não há integração local de caixa/prazo/clientes/despesas, revisão visual do proprietário, distribuição assinada, recuperação de chave nem homologação física. Não declarar fases completas. Produção e acesso remoto atual preservados. Procedimento e detalhes em `desktop/DEMONSTRATION.md`.
+
+### Evidências adicionais da continuação
+
+CI no commit `3abe644` aprovado: https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44209529968 . Inclui DPAPI e SQLCipher no Windows, 25 testes desktop sem skips nesse sistema, smoke do launcher real com encerramento forçado e reabertura, matriz Linux, integração MongoDB e testes/build React. Uma execução anterior identificou handle de SQLite aberto no ensaio de chave errada; o fechamento foi corrigido e revalidado, sem suprimir o erro.
+
+Ensaio adicional `desktop/tests/browser_demo_smoke.py` passou em Chromium real no Linux: React compilado → API local HTTP → SQLCipher, venda offline, fechamento/reabertura do backend e reconexão → MongoDB central descartável. Confirmados exatamente uma venda e uma baixa de estoque. Captura visual inspecionada. Esse teste usa transporte central injetado, não implantação HTTPS externa.
+
+Commits principais: `6e335b5` (núcleo), `6fb823a` (React/Electron), `3abe644` (fechamento de conexões). Builds de instalador são disparados apenas na branch isolada; o workflow novo não pôde ser disparado manualmente enquanto ausente da default branch, então foi habilitado por push restrito à branch, sem tocar em main.

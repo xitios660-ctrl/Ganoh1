@@ -33,3 +33,15 @@ Operações locais permanecem separadas do snapshot. Múltiplas vendas offline n
 - Workflow manual também executa smoke sobre o `.exe` PyInstaller antes de montar o instalador.
 
 Instalador sem assinatura: somente homologação. Ainda faltam testes reais da UI Electron, instalação/atualização/desinstalação em Windows 10/11 e nos dois PCs, assinatura, recuperação de chave/backup e atualização assinada com rollback. Caixa, clientes, recebimentos a prazo, despesas e estornos não foram adaptados; PIX/cartão/prazo continuam bloqueados para liquidação. Não liberar atendimento real.
+
+### Ensaio no navegador real
+
+Com dependências Playwright/Chromium disponíveis, build React desktop pronto e o replica set descartável em 27028:
+
+```sh
+python -m desktop.tests.browser_demo_smoke
+```
+
+Esse ensaio executa Chromium, API local HTTP, SQLCipher e API central com MongoDB real; simula rede indisponível, salva pela UI, encerra/reabre o backend e reconecta. Verifica uma única venda central e baixa única do estoque. A captura usa somente dados fictícios (`/tmp/ganoh-desktop-demo.png`). O transporte central nesse ensaio é injetado com TestClient; não comprova um deploy HTTPS real. Foi executado com sucesso em Linux. Não equivale ao teste da janela Electron no Windows.
+
+O workflow Windows também testa instalação silenciosa, reinstalação da mesma versão e desinstalação preservando dados. A atualização entre versões diferentes e o uso interativo em Windows 10/11 continuam sujeitos à homologação física.

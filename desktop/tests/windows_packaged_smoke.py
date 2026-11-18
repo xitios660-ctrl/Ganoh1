@@ -15,13 +15,22 @@ import httpx
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--exe')
+    parser.add_argument('--installer')
     args = parser.parse_args()
     if os.name != 'nt':
         raise RuntimeError('Windows required')
     with tempfile.TemporaryDirectory() as folder:
         env = {**os.environ, 'LOCALAPPDATA': folder}
         token = secrets.token_hex(32)
-        command = [args.exe] if args.exe else [sys.executable, '-m', 'desktop.launcher']
+        install_dir = Path(folder) / 'installed'
+        def install():
+            subprocess.run([str(Path(args.installer).resolve()), '/S', '/D=' + str(install_dir)],
+                           env=env, check=True, timeout=180)
+        if args.installer:
+            install()
+            command = [str(install_dir / 'resources' / 'backend' / 'ganoh-local.exe')]
+        else:
+            command = [args.exe] if args.exe else [sys.executable, '-m', 'desktop.launcher']
         def run():
             child = subprocess.Popen(command + ['--unit', 'runner', '--demo'], stdin=subprocess.PIPE,
                                      stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, env=env)
@@ -51,6 +60,8 @@ def main():
             assert client.get('/api/local/status').json()['pending'] == 1
         finally:
             stop(child, client)
+        if args.installer:
+            install()  # Reinstall/upgrade must preserve the existing encrypted journal and key.
         child, client = run()
         try:
             status = client.get('/api/local/status').json()
@@ -61,6 +72,11 @@ def main():
             stop(child, client)
         dbfile = Path(folder) / 'GANOH-Demo' / 'runner' / 'journal.sqlite3'
         assert not dbfile.read_bytes().startswith(b'SQLite format')
+        if args.installer:
+            uninstallers = list(install_dir.glob('Uninstall*.exe'))
+            assert len(uninstallers) == 1
+            subprocess.run([str(uninstallers[0]), '/S'], env=env, check=True, timeout=180)
+            assert dbfile.exists() and dbfile.with_name('database-key.dpapi').exists()
         print('PASS: encrypted Windows backend, DPAPI, hard restart, idempotent retry and data preservation')
 
 
