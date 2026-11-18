@@ -76,7 +76,7 @@ class OfflineJournal:
             db.execute("BEGIN IMMEDIATE")
             try:
                 schema_version = db.execute('PRAGMA user_version').fetchone()[0]
-                if schema_version not in (0, 1):
+                if schema_version not in (0, 1, 2):
                     raise OfflineError('Versão do banco mais recente; atualização compatível necessária')
                 db.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
                 db.execute("""
@@ -115,7 +115,13 @@ class OfflineJournal:
                 db.execute("ROLLBACK")
                 raise
             else:
-                db.execute("PRAGMA user_version = 1")
+                from desktop.commerce import initialize
+                try:
+                    initialize(db)
+                    db.execute("PRAGMA user_version = 2")
+                except Exception:
+                    db.execute('ROLLBACK')
+                    raise
                 db.execute("COMMIT")
 
     def record_sale(
@@ -172,6 +178,7 @@ class OfflineJournal:
                               "fingerprint": fingerprint, "already_exists": True}
                 else:
                     timestamp = _utc_now()
+                    db.execute('INSERT INTO event_order(operation_id,kind) VALUES(?,?)', (operation_key, 'sale.create'))
                     db.execute(
                         """INSERT INTO operations
                         (operation_id,unit,kind,payload_json,fingerprint,created_at)
@@ -184,6 +191,9 @@ class OfflineJournal:
                         VALUES (?,?,?,?,?,?)""",
                         (sale_id, operation_key, self.unit, total_cents, payment_method, timestamp),
                     )
+                    if payment_method == 'cash':
+                        from desktop.commerce import post
+                        post(db, operation_key, [('cash', total_cents), ('revenue', -total_cents)])
                     result = {"operation_id": operation_key, "state": "pending",
                               "fingerprint": fingerprint, "already_exists": False}
             except self._driver.IntegrityError as exc:
@@ -201,8 +211,11 @@ class OfflineJournal:
             raise OfflineError("Limite inválido")
         with closing(self._connect()) as db:
             rows = db.execute(
-                """SELECT sequence,operation_id,unit,kind,payload_json,fingerprint,created_at
-                   FROM operations WHERE state='pending' ORDER BY sequence LIMIT ?""",
+                """SELECT e.position AS sequence,o.operation_id,o.unit,o.kind,o.payload_json,o.fingerprint,o.created_at
+                   FROM (SELECT * FROM operations UNION ALL
+                         SELECT sequence,operation_id,unit,kind,payload_json,fingerprint,state,created_at,synced_at,central_receipt_id,last_error FROM business_operations) o
+                   JOIN event_order e ON e.operation_id=o.operation_id
+                   WHERE o.state='pending' ORDER BY e.position LIMIT ?""",
                 (limit,),
             ).fetchall()
         return [
@@ -212,6 +225,11 @@ class OfflineJournal:
              "fingerprint": row["fingerprint"], "created_at": row["created_at"]}
             for row in rows
         ]
+
+    @staticmethod
+    def _operation_table(db, operation_id):
+        row = db.execute('SELECT kind FROM event_order WHERE operation_id=?', (operation_id,)).fetchone()
+        return 'operations' if not row or row['kind'] == 'sale.create' else 'business_operations'
 
     def acknowledge(self, operation_id: str, fingerprint: str, central_receipt_id: str) -> None:
         """Ack ONLY a central receipt for the exact content and UUID.
@@ -224,8 +242,9 @@ class OfflineJournal:
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
+                table = self._operation_table(db, operation_id)
                 row = db.execute(
-                    "SELECT fingerprint,state,central_receipt_id FROM operations WHERE operation_id=?",
+                    f"SELECT fingerprint,state,central_receipt_id FROM {table} WHERE operation_id=?",
                     (operation_id,),
                 ).fetchone()
                 if not row or row["fingerprint"] != fingerprint or row["state"] == "conflict":
@@ -234,7 +253,7 @@ class OfflineJournal:
                     raise OfflineError("Comprovante central diferente do confirmado")
                 if row["state"] == "pending":
                     db.execute(
-                        """UPDATE operations
+                        f"""UPDATE {table}
                         SET state='synced',central_receipt_id=?,synced_at=?,last_error=NULL
                         WHERE operation_id=?""",
                         (central_receipt_id, _utc_now(), operation_id),
@@ -251,13 +270,14 @@ class OfflineJournal:
         with closing(self._connect()) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
+                table = self._operation_table(db, operation_id)
                 row = db.execute(
-                    "SELECT state FROM operations WHERE operation_id=?", (operation_id,)
+                    f"SELECT state FROM {table} WHERE operation_id=?", (operation_id,)
                 ).fetchone()
                 if not row or row["state"] == "synced":
                     raise OfflineError("Não é possível sinalizar essa operação")
                 db.execute(
-                    "UPDATE operations SET state='conflict',last_error=? WHERE operation_id=?",
+                    f"UPDATE {table} SET state='conflict',last_error=? WHERE operation_id=?",
                     (reason[:500], operation_id),
                 )
             except Exception:
@@ -269,10 +289,10 @@ class OfflineJournal:
     def status(self) -> dict[str, Any]:
         with closing(self._connect()) as db:
             rows = db.execute(
-                "SELECT state,COUNT(*) AS amount FROM operations GROUP BY state"
+                "SELECT state,COUNT(*) AS amount FROM (SELECT state FROM operations UNION ALL SELECT state FROM business_operations) GROUP BY state"
             ).fetchall()
             last = db.execute(
-                "SELECT MAX(synced_at) AS last_synced_at FROM operations"
+                "SELECT MAX(synced_at) AS last_synced_at FROM (SELECT synced_at FROM operations UNION ALL SELECT synced_at FROM business_operations)"
             ).fetchone()["last_synced_at"]
             check = db.execute("PRAGMA quick_check").fetchone()[0]
         totals = {row["state"]: row["amount"] for row in rows}

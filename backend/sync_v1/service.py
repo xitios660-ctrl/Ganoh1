@@ -9,13 +9,21 @@ from pymongo.errors import DuplicateKeyError
 from pymongo.read_concern import ReadConcern
 from pymongo.write_concern import WriteConcern
 
-from desktop.offline_store import _canonical
+from desktop.offline_store import _canonical, UNITS
+from desktop.business_rules import KINDS
+from backend.sync_v1.commerce import apply_business, post
 
 
 def create_app(db):
     # Explicit allowlist: accidental production configuration fails before writes.
     if not db.name.startswith('ganoh_sync_test_'):
         raise ValueError('Only isolated ganoh_sync_test_* databases are permitted')
+    db.payment_refs.create_index([('unit', 1), ('reference', 1)], unique=True)
+    db.ledger.create_index([('unit', 1), ('operation_id', 1), ('line', 1)], unique=True)
+    db.ledger.create_index([('unit', 1), ('account', 1)])
+    db.business_events.create_index([('unit', 1), ('business_id', 1)], unique=True)
+    db.customers.create_index([('unit', 1), ('customer_id', 1)], unique=True)
+    db.customers.create_index([('unit', 1), ('name_key', 1)], unique=True)
     db.inbox.create_index([('unit', 1), ('operation_id', 1)], unique=True)
     db.sales.create_index([('unit', 1), ('sale_id', 1)], unique=True)
     db.devices.create_index('token_hash', unique=True)
@@ -39,14 +47,19 @@ def create_app(db):
             raise HTTPException(422, 'Invalid operation')
         if operation != payload.get('operation_id') or operation != item['operation_id'] or not hmac.compare_digest(digest, str(item.get('fingerprint', ''))):
             raise HTTPException(422, 'Invalid identity or fingerprint')
-        if payload.get('kind') != 'sale.create' or item.get('kind') != 'sale.create':
+        if not isinstance(payload.get('kind'), str) or payload.get('kind') not in KINDS | {'sale.create'} or item.get('kind') != payload.get('kind'):
             raise HTTPException(422, 'Unsupported operation')
+        if payload['kind'] != 'sale.create' and payload['kind'] not in device.get('permissions', []):
+            raise HTTPException(403, 'Device lacks permission for this financial operation')
         key = {'unit': device['unit'], 'operation_id': operation}
 
         def transaction(session):
             # Writing the device document serializes revocation with commits.
+            active_filter = {'_id': device['_id'], 'revoked': False, 'unit': device['unit']}
+            if payload['kind'] in KINDS:
+                active_filter['permissions'] = payload['kind']
             active = db.devices.update_one(
-                {'_id': device['_id'], 'revoked': False, 'unit': device['unit']},
+                active_filter,
                 {'$inc': {'sync_attempts': 1}}, session=session)
             if active.matched_count != 1:
                 raise HTTPException(401, 'Device revoked')
@@ -57,6 +70,17 @@ def create_app(db):
                 reply = previous['reply'].copy()
                 if reply['status'] == 'applied':
                     reply['status'] = 'already_applied'
+                return reply
+            # All financial reads/writes within one unit serialize, including
+            # different devices. Prevents write-skew/overdraft on shared balances.
+            db.unit_state.update_one({'_id': device['unit']}, {'$inc': {'revision': 1}}, upsert=True, session=session)
+            if payload['kind'] in KINDS:
+                reason = apply_business(db, session, payload)
+                reply = {**identity, 'status': 'conflict' if reason else 'applied', 'receipt_id': str(uuid.uuid4())}
+                if reason:
+                    reply['reason'] = reason
+                db.inbox.insert_one({**key, 'device_id': device['_id'], 'fingerprint': digest, 'payload': payload,
+                                     'reply': reply, 'created_at': datetime.now(timezone.utc)}, session=session)
                 return reply
             reason = None
             items = payload.get('items')
@@ -93,6 +117,7 @@ def create_app(db):
                     updated = db.stock.update_one({'_id': stock['_id'], 'version': stock['version']}, {'$inc': {'quantity': -quantity, 'version': 1}}, session=session)
                     if updated.modified_count != 1:
                         raise RuntimeError('Concurrent stock change')
+                post(db, session, device['unit'], operation, [('cash', total), ('revenue', -total)])
                 db.sales.insert_one({**key, 'sale_id': payload['sale_id'], 'payload': payload, 'receipt_id': reply['receipt_id'], 'total_cents': total}, session=session)
             db.inbox.insert_one({**key, 'device_id': device['_id'], 'fingerprint': digest, 'payload': payload, 'reply': reply, 'created_at': datetime.now(timezone.utc)}, session=session)
             return reply
@@ -113,7 +138,7 @@ def create_app(db):
             raise HTTPException(401, 'Device authentication required')
         token_hash = hashlib.sha256(authorization[7:].encode()).hexdigest()
         device = db.devices.find_one({'token_hash': token_hash, 'revoked': False})
-        if not device:
+        if not device or device.get('unit') not in UNITS:
             raise HTTPException(401, 'Invalid device')
         return device
 

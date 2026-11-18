@@ -32,12 +32,16 @@ def sync_once(
             # A server may have committed even when the response was lost.
             # The same operation_id MUST be used for the next attempt.
             stats["retryable"] += 1
-            continue
+            # Preserve causal order: do not send dependent cash/customer events
+            # past an operation whose commit status is still unknown.
+            break
         if not isinstance(response, dict) or any(
             response.get(key) != item[key] for key in ("operation_id", "unit", "fingerprint")
         ):
             stats["retryable"] += 1
-            continue
+            # Preserve causal order: do not send dependent cash/customer events
+            # past an operation whose commit status is still unknown.
+            break
         decision = response.get("status")
         if decision in ("applied", "already_applied"):
             receipt = response.get("receipt_id")
@@ -45,15 +49,16 @@ def sync_once(
                 journal.acknowledge(item["operation_id"], item["fingerprint"], receipt)
             except OfflineError:
                 stats["retryable"] += 1
-                continue
+                break
             stats["synced"] += 1
         elif decision == "conflict":
             reason = response.get("reason")
             if not isinstance(reason, str) or not reason.strip():
                 stats["retryable"] += 1
-                continue
+                break
             journal.flag_conflict(item["operation_id"], reason)
             stats["conflicts"] += 1
         else:
             stats["retryable"] += 1
+            break
     return stats

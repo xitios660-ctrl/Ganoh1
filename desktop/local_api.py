@@ -91,6 +91,20 @@ def create_local_app(journal: OfflineJournal, session_token: str, transport=None
             restart(journal)
         return {'restarted': True}
 
+    @app.get('/api/local/commerce')
+    def business_summary():
+        from desktop.commerce import summary
+        return summary(journal)
+
+    @app.post('/api/local/commerce')
+    def business_event(body: dict):
+        from desktop.commerce import record
+        with lock:
+            try:
+                return record(journal, operation_id=body.get('operation_id'), kind=body.get('kind'), data=body.get('data'))
+            except OfflineError as exc:
+                raise HTTPException(409, str(exc))
+
     @app.get('/api/local/catalog')
     def products():
         return {'items': catalog(journal)}

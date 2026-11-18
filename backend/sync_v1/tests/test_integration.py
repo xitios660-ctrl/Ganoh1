@@ -181,6 +181,91 @@ class Integration(unittest.TestCase):
         self.assertEqual(self.db.sales.count_documents({}), 1)
         self.assertEqual(self.db.stock.find_one({'unit': 'runner'})['quantity'], 9)
 
+    def financial_event(self, kind, unit='runner', **data):
+        from desktop.business_rules import KINDS
+        from desktop.commerce import record
+        self.db.devices.update_one({'_id': unit}, {'$set': {'permissions': list(KINDS)}})
+        journal = OfflineJournal(Path(self.temp.name) / (uuid.uuid4().hex + '.sqlite'), unit)
+        if kind in ('cash.withdraw', 'expense.create', 'prazo.receive'):
+            # The caller supplies complete payloads for conflict scenarios.
+            payload = {'operation_id': str(uuid.uuid4()), 'unit': unit, 'kind': kind,
+                       'business_id': str(uuid.uuid4()), **data}
+            return {'operation_id': payload['operation_id'], 'unit': unit, 'kind': kind,
+                    'payload': payload, 'fingerprint': hashlib.sha256(_canonical(payload).encode()).hexdigest()}
+        record(journal, operation_id=str(uuid.uuid4()), kind=kind,
+               data={'business_id': str(uuid.uuid4()), **data})
+        return journal.pending()[0]
+
+    def test_commerce_lost_ack_no_duplicate_and_new_operation_same_business(self):
+        from backend.sync_v1.commerce import balance
+        deposit = self.financial_event('cash.deposit', amount_cents=1000, description='Entrada de teste')
+        self.assertEqual(self.send(deposit).json()['results'][0]['status'], 'applied')
+        for _ in range(10):
+            self.assertEqual(self.send(deposit).json()['results'][0]['status'], 'already_applied')
+        changed = {**deposit, 'operation_id': str(uuid.uuid4()), 'payload': dict(deposit['payload'])}
+        changed['payload']['operation_id'] = changed['operation_id']
+        changed['fingerprint'] = hashlib.sha256(_canonical(changed['payload']).encode()).hexdigest()
+        self.assertEqual(self.send(changed).json()['results'][0]['status'], 'conflict')
+        self.assertEqual(balance(self.db, None, 'runner', 'cash'), 1000)
+        self.assertEqual(self.db.business_events.count_documents({}), 1)
+        self.assertEqual(sum(r['amount_cents'] for r in self.db.ledger.find({})), 0)
+
+    def test_two_devices_same_unit_cannot_overdraw_cash(self):
+        from backend.sync_v1.commerce import balance
+        from desktop.business_rules import KINDS
+        self.send(self.financial_event('cash.deposit', amount_cents=1000, description='Suprimento teste'))
+        self.db.devices.insert_one({'_id': 'runner-second', 'unit': 'runner', 'revoked': False,
+                                   'permissions': list(KINDS), 'token_hash': hashlib.sha256(b'runner-second').hexdigest()})
+        a = self.financial_event('cash.withdraw', amount_cents=800, description='Retirada um')
+        b = self.financial_event('cash.withdraw', amount_cents=800, description='Retirada dois')
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            one = pool.submit(lambda: self.send(a).json()['results'][0]['status'])
+            two = pool.submit(lambda: self.send(b, 'runner-second').json()['results'][0]['status'])
+            self.assertEqual(sorted([one.result(), two.result()]), ['applied', 'conflict'])
+        self.assertEqual(balance(self.db, None, 'runner', 'cash'), 200)
+        self.assertEqual(balance(self.db, None, 'gym-londres', 'cash'), 0)
+
+    def test_cash_receipt_duplicate_and_distinct_overpayment(self):
+        from backend.sync_v1.commerce import balance
+        customer_id = str(uuid.uuid4())
+        customer = self.financial_event('customer.create', customer_id=customer_id, name='Cliente fictício')
+        self.send(customer)
+        # Historical debt fixture; there is no endpoint to invent debt.
+        self.db.ledger.insert_many([{'unit': 'runner', 'operation_id': 'fixture', 'line': 0,
+                                     'account': 'receivable/' + customer_id, 'amount_cents': 500},
+                                    {'unit': 'runner', 'operation_id': 'fixture', 'line': 1,
+                                     'account': 'revenue', 'amount_cents': -500}])
+        receipt = self.financial_event('prazo.receive', customer_id=customer_id, amount_cents=300,
+                                       description='Recebimento teste', payment_method='cash', payment_reference='receipt-a')
+        self.assertEqual(self.send(receipt).json()['results'][0]['status'], 'applied')
+        self.assertEqual(self.send(receipt).json()['results'][0]['status'], 'already_applied')
+        extra = self.financial_event('prazo.receive', customer_id=customer_id, amount_cents=300,
+                                     description='Recebimento duplicado distinto', payment_method='cash', payment_reference='receipt-b')
+        self.assertEqual(self.send(extra).json()['results'][0]['status'], 'conflict')
+        duplicate = self.financial_event('prazo.receive', customer_id=customer_id, amount_cents=100,
+                                         description='Mesmo recibo outro UUID', payment_method='cash', payment_reference='RECEIPT-A')
+        self.assertEqual(self.send(duplicate).json()['results'][0]['status'], 'conflict')
+        self.assertEqual(balance(self.db, None, 'runner', 'receivable/' + customer_id), 200)
+        self.assertEqual(balance(self.db, None, 'runner', 'cash'), 300)
+
+    def test_financial_permission_and_atomic_rollback(self):
+        from unittest.mock import patch
+        event = self.financial_event('cash.deposit', amount_cents=100, description='Entrada teste')
+        self.db.devices.update_one({'_id': 'runner'}, {'$set': {'permissions': []}})
+        self.assertEqual(self.send(event).status_code, 403)
+        self.db.devices.update_one({'_id': 'runner'}, {'$set': {'permissions': ['cash.deposit']}})
+        original = self.db.business_events.__class__.insert_one
+        def fail(collection, *args, **kwargs):
+            if collection.name == 'business_events':
+                raise RuntimeError('Injected failure after ledger write')
+            return original(collection, *args, **kwargs)
+        with patch.object(self.db.business_events.__class__, 'insert_one', fail):
+            with self.assertRaises(RuntimeError):
+                self.send(event)
+        self.assertEqual(self.db.ledger.count_documents({}), 0)
+        self.assertEqual(self.db.inbox.count_documents({}), 0)
+        self.assertEqual(self.send(event).json()['results'][0]['status'], 'applied')
+
     def test_production_database_rejected(self):
         with self.assertRaises(ValueError):
             create_app(self.mongo['ganoh_production'])
