@@ -13,7 +13,7 @@ Não é montada em `backend/server.py`, não lê `.env`, não acessa Render e re
 - Estoque insuficiente, versão divergente, preço divergente e reutilização de sale_id por outro UUID geram conflito durável sem efeitos financeiros/estoque. Reenvio devolve o mesmo conflito. Resolver exige futuro fluxo auditável; nunca editar payload ou regenerar UUID para tentar contornar um conflito.
 - PIX, cartão e prazo vão para revisão sem liquidação automática. Recebimentos, estornos, despesas e caixa ainda não implementados. Não existe paridade com o GANOH comercial.
 - Coleções `sales`, `stock`, `inbox`, `devices` são exclusivas deste ensaio. Vendas NÃO alimentam o dashboard legado e NÃO representam consolidação no painel do proprietário.
-- Falta provisionamento seguro, limites de corpo no ingresso, rate limiting, snapshots/cursor, heartbeat, retenção, revisão de conflitos, rotação de token e integração com autorização do proprietário.
+- Há snapshots imutáveis de catálogo/estoque com cursor e revisão auditável limitada a rejeitar/manter conflitos. Faltam provisionamento seguro, limites de corpo no ingresso, rate limiting, CDC de todas as coleções, heartbeat, retenção de auditoria, aprovação financeira de conflitos, rotação de token e integração com a autorização do proprietário existente.
 
 ## Reprodução
 
@@ -29,3 +29,11 @@ Os testes criam nomes aleatórios `ganoh_sync_test_*` e apagam apenas esses banc
 ## Decisão Windows
 
 Manter Electron como escolha inicial: reutiliza React/CRA e permite gerenciar o processo Python empacotado sem exigir WebView2 e toolchain Rust. O custo de memória e tamanho será medido no piloto; ainda não existe instalador. Pré-requisitos para empacotar: autenticação loopback, SQLCipher/DPAPI, migrações versionadas, paridade comercial e testes reais de atualização preservando dados.
+
+## Continuação: snapshots e revisão
+
+`GET /api/sync/v1/snapshot?cursor=...` captura até 1.000 SKUs numa geração imutável com páginas de 100 itens e expiração de 24h. Cursor é vinculado ao dispositivo/unidade; a retomada usa a mesma geração. SQLite publica somente o catálogo completo, valida versões e mantém operações locais separadas.
+
+`POST /api/sync/v1/conflicts/review` usa credencial independente de `reviewers`, permitida por unidade e revogável; exige `review_id`, `operation_id`, `unit`, `expected_revision`, `reason` e `decision` (`reject` ou `retain`). Revisão de inbox + evento auditável são atômicos. Não aplica pagamentos/estoque e não altera recibos originais. A UI de revisão do proprietário e a transmissão dessas revisões ao desktop continuam pendentes.
+
+Demonstração local, criptografia e estrutura Windows: `desktop/DEMONSTRATION.md`. Os testes de integração agora incluem o ciclo API local → reinício → API central real e retomada de três páginas com alteração concorrente do catálogo.

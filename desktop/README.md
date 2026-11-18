@@ -1,3 +1,5 @@
+> Atualização de 18/11/2026: a branch agora inclui uma demonstração React/FastAPI local, snapshots paginados, SQLCipher/DPAPI e estrutura Electron/NSIS. Consulte [DEMONSTRATION.md](DEMONSTRATION.md) para o estado atual e testes. O texto abaixo descreve o núcleo original; não representa liberação para dados reais.
+
 # GANOH Desktop (Windows): protótipo de núcleo offline
 
 **NÃO usar em produção. Não é instalador, não é backend local completo e NÃO realiza pagamentos.**

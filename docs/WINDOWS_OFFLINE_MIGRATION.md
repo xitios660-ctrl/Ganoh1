@@ -1,3 +1,5 @@
+> Estado atualizado da implementação: [relatório de 18/11/2026](CODEX_WINDOWS_PROGRESS_2026-11-18.md) e [demonstração Windows](../desktop/DEMONSTRATION.md). O plano/auditoria abaixo é histórico; há agora API central isolada, snapshots de catálogo/estoque, revisão limitada, API local, SQLCipher/DPAPI e build Electron demonstrativo. Isso não equivale à migração comercial concluída.
+
 # GANOH Windows / offline-first: plano de migração e riscos (isolado da produção)
 
 **Situação: protótipo de arquitetura, não liberado para atendimento.**

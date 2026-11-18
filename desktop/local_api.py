@@ -104,8 +104,12 @@ def create_local_app(journal: OfflineJournal, session_token: str, transport=None
 
     @app.post('/api/local/sales')
     def sell(body: dict):
-        if not isinstance(body.get('operation_id'), str):
-            raise HTTPException(422, 'Identificador estável obrigatório')
+        import uuid
+        try:
+            if str(uuid.UUID(body['operation_id'])) != body['operation_id']:
+                raise ValueError()
+        except (ValueError, KeyError, TypeError, AttributeError):
+            raise HTTPException(422, 'Identificador UUID estável obrigatório')
         with lock:
             with closing(journal._connect()) as db:
                 old = db.execute('SELECT operation_id,payload_json,fingerprint,state FROM operations WHERE operation_id=?', (body.get('operation_id'),)).fetchone()

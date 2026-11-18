@@ -55,6 +55,13 @@ def main():
         child, client = run()
         try:
             operation = {'operation_id': str(uuid.uuid4()), 'sale_id': 'restart-smoke', 'items': [{'sku': 'lanche-demo', 'quantity': 1}]}
+            if args.exe or args.installer:
+                import re
+                html = client.get('/desktop-demo')
+                assert html.status_code == 200 and 'id="root"' in html.text
+                script = re.search(r'<script[^>]+src="(/static/[^"]+)"', html.text)
+                assert script and client.get(script.group(1)).status_code == 200
+                assert "frame-ancestors 'none'" in html.headers['content-security-policy']
             response = client.post('/api/local/sales', json=operation)
             assert response.status_code == 200, response.text
             assert client.get('/api/local/status').json()['pending'] == 1

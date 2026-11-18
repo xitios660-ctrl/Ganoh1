@@ -75,6 +75,9 @@ class OfflineJournal:
             db.execute("PRAGMA journal_mode = WAL")
             db.execute("BEGIN IMMEDIATE")
             try:
+                schema_version = db.execute('PRAGMA user_version').fetchone()[0]
+                if schema_version not in (0, 1):
+                    raise OfflineError('Versão do banco mais recente; atualização compatível necessária')
                 db.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
                 db.execute("""
                     CREATE TABLE IF NOT EXISTS operations (
@@ -112,6 +115,7 @@ class OfflineJournal:
                 db.execute("ROLLBACK")
                 raise
             else:
+                db.execute("PRAGMA user_version = 1")
                 db.execute("COMMIT")
 
     def record_sale(

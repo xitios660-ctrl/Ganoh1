@@ -92,6 +92,22 @@ class LocalTests(unittest.TestCase):
             self.assertGreaterEqual(len(events), 1)
             self.assertNotIn('secret remote token', str(events))
 
+    def test_future_schema_refused_without_data_loss(self):
+        self.journal.record_sale(sale_id='future-test', total_cents=1, payment_method='cash', items=[{'sku': 'a'}])
+        with closing(self.journal._connect()) as db:
+            db.execute('PRAGMA user_version = 999')
+        with self.assertRaises(OfflineError):
+            OfflineJournal(self.path, 'runner')
+        with closing(self.journal._connect()) as db:
+            self.assertEqual(db.execute('SELECT COUNT(*) FROM local_sales').fetchone()[0], 1)
+            self.assertEqual(db.execute('PRAGMA user_version').fetchone()[0], 999)
+
+    def test_local_sale_requires_canonical_uuid(self):
+        with TestClient(create_local_app(self.journal, TOKEN)) as client:
+            for value in ('', 'bad', None):
+                self.assertEqual(client.post('/api/local/sales', headers=HEADERS, json={'operation_id': value}).status_code, 422)
+        self.assertEqual(self.journal.status()['pending'], 0)
+
     def test_local_auth_origin_and_host(self):
         with TestClient(create_local_app(self.journal, TOKEN)) as client:
             self.assertEqual(client.get('/api/local/status').status_code, 401)
