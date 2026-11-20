@@ -4,7 +4,7 @@ Aplicativo **separado** do Windows e do site. Painel nativo Java/Android para co
 
 ## Instalação pelo Downloader
 
-Depois de validado, o primeiro APK de demonstração fica em `tv/downloads/GANOH-TV-demo.apk`. Link direto:
+O primeiro APK de demonstração validado está em `tv/downloads/GANOH-TV-demo.apk`. Link direto:
 
 https://raw.githubusercontent.com/xitios660-ctrl/Ganoh1/feature/windows-offline-ganoh-2026/tv/downloads/GANOH-TV-demo.apk
 

@@ -25,7 +25,7 @@ Demonstração funciona sem login/servidor e nunca acessa rede. Dados fictícios
 - `testDebugUnitTest`: 14 testes aprovados em Robolectric API 28/JDK 17: valores/unidades/escopo, duplicidade de SKUs, paginação, erro/expiração, redirects, limite de resposta, foco/ações, recriação e limpeza ao sair.
 - `lintRelease` e `assembleRelease`: aprovados, 0 erros e 1 aviso esperado sobre atributo dataExtractionRules (só usado em Android 12+; versões anteriores usam allowBackup/fullBackupContent desabilitados).
 - SDK/JDK instalados somente no ambiente de build, fora do repositório. Certificados/proxy do ambiente foram configurados só para downloads de dependências; TLS do aplicativo permanece padrão, sem bypass.
-- Não há KVM disponível neste ambiente. Teste de instalação/controle real no emulador foi preparado para CI; execução/resultados serão acrescentados após validação. Nunca declarar teste físico na TCL sem fazê-lo.
+- Não há KVM disponível neste ambiente. Por isso, a instalação e o controle real no emulador foram validados na CI, conforme a seção de resultado final. Nunca declarar teste físico na TCL sem fazê-lo.
 
 ## Limitações e próximas etapas
 
@@ -39,12 +39,12 @@ Faltam homologação física na TCL, testes de versões Android anteriores/poste
 - APK release universal (sem bibliotecas nativas), 37.677 bytes; assinatura v2/v3 RSA-2048 validada por apksigner. Manifest conferido com aapt: API mínima 24, target 35, launcher leanback, touchscreen opcional e somente permissão INTERNET; sem debuggable.
 - SHA-256 do APK conferido localmente: `48a7be1a91928c8a042df4d277751e26ef069c32802f78e8b1ff2d3803a79bbb`. SHA-256 do certificado de demonstração: `239e868973f764daa9742dce6aebf72a8ed06943d2cfd5f96f9998a162cf9243`.
 - O APK está versionado em tv/downloads para permitir URL direta no Downloader sem depender de ZIP/autenticação de artefato. Repositório confirmado público; o APK não inclui conta, token, senha ou hostname de produção. Não foi criado release comercial nem modificado serviço hospedado.
-- CI verificará tanto o APK recompilado como este APK direto em emulador, além do checksum e testes. Resultado pendente; teste físico TCL não realizado.
+- CI verificou tanto o APK recompilado como este APK direto em emulador, além do checksum e testes, conforme os resultados abaixo. Teste físico TCL não realizado.
 
 ## Resultado final da automação — 20/11/2026
 
 - [CI Android TV aprovada](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44662892315), código 1e4de71: wrapper validado, checksum do APK direto conferido, testes/lint/build e assinaturas aprovados.
-- Emulador **Android TV API 29/x86, perfil TV 1080p** executou tv/tests/android_tv_smoke.py duas vezes, uma com o APK recompilado da CI e outra com o **APK exato do link direto**: instalar, abrir por launcher, usar DPAD/OK, abrir estoque RUNNER, voltar, sair, encerrar forçado e reinstalar; reabertura sem restaurar valores/sessão. Ambos aprovados. FLAG_SECURE preservado, validação via XML de acessibilidade; sem alegação de teste físico ou screenshot da TCL.
+- Emulador **Android TV API 29/x86, perfil TV 1080p** executou tv/tests/android_tv_smoke.py duas vezes, uma com o APK recompilado da CI e outra com o **APK exato do link direto**: instalar, abrir a Activity registrada para o menu TV, usar DPAD/OK, abrir estoque RUNNER, voltar, sair, encerrar forçado e reinstalar; reabertura sem restaurar valores/sessão. Ambos aprovados. FLAG_SECURE preservado, validação via XML de acessibilidade; sem alegação de teste físico ou screenshot da TCL.
 - [Artefatos da CI](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44662892315/artifacts/14596273582) são ZIP temporário com APK assinado por outra chave de teste. Para Downloader, usar o APK direto estável de tv/downloads, que também foi testado no emulador. [Relatórios JUnit/lint](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44662892315/artifacts/14596766030), retenção até 04/12/2026.
 - [Regressão Windows/Linux/central/React aprovada](https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44662899184). Código Windows/web/central não foi alterado nesta etapa.
 - Link público direto baixado por HTTPS com status 200 e SHA-256 igual ao APK gerado, sem depender de login, ZIP ou Render. [Baixar APK](https://raw.githubusercontent.com/xitios660-ctrl/Ganoh1/feature/windows-offline-ganoh-2026/tv/downloads/GANOH-TV-demo.apk).
