@@ -1,5 +1,7 @@
 // craco.config.js
 const path = require("path");
+const isolated = process.env.REACT_APP_DESKTOP_DEMO === "true" || process.env.REACT_APP_OWNER_PANEL === "true";
+const { IsolatedResourcesPlugin } = require("./plugins/isolated-resources.cjs");
 require("dotenv").config();
 
 // Check if we're in development/preview mode (not production build)
@@ -37,6 +39,14 @@ let webpackConfig = {
       '@': path.resolve(__dirname, 'src'),
     },
     configure: (webpackConfig) => {
+
+      if (isolated) {
+        webpackConfig.plugins.push(new IsolatedResourcesPlugin());
+        webpackConfig.module.rules.unshift({
+          enforce: 'pre', test: /index\.css$/, include: path.resolve(__dirname, 'src'),
+          use: path.resolve(__dirname, 'plugins/isolated-css-loader.cjs'),
+        });
+      }
 
       // Add ignored patterns to reduce watched directories
         webpackConfig.watchOptions = {
@@ -96,5 +106,7 @@ if (isDevServer) {
     }
   }
 }
+
+webpackConfig.jest = { configure: { moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' } } };
 
 module.exports = webpackConfig;

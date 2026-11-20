@@ -17,7 +17,15 @@ import { BackgroundMusic } from "./components/BackgroundMusic";
 
 import { BillingAccess } from "./components/BillingAccess";
 
+import OwnerOverviewPage from './pages/OwnerOverviewPage';
+import DesktopAuthBoundary from './components/DesktopAuthBoundary';
+import DesktopDemoPage from './pages/DesktopDemoPage';
+
 function App() {
+  if(process.env.REACT_APP_OWNER_PANEL==='true') return <ThemeProvider><OwnerOverviewPage /></ThemeProvider>;
+  if (process.env.REACT_APP_DESKTOP_DEMO === 'true') {
+    return <ThemeProvider><DesktopAuthBoundary><DesktopDemoPage /></DesktopAuthBoundary></ThemeProvider>;
+  }
   return (
     <ThemeProvider>
       <CartProvider>
