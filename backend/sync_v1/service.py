@@ -18,6 +18,8 @@ def create_app(db, *, owner_origins=()):
     # Explicit allowlist: accidental production configuration fails before writes.
     if not db.name.startswith('ganoh_sync_test_'):
         raise ValueError('Only isolated ganoh_sync_test_* databases are permitted')
+    from backend.sync_v1 import tv_auth
+    tv_auth.initialize(db)
     db.owner_stock_snapshots.create_index('expires_at',expireAfterSeconds=0)
     db.owner_sessions.create_index('token_hash',unique=True)
     db.owner_sessions.create_index('expires_at',expireAfterSeconds=0)
@@ -37,6 +39,7 @@ def create_app(db, *, owner_origins=()):
     db.reviewers.create_index('token_hash', unique=True)
     db.snapshots.create_index('expires_at', expireAfterSeconds=0)
     app = FastAPI(title='GANOH isolated sync validation')
+    app.add_middleware(tv_auth.PrivateResponses)
     if owner_origins:
         from urllib.parse import urlsplit
         from fastapi.middleware.cors import CORSMiddleware
@@ -285,6 +288,9 @@ def create_app(db, *, owner_origins=()):
         from backend.sync_v1.owner_auth import resolve
         reviewer=resolve(db,authorization)
         if not reviewer:raise HTTPException(401,'Owner authentication required')
+        return overview_for(reviewer)
+
+    def overview_for(reviewer):
         units=sorted(set(reviewer.get('units',[])) & UNITS)
         def collect(session):
             result=[];now=datetime.now(timezone.utc)
@@ -316,6 +322,9 @@ def create_app(db, *, owner_origins=()):
         from backend.sync_v1.owner_auth import resolve
         reviewer=resolve(db,authorization)
         if not reviewer:raise HTTPException(401,'Owner authentication required')
+        return stock_for(reviewer, unit, cursor)
+
+    def stock_for(reviewer, unit, cursor):
         if unit not in UNITS or unit not in reviewer.get('units',[]):raise HTTPException(403,'Owner unit mismatch')
         if cursor:
             try:
@@ -337,6 +346,51 @@ def create_app(db, *, owner_origins=()):
         done=offset+100>=len(saved['items'])
         return {'unit':unit,'generation':generation,'items':saved['items'][offset:offset+100],'done':done,
                 'next_cursor':None if done else generation+':'+str(offset+100),'created_at':saved['created_at'],'includes_unsynced_local_data':False}
+
+    def require_owner(authorization):
+        from backend.sync_v1.owner_auth import resolve
+        owner = resolve(db, authorization)
+        if not owner:
+            raise HTTPException(401, 'Owner authentication required')
+        return owner
+
+    @app.get('/api/sync/v1/owner/tv-accounts')
+    def tv_accounts(authorization: str = Header(default='')):
+        return {'accounts': tv_auth.accounts(db, require_owner(authorization))}
+
+    @app.post('/api/sync/v1/owner/tv-accounts')
+    def tv_create(body: dict, authorization: str = Header(default='')):
+        return tv_auth.create(db, require_owner(authorization), body)
+
+    @app.post('/api/sync/v1/owner/tv-accounts/{account_id}/revoke')
+    def tv_revoke(account_id: str, authorization: str = Header(default='')):
+        return tv_auth.revoke(db, require_owner(authorization), account_id)
+
+    @app.post('/api/sync/v1/tv/login')
+    def tv_login(body: dict):
+        token = tv_auth.login(db, body.get('username'), body.get('password'))
+        if not token:
+            raise HTTPException(401, 'Invalid TV credentials or temporarily locked')
+        return {'access_token': token, 'token_type': 'bearer', 'expires_in': 8*3600, 'scope': 'tv:read'}
+
+    @app.post('/api/sync/v1/tv/logout')
+    def tv_logout(authorization: str = Header(default='')):
+        tv_auth.logout(db, authorization)
+        return {'authenticated': False}
+
+    def require_tv(authorization):
+        viewer = tv_auth.resolve(db, authorization)
+        if not viewer:
+            raise HTTPException(401, 'TV authentication required')
+        return viewer
+
+    @app.get('/api/sync/v1/tv/overview')
+    def tv_overview(authorization: str = Header(default='')):
+        return overview_for(require_tv(authorization))
+
+    @app.get('/api/sync/v1/tv/stock')
+    def tv_stock(unit: str, cursor: str = '', authorization: str = Header(default='')):
+        return stock_for(require_tv(authorization), unit, cursor)
 
     @app.post('/api/sync/v1/batch')
     def batch(body: dict, authorization: str = Header(default='')):
