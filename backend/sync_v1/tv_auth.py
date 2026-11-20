@@ -9,6 +9,8 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from pymongo.errors import DuplicateKeyError
+from pymongo.read_concern import ReadConcern
+from pymongo.write_concern import WriteConcern
 from desktop.auth import _hash
 from desktop.offline_store import UNITS
 
@@ -54,7 +56,7 @@ def create(db, owner, body):
         return {'account_id': account_id, 'username': username, 'units': units, 'scope': 'tv:read'}
     try:
         with db.client.start_session() as session:
-            return session.with_transaction(transaction)
+            return session.with_transaction(transaction, read_concern=ReadConcern('snapshot'), write_concern=WriteConcern('majority'))
     except DuplicateKeyError:
         raise HTTPException(409, 'TV username unavailable')
 
@@ -81,7 +83,7 @@ def revoke(db, owner, account_id):
                 'owner_id': owner['_id'], 'created_at': datetime.now(timezone.utc)}, session=session)
         return {'account_id': account_id, 'revoked': True}
     with db.client.start_session() as session:
-        return session.with_transaction(transaction)
+        return session.with_transaction(transaction, read_concern=ReadConcern('snapshot'), write_concern=WriteConcern('majority'))
 
 
 def login(db, username, password):
@@ -107,7 +109,7 @@ def login(db, username, password):
                                   'expires_at': datetime.now(timezone.utc) + timedelta(hours=8)}, session=session)
         return token
     with db.client.start_session() as session:
-        return session.with_transaction(transaction)
+        return session.with_transaction(transaction, read_concern=ReadConcern('snapshot'), write_concern=WriteConcern('majority'))
 
 
 def resolve(db, authorization):

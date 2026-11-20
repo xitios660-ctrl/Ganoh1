@@ -23,7 +23,7 @@ export default function DesktopTVAccessPanel({origin, token, units}) {
   return <Card><CardHeader><CardTitle>Acessos exclusivos para Android TV</CardTitle></CardHeader><CardContent className="space-y-3">
     <p>Homologação: a TV consulta somente as unidades escolhidas. Crie uma senha diferente da sua; revogar encerra suas sessões na central.</p>
     <form onSubmit={create} className="space-y-3">
-      <label className="block">Usuário da TV<input className="block border rounded p-2 bg-background w-full" value={username} onChange={e=>setUsername(e.target.value)} pattern="[a-z0-9._\-]{3,64}" autoComplete="off" required/></label>
+      <label className="block">Usuário da TV<input className="block border rounded p-2 bg-background w-full" value={username} onChange={e=>setUsername(e.target.value)} pattern="[a-z0-9._\-]{3,64}" autoCapitalize="none" autoCorrect="off" spellCheck={false} autoComplete="off" required/></label>
       <label className="block">Senha exclusiva da TV<input className="block border rounded p-2 bg-background w-full" type="password" value={password} onChange={e=>setPassword(e.target.value)} minLength={12} maxLength={256} autoComplete="new-password" required/></label>
       <fieldset><legend>Unidades que essa TV pode consultar</legend>{units.map(unit=><label className="block" key={unit}><input type="checkbox" checked={selected.includes(unit)} onChange={e=>setSelected(current=>e.target.checked?[...current,unit]:current.filter(u=>u!==unit))}/>{unit==='runner'?'RUNNER':'GYM LONDRES'}</label>)}</fieldset>
       <Button type="submit" disabled={busy||!selected.some(u=>units.includes(u))}>Criar acesso da TV</Button>
