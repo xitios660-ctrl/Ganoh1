@@ -32,3 +32,11 @@ Demonstração funciona sem login/servidor e nunca acessa rede. Dados fictícios
 Não é painel de produção nem contém números reais do site. Depende de servidor HTTPS isolado e conta de homologação previamente provisionados para consulta autenticada; nenhuma hospedagem foi criada. O backend atual emite sessão de proprietário, não um token exclusivo de leitura/pareamento para TV. A interface só consulta, mas a autorização central específica de TV ainda precisa ser implementada antes de uso comercial.
 
 Faltam homologação física na TCL, testes de versões Android anteriores/posteriores, filtro diário/histórico, assinatura comercial estável e mecanismo seguro de atualização. APK inicial tem chave de demonstração local; builds CI usam outras chaves descartáveis e não são upgrades diretos garantidos. Nenhuma chave, senha real ou token entra no APK/repositório. O Windows permanece na versão anterior validada; este incremento não modifica seu comportamento ou o sistema das lojas.
+
+## APK gerado e verificado
+
+- Código: [acfab8b](https://github.com/xitios660-ctrl/Ganoh1/commit/acfab8b), normalização do wrapper [0216aca](https://github.com/xitios660-ctrl/Ganoh1/commit/0216aca).
+- APK release universal (sem bibliotecas nativas), 37.677 bytes; assinatura v2/v3 RSA-2048 validada por apksigner. Manifest conferido com aapt: API mínima 24, target 35, launcher leanback, touchscreen opcional e somente permissão INTERNET; sem debuggable.
+- SHA-256 do APK conferido localmente: `48a7be1a91928c8a042df4d277751e26ef069c32802f78e8b1ff2d3803a79bbb`. SHA-256 do certificado de demonstração: `239e868973f764daa9742dce6aebf72a8ed06943d2cfd5f96f9998a162cf9243`.
+- O APK está versionado em tv/downloads para permitir URL direta no Downloader sem depender de ZIP/autenticação de artefato. Repositório confirmado público; o APK não inclui conta, token, senha ou hostname de produção. Não foi criado release comercial nem modificado serviço hospedado.
+- CI verificará tanto o APK recompilado como este APK direto em emulador, além do checksum e testes. Resultado pendente; teste físico TCL não realizado.
