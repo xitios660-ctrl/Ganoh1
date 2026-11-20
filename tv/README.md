@@ -29,7 +29,7 @@ A demonstração tem aviso permanente de dados fictícios e não acessa nenhuma 
 
 ## Consulta autenticada de homologação
 
-Campo de servidor vazio por padrão. Responsável técnico configura origem HTTPS da central v1 isolada; usar somente conta de proprietário criada para homologação. Sem fallback para Render, site ou API legada. O servidor da branch aceita apenas bancos `ganoh_sync_test_*`; nenhuma hospedagem nova foi implantada.
+Campo de servidor vazio por padrão. Responsável técnico configura origem HTTPS da central v1 isolada; usar somente uma conta exclusiva de TV criada pelo proprietário na homologação. Sem fallback para Render, site ou API legada. O servidor da branch aceita apenas bancos `ganoh_sync_test_*`; nenhuma hospedagem nova foi implantada.
 
 A TV 0.2 usa somente `tv/login`, `tv/overview`, `tv/stock` e `tv/logout`. No painel separado do proprietário, a seção **Acessos exclusivos para Android TV** cria um usuário/senha diferente da conta do proprietário e permite escolher as unidades e revogar o acesso. Só mostra unidades autorizadas e aceita o escopo `CONFIRMED_ISOLATED_V1_LEDGER`. O aplicativo não contém endpoints de alterações financeiras ou conexão com banco. Apenas a central isolada ganhou essas rotas; o backend web de produção permanece intacto.
 
