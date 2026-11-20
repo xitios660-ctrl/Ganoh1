@@ -5,3 +5,4 @@ android/local.properties
 *.keystore
 *.apk
 *.aab
+*.idsig
