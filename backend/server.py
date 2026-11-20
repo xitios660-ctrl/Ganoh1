@@ -1035,7 +1035,8 @@ async def get_orders(store: StoreLocation, status: Optional[str] = None):
     # Must also run on the default kitchen poll (no status filter) used by KitchenPage;
     # previously only ?status=ready archived, so top-bar stats (12h filter) disagreed
     # with the Prontos list (all ready rows).
-    if not restricted() and (status is None or status == "ready"):
+    if (not restricted() and os.environ.get("SCHEDULER_ENABLED", "true").lower() == "true"
+            and (status is None or status == "ready")):
         stale_cutoff = datetime.now(timezone.utc) - timedelta(hours=12)
         stale_iso = stale_cutoff.isoformat()
         stale_query = {
@@ -1072,6 +1073,10 @@ async def get_pending_pix_orders(store: StoreLocation):
         "pix_proof": {"$exists": True}
     }, {"_id": 0}).sort("created_at", 1).to_list(100)
     
+    # A migration with automation disabled must not change payment state on GET.
+    if os.environ.get("SCHEDULER_ENABLED", "true").lower() != "true":
+        return {"orders": orders}
+
     # Auto-trigger verification for orders that have proof but no analysis (30+ seconds old)
     # Only trigger once per order (check verification_triggered flag)
     for order in orders:
