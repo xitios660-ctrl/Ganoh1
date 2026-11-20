@@ -26,6 +26,16 @@ ROOT = Path(__file__).resolve().parent.parent
 # Read-only MongoDB connectivity probe for cross-workspace migration.
 # Runs only with explicit opt-in, without changing orders or financial data.
 if os.environ.get("GANOH_MIGRATION_DB_PROBE", "false").lower() == "true":
+    # Report names only: never print secret values or connection details.
+    required_settings = ("MONGO_URL", "DB_NAME", "GESTOR_PASSWORD", "PRAZO_PASSWORD", "CLEAR_DATA_PASSWORD")
+    missing_settings = [key for key in required_settings if not os.environ.get(key)]
+    unsafe_settings = [key for key in (
+        "GANOH_E2E_ONCE", "GANOH_STORE_ROUTING_TEST_ONCE", "GANOH_VALUE_AUDIT_ONCE",
+        "GANOH_SECURITY_DUPLICATE_ROLLBACK_ONCE", "SCHEDULER_ENABLED", "WHATSAPP_SEND_ENABLED",
+        "SYNC_GESTOR_PASSWORD",
+    ) if os.environ.get(key, "false").lower() == "true"]
+    recovery_configured = bool(os.environ.get("GANOH_RECOVERY_CUSTOMERS") or os.environ.get("GANOH_RECOVERY_SOURCE"))
+    print(f"GANOH_MIGRATION_PREFLIGHT missing_settings={missing_settings} unsafe_settings={unsafe_settings} recovery_configured={recovery_configured}", flush=True)
     try:
         from pymongo import MongoClient
         with MongoClient(os.environ["MONGO_URL"], serverSelectionTimeoutMS=9000, connectTimeoutMS=9000) as conn:
