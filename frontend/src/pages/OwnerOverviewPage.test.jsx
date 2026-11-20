@@ -10,7 +10,7 @@ test('unconfigured owner hosting cannot silently connect to production',async()=
 test('owner sees confirmed totals, unknown offline count and scoped stock after login',async()=>{
  process.env.REACT_APP_SYNC_ORIGIN='https://central.example';
  const box=document.createElement('div');document.body.appendChild(box);const root=createRoot(box);
- global.fetch=jest.fn(async(url)=>({ok:true,status:200,json:async()=>url.endsWith('/login')?{access_token:'fixture-session'}:url.includes('/stock?')?{unit:'runner',items:[{sku:'a',name:'Lanche',quantity:3,version:1}],done:true,created_at:'2026-11-18T00:00:00Z'}:{generated_at:'2026-11-18T00:00:00Z',consolidated:{cash_cents:1000,revenue_cents:1000,expense_cents:0,receivable_cents:0,cash_variance_cents:0,result_cents:1000},units:[{unit:'runner',cash_cents:1000,revenue_cents:1000,expense_cents:0,receivable_cents:0,stale:true,conflicts:0,cash_reviews:0,last_sync_at:null,local_pending:null}]}}));
+ global.fetch=jest.fn(async(url)=>({ok:true,status:200,json:async()=>url.endsWith('/login')?{access_token:'fixture-session'}:url.endsWith('/tv-accounts')?{accounts:[]}:url.includes('/stock?')?{unit:'runner',items:[{sku:'a',name:'Lanche',quantity:3,version:1}],done:true,created_at:'2026-11-18T00:00:00Z'}:{generated_at:'2026-11-18T00:00:00Z',consolidated:{cash_cents:1000,revenue_cents:1000,expense_cents:0,receivable_cents:0,cash_variance_cents:0,result_cents:1000},units:[{unit:'runner',cash_cents:1000,revenue_cents:1000,expense_cents:0,receivable_cents:0,stale:true,conflicts:0,cash_reviews:0,last_sync_at:null,local_pending:null}]}}));
  try{
   await act(async()=>root.render(<OwnerOverviewPage/>));
   const inputs=box.querySelectorAll('input');

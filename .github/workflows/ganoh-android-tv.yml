@@ -55,7 +55,7 @@ jobs:
           script: |
             python3 tv/tests/android_tv_smoke.py "$RUNNER_TEMP/GANOH-TV-demo.apk"
             adb uninstall com.ganoh.tv.demo
-            python3 tv/tests/android_tv_smoke.py tv/downloads/GANOH-TV-demo.apk
+            python3 tv/tests/android_tv_smoke.py tv/downloads/GANOH-TV-demo.apk tv/tests/fixtures/ganoh-tv-0.1.apk
       - uses: actions/upload-artifact@v4
         if: success()
         with:

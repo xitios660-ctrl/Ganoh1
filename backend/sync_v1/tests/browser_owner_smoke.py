@@ -68,6 +68,20 @@ def main():
                     page.get_by_role('button', name='Ver estoque de RUNNER', exact=True).click()
                     page.get_by_text('Lanche fictício: 9', exact=False).wait_for()
                     assert page.get_by_text('Quantidade de operações ainda offline: desconhecida pelo servidor.', exact=True).is_visible()
+                    page.get_by_label('Usuário da TV', exact=True).fill('mobile-tv-fixture')
+                    page.get_by_label('Senha exclusiva da TV', exact=True).fill('Dedicated-TV-Fixture-2026')
+                    page.get_by_label('RUNNER', exact=True).check()
+                    page.get_by_role('button', name='Criar acesso da TV', exact=True).click()
+                    revoke = page.get_by_role('button', name='Revogar mobile-tv-fixture', exact=True)
+                    revoke.wait_for()
+                    television = central.post('/api/sync/v1/tv/login', json={'username':'mobile-tv-fixture','password':'Dedicated-TV-Fixture-2026'})
+                    assert television.status_code == 200
+                    tv_headers = {'Authorization':'Bearer ' + television.json()['access_token']}
+                    assert central.get('/api/sync/v1/tv/overview', headers=tv_headers).status_code == 200
+                    assert central.post('/api/sync/v1/conflicts/review', headers=tv_headers, json={}).status_code == 401
+                    revoke.click()
+                    page.get_by_text('Revogado', exact=False).wait_for()
+                    assert central.get('/api/sync/v1/tv/overview', headers=tv_headers).status_code == 401
                     assert page.evaluate('document.documentElement.scrollWidth <= window.innerWidth')
                     assert page.evaluate('Object.keys(localStorage)') == ['ganoh_theme']
                     assert page.evaluate('sessionStorage.length') == 0

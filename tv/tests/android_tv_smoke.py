@@ -1,5 +1,5 @@
 """Actual Android TV emulator/device test. No production, credentials or coordinates.
-python3 tv/tests/android_tv_smoke.py /path/to/signed-demo.apk
+python3 tv/tests/android_tv_smoke.py /path/to/signed-demo.apk [previous-signed.apk]
 FLAG_SECURE is preserved: assertions inspect accessibility XML, not screenshots.
 """
 import pathlib
@@ -52,6 +52,18 @@ def focus(label, directions=(20,)):
 def main():
     apk = pathlib.Path(sys.argv[1]).resolve()
     assert apk.is_file()
+    if len(sys.argv) > 2:
+        old = pathlib.Path(sys.argv[2]).resolve()
+        assert old.is_file()
+        import hashlib
+        assert hashlib.sha256(old.read_bytes()).hexdigest() == '48a7be1a91928c8a042df4d277751e26ef069c32802f78e8b1ff2d3803a79bbb'
+        adb('install', '-r', str(old))
+        adb('shell', 'am', 'start', '-W', '-n', COMPONENT)
+        wait_for('Abrir demonstração — dados fictícios')
+        focus('Abrir demonstração — dados fictícios', (19,))
+        key(23)
+        wait_for('NÃO SÃO VENDAS REAIS')
+        adb('shell', 'am', 'force-stop', PACKAGE)
     adb('install', '-r', str(apk))
     adb('shell', 'am', 'force-stop', PACKAGE)
     adb('shell', 'am', 'start', '-W', '-n', COMPONENT)
@@ -75,6 +87,8 @@ def main():
     adb('shell', 'am', 'start', '-W', '-n', COMPONENT)
     final = wait_for('Abrir demonstração — dados fictícios')
     assert not any('TOTAL DAS UNIDADES' in n.get('text', '') for n in final)
+    if len(sys.argv) > 2:
+        print('PASS Android TV: upgrade 0.1 to current APK without uninstall; prior financial screen/session not restored')
     print('PASS Android TV: APK install, real D-pad demo/stock/back/logout, force stop and reinstall; no financial state restored')
 
 

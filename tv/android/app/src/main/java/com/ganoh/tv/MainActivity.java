@@ -96,12 +96,12 @@ public final class MainActivity extends Activity {
         serverInput=input("Servidor HTTPS de homologação",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_URI);
         serverInput.setText(getPreferences(MODE_PRIVATE).getString("origin",""));
         serverInput.setHint("https://central-de-homologacao");
-        usernameInput=input("Usuário do proprietário",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
-        passwordInput=input("Senha do proprietário",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        usernameInput=input("Usuário exclusivo da TV",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+        passwordInput=input("Senha exclusiva da TV",InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);
         passwordInput.setLongClickable(false);
         if (android.os.Build.VERSION.SDK_INT>=26) passwordInput.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
         button(root,"Entrar na homologação",this::login);
-        message=text(root,"Use somente credenciais de homologação, nunca a conta de produção. Senha e sessão não são gravadas na TV.",18,MUTED);
+        message=text(root,"Crie o acesso da TV no painel do proprietário da homologação. Não use a senha do proprietário ou de produção. Senha e sessão não são gravadas na TV.",18,MUTED);
         buttons.get(0).requestFocus();
         getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
     }

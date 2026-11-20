@@ -12,7 +12,7 @@ import javax.net.ssl.HttpsURLConnection;
 
 /** No database credentials, redirects, cleartext, telemetry, or financial writes. */
 final class CentralClient {
-    static final String BASE="/api/sync/v1/owner/";
+    static final String BASE="/api/sync/v1/tv/";
     interface Connector { HttpsURLConnection open(URL url) throws IOException; }
     static final class AccessDenied extends IOException { AccessDenied(){super("Sessão encerrada ou acesso recusado. Entre novamente.");} }
     private final String origin;
@@ -31,8 +31,10 @@ final class CentralClient {
     }
     JSONObject login(String username,String password) throws Exception {
         if (username.length()<3 || username.length()>64 || password.length()<12 || password.length()>256)
-            throw new IllegalArgumentException("Informe usuário e senha do proprietário da homologação.");
-        return request("login",null,new JSONObject().put("username",username).put("password",password));
+            throw new IllegalArgumentException("Informe usuário e senha exclusivos da TV na homologação.");
+        JSONObject result=request("login",null,new JSONObject().put("username",username).put("password",password));
+        if (!"tv:read".equals(result.optString("scope"))) throw new IOException("Servidor não emitiu sessão exclusiva de consulta TV.");
+        return result;
     }
     Dashboard overview(String token) throws Exception { return Dashboard.parse(request("overview",token,null)); }
     JSONObject stock(String token,String unit,String cursor) throws Exception {
@@ -46,7 +48,7 @@ final class CentralClient {
     }
     void logout(String token) throws Exception { request("logout",token,new JSONObject()); }
     private JSONObject request(String path,String token,JSONObject body) throws Exception {
-        // All methods are private except the four explicit owner-view operations.
+        // All methods are private except the four explicit TV-view operations.
         HttpsURLConnection connection=connector.open(new URL(origin+BASE+path));
         try {
             connection.setInstanceFollowRedirects(false); connection.setConnectTimeout(8000); connection.setReadTimeout(8000);

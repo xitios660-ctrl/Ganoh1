@@ -29,12 +29,13 @@ public class CentralClientTest {
     @Test public void refusesRedirectAndClosesConnection() throws Exception {
         final Connection[] actual={null};CentralClient c=new CentralClient("https://central.example",url->{actual[0]=new Connection(url);actual[0].code=302;return actual[0];});
         assertThrows(IOException.class,()->c.overview(TOKEN));assertFalse(actual[0].getInstanceFollowRedirects());assertTrue(actual[0].closed);
-        assertEquals("/api/sync/v1/owner/overview",actual[0].getURL().getPath());assertEquals("GET",actual[0].getRequestMethod());
+        assertEquals("/api/sync/v1/tv/overview",actual[0].getURL().getPath());assertEquals("GET",actual[0].getRequestMethod());
     }
     @Test public void loginIsOnlyCredentialWriteAndNeverChangesMoney() throws Exception {
         final Connection[] actual={null};CentralClient c=new CentralClient("https://central.example",url->{actual[0]=new Connection(url);return actual[0];});
-        c.login("fixture-owner","Fixture-Password-2026");assertEquals("POST",actual[0].getRequestMethod());
-        assertEquals("/api/sync/v1/owner/login",actual[0].getURL().getPath());assertTrue(actual[0].closed);
+        // A generic owner session must never be accepted by this TV client.
+        assertThrows(IOException.class,()->c.login("fixture-tv","Fixture-Password-2026"));assertEquals("POST",actual[0].getRequestMethod());
+        assertEquals("/api/sync/v1/tv/login",actual[0].getURL().getPath());assertTrue(actual[0].closed);
         assertThrows(IllegalArgumentException.class,()->c.stock(TOKEN,"other-store",null));
         assertThrows(IOException.class,()->c.stock(TOKEN,"runner","../../orders"));
     }
@@ -43,5 +44,20 @@ public class CentralClientTest {
         assertThrows(CentralClient.AccessDenied.class,()->expired.overview(TOKEN));
         CentralClient huge=new CentralClient("https://central.example",url->{Connection c=new Connection(url);c.payload=new byte[1_048_577];return c;});
         assertThrows(IOException.class,()->huge.overview(TOKEN));
+    }
+    @Test public void dedicatedLoginAndOverviewUseOnlyTvEndpoints() throws Exception {
+        final Connection[] actual={null};
+        CentralClient client=new CentralClient("https://central.example",url->{
+            Connection connection=new Connection(url);actual[0]=connection;
+            try { connection.payload=(url.getPath().endsWith("/login")
+                    ? new org.json.JSONObject().put("scope","tv:read").put("access_token",TOKEN)
+                    : DashboardTest.body()).toString().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            } catch(Exception error){throw new IOException(error);}
+            return connection;
+        });
+        assertEquals(TOKEN,client.login("fixture-tv","Fixture-TV-Password-2026").getString("access_token"));
+        assertEquals(2,client.overview(TOKEN).units.size());
+        assertEquals("/api/sync/v1/tv/overview",actual[0].getURL().getPath());
+        assertEquals("Bearer "+TOKEN,actual[0].getRequestProperty("Authorization"));
     }
 }
