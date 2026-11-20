@@ -1,3 +1,5 @@
+> Estado atual: incremento **0.2** ao final deste relatório. As seções 0.1 abaixo preservam a evidência histórica; a limitação de usar credencial de proprietário foi resolvida na central isolada.
+
 # GANOH Android TV — relatório do incremento 0.1.0-demo
 
 Solicitação: criar aplicativo separado para acompanhar o GANOH numa TCL Android TV, instalável pelo Downloader, mantendo Windows e site existentes. Base anterior: f192d08, branch feature/windows-offline-ganoh-2026 e PR #6 em rascunho.
@@ -52,3 +54,21 @@ Faltam homologação física na TCL, testes de versões Android anteriores/poste
 - Commits: [acfab8b — código/testes](https://github.com/xitios660-ctrl/Ganoh1/commit/acfab8b), [0216aca — wrapper](https://github.com/xitios660-ctrl/Ganoh1/commit/0216aca), [44eb557 — APK/link](https://github.com/xitios660-ctrl/Ganoh1/commit/44eb557), [1e4de71 — CI](https://github.com/xitios660-ctrl/Ganoh1/commit/1e4de71). PR #6 permanece em rascunho.
 
 **Entregue:** APK instalável demonstrativo, testado em Android TV virtual, com cliente de consulta de homologação e link para Downloader. **Não entregue como concluído:** números reais de produção, servidor HTTPS novo, credencial TV dedicada, Play Store, teste físico TCL e atualização comercial assinada. Próxima etapa: testar instalação/legibilidade/controle na TCL e preparar acesso central dedicado à TV em ambiente isolado, antes de qualquer integração real. Nenhum dado real foi acessado ou alterado.
+
+## Incremento 0.2 — credencial dedicada e revogável de consulta
+
+Implementado: backend/sync_v1/tv_auth.py com contas/sessões exclusivas, escopo tv:read, scrypt, bloqueio por falhas, validade de 8h, revogação e auditoria snapshot/majority. Autorizações de proprietário e dispositivo não aceitam esses tokens. Cada consulta usa a interseção das unidades da conta com as unidades atualmente autorizadas ao proprietário; revogação do proprietário também bloqueia a TV. Cadastro é protegido, sem endpoint público; senha não pode repetir a do proprietário. Respostas autenticadas não são armazenáveis em caches.
+
+service.py ganhou rotas /tv/* e /owner/tv-accounts; cálculo de resumo/estoque foi extraído para helpers compartilhados, preservando contrato do proprietário. Nenhum servidor legado de produção foi importado/montado. Índices e coleções são adicionados exclusivamente no banco isolado permitido, sem migração destrutiva.
+
+Novo DesktopTVAccessPanel.jsx é montado somente no build separado do proprietário: criar usuário/senha/unidades e revogar pelo navegador, inclusive celular. Campos de senha são apagados, sem localStorage. Cadastros são relidos após a tentativa, inclusive resposta perdida; usuário único evita contas duplicadas.
+
+Android 0.2 exige resposta tv:read em /tv/login e não usa mais /owner/login. Nome/pacote mantidos; versionCode 2 e mesma chave do APK direto 0.1. APK atual SHA-256: `228ed3f0ae876f68292ed8d77d3684730a543bca77c1f98d9d9e26fa76399cc7`. Assinatura e manifest verificados, sem debuggable e somente INTERNET. A versão 0.1 foi guardada como fixture de upgrade; não é o download indicado para uso.
+
+Arquivos: backend/sync_v1/{service,tv_auth}.py; testes test_tv_access.py/browser_owner_smoke.py; React DesktopTVAccessPanel e integração/testes OwnerOverview; Java CentralClient/MainActivity e testes; app/build.gradle; teste adb de atualização; workflow Android TV; APK/SHA256SUMS e documentos. Commits iniciais: b8a9874 (central), a149ff9 (cliente/painel/upgrade).
+
+Testes locais executados: 32 testes MongoDB aprovados (25 anteriores + 7 de TV), 15 Android aprovados, 13 React aprovados, 2 Node aprovados, 56 desktop executados (54 aprovados + 2 DPAPI específicos do Windows pulados em Linux). Lint Android sem erros, 1 aviso conhecido de atributo usado só no Android 12+. Build separado do proprietário aprovado. Chromium mobile real aprovou criar conta RUNNER, obter consulta TV, negar revisão financeira e revogar; sessão perdeu acesso na consulta seguinte. Backend central é TestClient com MongoDB local, não servidor HTTPS publicado.
+
+O primeiro fixture MongoDB local não iniciou por falta de espaço no ambiente restaurado. Apenas esse container descartável foi removido e recriado com /data/db em tmpfs; testes foram repetidos com sucesso, sem apagar dados reais ou volumes desconhecidos.
+
+CI de upgrade 0.1→0.2 e APK novo ainda será registrada após execução. Não declarar teste físico na TCL ou acesso real aos números das lojas. Continuam pendentes hospedagem HTTPS de homologação, validação física e assinatura/atualização comercial. O novo login precisa da versão nova da central isolada; servidor antigo falha sem fallback para conta de proprietário ou produção.

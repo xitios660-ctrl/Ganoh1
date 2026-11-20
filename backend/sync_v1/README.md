@@ -39,3 +39,11 @@ python -m unittest discover -s backend/sync_v1/tests -v
 ```
 
 TestClient não comprova servidor HTTPS externo. Transporte Windows exige TLS/certificados e não segue redirects. Ensaios Chromium e instruções adicionais: [demonstração](../../desktop/DEMONSTRATION.md). Resultados: [relatório](../../docs/CODEX_WINDOWS_PROGRESS_2026-11-18.md).
+
+## Contas exclusivas de Android TV (0.2)
+
+Proprietário autenticado administra GET/POST /owner/tv-accounts e POST /owner/tv-accounts/{id}/revoke sob /api/sync/v1. Usuário minúsculo de 3–64 caracteres, senha dedicada de 12–256 diferente da senha do proprietário e unidades explícitas. Máximo 20 contas ativas por proprietário; lista prioriza ativas e mostra até 100 registros. Cadastro/revogação com auditoria atômica e confirmação majority.
+
+TV usa /tv/login, /tv/logout, /tv/overview e /tv/stock. Sessões/contas separadas, scrypt, lockout de 15 min após 5 falhas, sessão de 8h por hash e token tv:read rejeitado pelas autorizações de proprietário/dispositivo. Cada consulta revalida conta, proprietário e unidades atuais. Cursores de estoque são vinculados à identidade TV, sem compartilhamento com outras TVs ou proprietário. Rotas owner/tv retornam Cache-Control no-store, inclusive erros de autenticação.
+
+A revogação protege a próxima consulta; valores já recebidos ficam em memória, com aviso de atraso, até sair/trocar de aplicativo ou receber uma rejeição de sessão da central. Não há apagamento remoto da tela enquanto a TV estiver sem conexão. O aplicativo marca dados antigos e limpa a tela ao sair/trocar de aplicativo. Sem deploy: guard ganoh_sync_test_* permanece, sem alterações em backend/server.py, Render ou produção. Consulte tv/README.md.

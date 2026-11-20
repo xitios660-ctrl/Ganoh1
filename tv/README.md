@@ -1,6 +1,6 @@
 # GANOH TV — Android TV / Google TV (TCL)
 
-Aplicativo **separado** do Windows e do site. Painel nativo Java/Android para controle remoto, sem WebView, MongoDB, vendas ou movimentações financeiras locais. Pacote `com.ganoh.tv.demo`, versão `0.1.0-demo`, Android 7/API 24 ou superior. Não é Roku, Tizen ou webOS; não foi publicado na Play Store.
+Aplicativo **separado** do Windows e do site. Painel nativo Java/Android para controle remoto, sem WebView, MongoDB, vendas ou movimentações financeiras locais. Pacote `com.ganoh.tv.demo`, versão `0.2.0-demo`, Android 7/API 24 ou superior. Não é Roku, Tizen ou webOS; não foi publicado na Play Store.
 
 ## Instalação pelo Downloader
 
@@ -13,7 +13,7 @@ https://raw.githubusercontent.com/xitios660-ctrl/Ganoh1/feature/windows-offline-
 3. Abrir o GANOH TV Demo no menu da TV e escolher **Abrir demonstração — dados fictícios**. Não precisa de computador, usuário ou servidor para essa demonstração.
 4. Usar setas e OK do controle. Voltar sai do estoque para o resumo; **Sair da demonstração** retorna à tela inicial.
 
-O APK é assinado com chave de desenvolvimento dedicada à demonstração, não uma identidade comercial homologada. A chave fica fora do Git. Builds automáticos de CI usam chave descartável própria; portanto, APKs de builds diferentes podem não atualizar uns aos outros. Antes de distribuição comercial, definir assinatura estável e estratégia de atualização. Esta versão não guarda vendas, senha ou sessão na TV.
+O APK 0.2 é assinado com a mesma chave do APK direto 0.1, para permitir atualização sem desinstalar. A CI testa esse upgrade. É uma chave de desenvolvimento dedicada à demonstração, não uma identidade comercial homologada. A chave fica fora do Git. Builds automáticos de CI usam chave descartável própria; portanto, APKs de builds diferentes podem não atualizar uns aos outros. Antes de distribuição comercial, definir assinatura estável e estratégia de atualização. Esta versão não guarda vendas, senha ou sessão na TV.
 
 Não instalar um arquivo de origem diferente fingindo ser o mesmo aplicativo. SHA-256 e evidências de teste ficam em [REPORT.md](REPORT.md). Nenhum código numérico de terceiros para o Downloader foi criado.
 
@@ -31,9 +31,11 @@ A demonstração tem aviso permanente de dados fictícios e não acessa nenhuma 
 
 Campo de servidor vazio por padrão. Responsável técnico configura origem HTTPS da central v1 isolada; usar somente conta de proprietário criada para homologação. Sem fallback para Render, site ou API legada. O servidor da branch aceita apenas bancos `ganoh_sync_test_*`; nenhuma hospedagem nova foi implantada.
 
-A TV usa os contratos existentes de `owner/login`, `owner/overview`, `owner/stock` e `owner/logout`. Só mostra unidades autorizadas e aceita o escopo `CONFIRMED_ISOLATED_V1_LEDGER`. O aplicativo não contém endpoints de alterações financeiras ou conexão com banco. O backend existente não foi modificado.
+A TV 0.2 usa somente `tv/login`, `tv/overview`, `tv/stock` e `tv/logout`. No painel separado do proprietário, a seção **Acessos exclusivos para Android TV** cria um usuário/senha diferente da conta do proprietário e permite escolher as unidades e revogar o acesso. Só mostra unidades autorizadas e aceita o escopo `CONFIRMED_ISOLATED_V1_LEDGER`. O aplicativo não contém endpoints de alterações financeiras ou conexão com banco. Apenas a central isolada ganhou essas rotas; o backend web de produção permanece intacto.
 
-**Limitação de autorização:** o token atual é a sessão de proprietário da homologação, não uma credencial central com escopo exclusivo de TV. A interface só consulta; uma credencial dedicada, com autorização de leitura e pareamento/revogação apropriados, é necessária antes de uso comercial. Não usar senha de produção nessa tela.
+**Autorização exclusiva de consulta:** as contas e sessões de TV ficam em coleções separadas das contas de proprietário/dispositivos. A senha da TV precisa diferir da senha atual do proprietário. O token `tv:read` não autoriza vendas, revisão de conflitos ou criação/revogação de acessos. O servidor revalida a conta, o proprietário e a interseção de unidades em cada consulta. Revogar a conta encerra as sessões; desativar o proprietário também impede novas consultas.
+
+As credenciais são criadas por proprietário autenticado; não há cadastro público. Senhas usam scrypt e sessões aleatórias ficam no servidor somente por hash, com validade de 8h e bloqueio após tentativas inválidas. Criação/revogação são auditadas em transações snapshot/majority. Respostas autenticadas usam Cache-Control: no-store.
 
 O resumo é consultado a cada 30 segundos enquanto aberto; estoque é snapshot identificado por geração/data e pode ser atualizado explicitamente. Falhas preservam o último resumo **em memória**, com aviso de desatualização. Sem resumo anterior, não inventa saldo zero. Não há cache financeiro em disco. Voltar para outro aplicativo encerra a sessão local e tenta logout; sem rede, a sessão central expira conforme política existente (8h).
 
@@ -57,4 +59,4 @@ Gradle Wrapper 8.9 com SHA-256 da distribuição. APK release precisa de assinat
 
 `tv/tests/android_tv_smoke.py APK` instala/reinstala via adb em emulador/TV de teste, usa DPAD real, confere demonstração, estoque, voltar, logout e reabertura sem dados financeiros. Nunca usar esse ensaio contra instalações reais existentes. FLAG_SECURE não é desabilitado para capturar imagem.
 
-Faltam teste físico na TCL do proprietário, autenticação dedicada à TV e servidor HTTPS de homologação. Consulte o relatório para distinguir testes executados dos apenas preparados.
+Faltam teste físico na TCL do proprietário e servidor HTTPS de homologação. A conta de consulta dedicada já foi implementada e testada em ambiente isolado. Consulte o relatório para distinguir testes executados dos apenas preparados.
