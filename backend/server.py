@@ -7409,7 +7409,8 @@ async def _register_manual_morning_sales_runner_v1():
 @app.on_event("startup")
 async def startup_db_client():
     """Initialize database, scheduler and default tenant"""
-    if not restricted():
+    skip_startup_writes = os.environ.get("GANOH_SKIP_STARTUP_REPAIRS", "").lower() == "true"
+    if not restricted() and not skip_startup_writes:
         await ensure_default_tenant()
     # Historical sales must only come from the verified migration, never from startup.
     # The old helper is kept for historical reference and is deliberately not executed.
@@ -7419,24 +7420,26 @@ async def startup_db_client():
         WHATSAPP_GROUP_ID = target_setting["value"]
         STORE_WHATSAPP_GROUPS["gym-londres"] = WHATSAPP_GROUP_ID
     
-    # Performance: create indexes on hot query paths
-    try:
-        await db.orders.create_index([("store", 1), ("status", 1)])
-        await db.orders.create_index([("store", 1), ("created_at", -1)])
-        await db.orders.create_index([("status", 1), ("created_at", -1)])
-        await db.stock.create_index([("store", 1), ("menu_item_id", 1)])
-        await db.pix_adjustments.create_index([("store", 1), ("created_at", -1)])
-        await db.prazo_debts.create_index([("store", 1), ("status", 1)])
-        await db.prazo_payments.create_index([("store", 1), ("created_at", -1)])
-        await db.prazo_partial_payments.create_index([("store", 1), ("created_at", -1)])
-        await db.cash_withdrawals.create_index([("store", 1), ("created_at", -1)])
-        await db.tenants.create_index("username", unique=True)
-        await db.whatsapp_inbound.create_index("messageId", unique=True)
-        await db.whatsapp_inbound.create_index([("receivedAt", -1)])
-        await db.whatsapp_inbound.create_index([("processed", 1), ("receivedAt", -1)])
-        logger.info("MongoDB indexes ensured (performance optimization)")
-    except Exception as e:
-        logger.warning(f"Could not ensure all indexes (non-fatal): {e}")
+    # Migration validation must preserve tenants, collections and indexes too.
+    if not skip_startup_writes:
+        # Performance: create indexes on hot query paths
+        try:
+            await db.orders.create_index([("store", 1), ("status", 1)])
+            await db.orders.create_index([("store", 1), ("created_at", -1)])
+            await db.orders.create_index([("status", 1), ("created_at", -1)])
+            await db.stock.create_index([("store", 1), ("menu_item_id", 1)])
+            await db.pix_adjustments.create_index([("store", 1), ("created_at", -1)])
+            await db.prazo_debts.create_index([("store", 1), ("status", 1)])
+            await db.prazo_payments.create_index([("store", 1), ("created_at", -1)])
+            await db.prazo_partial_payments.create_index([("store", 1), ("created_at", -1)])
+            await db.cash_withdrawals.create_index([("store", 1), ("created_at", -1)])
+            await db.tenants.create_index("username", unique=True)
+            await db.whatsapp_inbound.create_index("messageId", unique=True)
+            await db.whatsapp_inbound.create_index([("receivedAt", -1)])
+            await db.whatsapp_inbound.create_index([("processed", 1), ("receivedAt", -1)])
+            logger.info("MongoDB indexes ensured (performance optimization)")
+        except Exception as e:
+            logger.warning(f"Could not ensure all indexes (non-fatal): {e}")
     
     if os.environ.get("SCHEDULER_ENABLED", "true").lower() == "true":
         scheduler.add_job(auto_mark_orders_ready, 'interval', minutes=1, id='auto_ready_orders')
@@ -7449,7 +7452,7 @@ async def startup_db_client():
                               id='daily_sales_report')
         scheduler.start()
         logger.info("Automatic order readiness enabled")
-    logger.info("Database initialized, default tenant ensured")
+    logger.info("Database initialized (startup writes skipped=%s)", skip_startup_writes)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
