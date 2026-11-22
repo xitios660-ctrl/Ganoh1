@@ -80,7 +80,6 @@ def apply_page(journal, page, expected_cursor):
                 db.execute('INSERT OR IGNORE INTO inventory_coverage SELECT * FROM inventory_coverage_staging')
                 db.execute('DELETE FROM inventory_coverage_staging')
                 db.execute('DELETE FROM snapshot_staging')
-            db.execute('DELETE FROM inventory_coverage_staging')
             db.execute('UPDATE snapshot_state SET generation=?,cursor=?,published_at=CASE WHEN ? THEN ? ELSE published_at END WHERE id=1',
                        (page['generation'], page.get('next_cursor'), page['done'], page.get('created_at')))
             db.execute('COMMIT')

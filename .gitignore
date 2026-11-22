@@ -105,3 +105,9 @@ frontend/node_modules/.cache/default-development/19.pack
 /frontend/build-owner/
 
 /frontend/build-webcheck/
+
+# Private migration/backup artifacts must never enter Git.
+*.ganoh
+*.mongosnapshot
+*.bson
+/private-data/

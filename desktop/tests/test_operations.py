@@ -50,6 +50,20 @@ class OperationalTests(unittest.TestCase):
         self.journal.flag_conflict(self.journal.pending()[1]['operation_id'], 'Version conflict')
         self.assertTrue(catalog(self.journal)[0]['blocked'])
 
+    def test_multi_page_coverage_survives_restart_until_atomic_publication(self):
+        saved=self.sale('covered-on-first-page')
+        apply_page(self.journal, {'unit':'runner','generation':'paged','done':False,'next_cursor':'paged:100',
+            'covered_operations':[{'operation_id':saved['operation_id'],'fingerprint':saved['fingerprint']}],
+            'items':[{'sku':'lanche','quantity':4,'price_cents':100,'version':2}]},None)
+        # Staging must not change the old published catalogue or overlay yet.
+        self.assertEqual(catalog(self.journal)[0]['quantity'],4)
+        reopened=OfflineJournal(self.journal.path,'runner')
+        apply_page(reopened, {'unit':'runner','generation':'paged','done':True,'next_cursor':None,
+            'covered_operations':[], 'items':[{'sku':'second-product','quantity':1,'price_cents':100,'version':1}]},'paged:100')
+        item=next(i for i in catalog(reopened) if i['sku']=='lanche')
+        self.assertEqual(item['quantity'],4)  # never 3: first-page sale already covered
+        self.assertEqual(item['version'],2)
+
     def test_stock_adjustment_is_projected_audited_and_cannot_go_negative(self):
         self.event('stock.adjust', sku='lanche', delta=2, base_version=1, description='Entrada fictícia')
         self.assertEqual(catalog(self.journal)[0]['quantity'], 7)

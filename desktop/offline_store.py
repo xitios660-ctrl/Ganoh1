@@ -32,6 +32,13 @@ def _canonical(data: dict[str, Any]) -> str:
     return json.dumps(data, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
+def require_legacy_baseline(db):
+    imported=db.execute("SELECT value FROM metadata WHERE key IN ('legacy_active','legacy_staging') LIMIT 1").fetchone()
+    approved=db.execute("SELECT value FROM metadata WHERE key='legacy_operational_baseline'").fetchone()
+    if imported and not (approved and approved[0]):
+        raise OfflineError('Conclua a conferência dos saldos importados antes de registrar novas operações')
+
+
 class OfflineJournal:
     """A single-unit SQLite journal; each PC must have its own DB and device identity.
 
@@ -76,7 +83,7 @@ class OfflineJournal:
             db.execute("BEGIN IMMEDIATE")
             try:
                 schema_version = db.execute('PRAGMA user_version').fetchone()[0]
-                if schema_version not in (0, 1, 2, 3):
+                if schema_version not in (0, 1, 2, 3, 4):
                     raise OfflineError('Versão do banco mais recente; atualização compatível necessária')
                 db.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
                 db.execute("""
@@ -118,7 +125,7 @@ class OfflineJournal:
                 from desktop.commerce import initialize
                 try:
                     initialize(db)
-                    db.execute("PRAGMA user_version = 3")
+                    db.execute("PRAGMA user_version = " + str(max(3, schema_version)))
                 except Exception:
                     db.execute('ROLLBACK')
                     raise
@@ -191,6 +198,7 @@ class OfflineJournal:
                     result = {"operation_id": operation_key, "state": existing["state"],
                               "fingerprint": fingerprint, "already_exists": True}
                 else:
+                    require_legacy_baseline(db)
                     if actor:
                         from desktop.auth import check_actor
                         check_actor(db,actor,'sale.create')

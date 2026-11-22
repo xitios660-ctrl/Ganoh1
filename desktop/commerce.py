@@ -3,7 +3,7 @@ import hashlib
 import json
 from contextlib import closing
 from desktop.business_rules import BusinessError, KINDS, customer_name, identifier, plan
-from desktop.offline_store import OfflineError, _canonical, _utc_now
+from desktop.offline_store import OfflineError, _canonical, _utc_now, require_legacy_baseline
 
 
 def initialize(db):
@@ -91,6 +91,7 @@ def record(journal, *, operation_id, kind, data, actor=None):
                         raise BusinessError('UUID reutilizado com dados diferentes')
                     db.execute('COMMIT')
                     return {'operation_id': operation_id, 'fingerprint': fingerprint, 'state': prior['state'], 'already_exists': True}
+                require_legacy_baseline(db)
                 if actor:
                     from desktop.auth import check_actor
                     check_actor(db,actor,kind)
