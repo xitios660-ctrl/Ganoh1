@@ -46,8 +46,8 @@ vendas antigas e recentes, inclusive sábado 21/11, sem interromper o site.
 
 ## Limitações que impedem entrega final
 
-O site informado `https://ganoh-minjuin.onrender.com/` respondeu HTTP 200. Não há
-origem Mongo confirmada nem backup dos dados reais neste incremento. Após
+O site informado `https://ganoh-minjuin.onrender.com/` respondeu HTTP 200. Ainda
+não há backup dos dados reais neste incremento. Após
 confirmação do proprietário, consulta somente leitura localizou ganoh-minjuin
 em “Min's workspace”, conexão Minjuin, serviço srv-dc057df40ujc73fe2fig.
 O serviço aponta para este repositório/main e está com auto-deploy desligado.
@@ -57,8 +57,35 @@ O conector Render não oferece leitura de variáveis de ambiente; não se usou
 update de variáveis como contorno. A tentativa de navegador falhou antes de
 abrir o painel. Consulta apenas dos nomes de bancos nos dois clusters da conexão
 Atlas Primary não encontrou ganoh_production; nenhum documento de outras
-aplicações foi consultado. É necessário identificar/conectar o projeto Atlas
-correto, sem publicar URI/senha nem presumir que outro banco seja a origem.
+aplicações foi consultado. Posteriormente o proprietário identificou a conexão
+Atlas Regex. Nela foi encontrado ganoh_production no Project 0 / Cluster0,
+MongoDB 8.0.39, Free. Consultas somente leitura confirmaram 22 coleções, unidades
+runner/gym-londres e vendas até sábado 21/11. Valores, contagens comerciais,
+clientes e documentos reais não foram colocados no repositório público.
+
+A inspeção revelou prazo_debts, prazo_payment_reversals e coleções administrativas
+que não existiam no inventário do código. A projeção inclui dívidas e estornos;
+auditorias globais repair_runs/recovery_runs e filas Baileys ficam somente no
+backup integral do servidor, nunca no pacote de funcionário. Coleções novas não
+mapeadas continuam bloqueando a exportação. Estornos com pedidos/pagamentos
+aninhados de outra unidade são recusados, também na carga SQLCipher.
+
+O conector de consultas não fornece exportação BSON com sessão snapshot nem
+credenciais ao cliente Python. Não tratar consultas paginadas independentes como
+backup consistente. Para executar capture/validate_restore reais está preparado
+um acesso dedicado: usuário ganoh_backup_reader_20261122, somente role read em
+ganoh_production, limitado a Cluster0, senha gerada pelo servidor MCP e guardada
+fora do Git; liberação somente do IP de saída atual /32, sem trocar entradas
+existentes. Nenhum usuário/IP foi criado. A regra do proprietário exige aprovação
+antes de mudar configuração da produção. Revalidar IP antes de executar. A ferramenta
+de criação não oferece expiração/revogação; revogar usuário e IP pelo painel Atlas
+ao terminar a cópia, com confirmação do proprietário. Jamais incluir o acesso no
+Windows ou em artefatos. Até essa autorização, somente consultas via conector.
+
+Testes locais deste ajuste: 15 data_bridge aprovados; 63 desktop aprovados com
+2 skips Windows antes do último caso adicional; 7 testes focados de histórico
+aprovados após adicionar o caso de estorno local. A CI do novo commit deve validar
+64 testes desktop (incluindo os dois específicos de Windows na matriz Windows).
 
 O cache histórico não está ligado ao assistente de primeira execução nem às APIs
 originais. Faltam conciliação de caixa/prazo/estoque, compatibilidade integral com
@@ -72,7 +99,8 @@ operações por unidade, aplicar as mudanças posteriores com revisão dos confl
 e confirmar a sincronização ao painel remoto antes de liberar o caixa local.
 
 Não houve merge em main, deploy, migração, escrita em ganoh_production nem
-alteração do Render. Apenas testes em bancos descartáveis e código na branch
+alteração do Render. Consultas reais somente leitura, testes em bancos descartáveis
+e código na branch
 feature/windows-offline-ganoh-2026. Não distribuir cópia real do banco em GitHub.
 
 PR: https://github.com/xitios660-ctrl/Ganoh1/pull/6

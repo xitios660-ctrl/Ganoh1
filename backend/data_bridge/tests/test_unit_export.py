@@ -71,3 +71,28 @@ class UnitExportTests(unittest.TestCase):
         receipt['archive_sha256']='0'*64
         with self.assertRaises(ArchiveError):export_unit(full,self.phrase,destination,self.unit_phrase,'runner',validated_backup=receipt)
         self.assertFalse(destination.exists())
+
+
+    def test_debts_and_reversal_audit_are_preserved_but_server_inboxes_are_not_distributed(self):
+        self.db.prazo_debts.insert_one({'_id':'debt-fixture','store':'runner','amount':23.25})
+        self.db.prazo_payment_reversals.insert_many([
+            {'_id':'reverse-fixture','store':'runner','amount_reversed':10,
+             'duplicate_payment':{'store':'runner','amount':10},
+             'affected_orders_before':[{'store':'runner','total':10}]},
+            {'_id':'other-reversal','store':'gym-londres','amount_reversed':99}])
+        for name in ('repair_runs','recovery_runs','baileys_inbound','baileys_processed_messages'):
+            self.db[name].insert_one({'_id':'server-only','payload':'FIXTURE-PRIVATE-SERVER-AUDIT'})
+        with Reader(self.export(),self.unit_phrase,kind=UNIT_FORMAT) as reader:
+            collections={c['name']:c for c in reader.manifest['collections']}
+            self.assertEqual(set(collections),{'orders','adicionais','prazo_debts','prazo_payment_reversals'})
+            reversal=list(reader.documents(collections['prazo_payment_reversals']))
+            self.assertEqual(len(reversal),1)
+            self.assertEqual(reversal[0]['duplicate_payment']['amount'],10)
+            self.assertEqual(reversal[0]['affected_orders_before'][0]['store'],'runner')
+            self.assertEqual(list(reader.documents(collections['prazo_debts']))[0]['amount'],23.25)
+
+    def test_top_level_unit_cannot_hide_another_stores_embedded_financial_records(self):
+        self.db.prazo_payment_reversals.insert_one({'_id':'cross-unit-fixture','store':'runner',
+            'affected_orders_before':[{'store':'gym-londres','total':150}]})
+        with self.assertRaises(ArchiveError):self.export()
+        self.assertFalse((self.root/'runner.ganoh').exists())

@@ -46,3 +46,13 @@ Testes isolados (Mongo de ensaio, jamais produção):
 python -m unittest discover -s backend/data_bridge/tests -v
 python -m unittest discover -s desktop/tests -p 'test_*.py' -v
 ```
+
+## Mapeamento observado na origem indicada pelo proprietário
+
+A projeção preserva `prazo_debts` e `prazo_payment_reversals` como histórico,
+inclusive evidência aninhada original. Não refaz um estorno nem recria um pagamento.
+`repair_runs`, `recovery_runs`, `baileys_inbound` e `baileys_processed_messages`
+ficam no backup central completo: são auditorias/filas do servidor, não credenciais
+nem operações novas do dispositivo. Documentos financeiros com outra unidade
+aninhada são recusados, nunca parcialmente recortados para parecerem íntegros.
+Todos os dados de teste são fictícios; nenhuma cópia real foi publicada.

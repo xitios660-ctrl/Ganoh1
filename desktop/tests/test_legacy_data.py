@@ -21,14 +21,16 @@ class LegacyDataTests(unittest.TestCase):
         self.root=Path(self.temp.name);self.key=secrets.token_bytes(32)
         self.journal=OfflineJournal(self.root/'encrypted.sqlite','runner',encryption_key=self.key)
 
-    def bundle(self,name='unit.ganoh',*,unit='runner',clock=100,total=205,rows=3,collection='orders'):
+    def bundle(self,name='unit.ganoh',*,unit='runner',clock=100,total=205,rows=3,collection='orders',extra=None):
         path=self.root/name
         with new_file(path) as file:
             writer=Writer(file,PHRASE,kind=UNIT_FORMAT)
             pages=[];fingerprint=hashlib.sha256()
             for i in range(rows):
-                data=BSON.encode({'_id':str(i),'store':unit,'customer_name':'SECRET-LOCAL-CUSTOMER',
-                    'total':Decimal128(str(total/100)),'created_at':'2020-01-01T00:00:00Z'})
+                document={'_id':str(i),'store':unit,'customer_name':'SECRET-LOCAL-CUSTOMER',
+                    'total':Decimal128(str(total/100)),'created_at':'2020-01-01T00:00:00Z'}
+                document.update(extra or {})
+                data=BSON.encode(document)
                 fingerprint.update(data);pages.append(writer.page(data))
             writer.finish({'archive_id':writer.id,'unit':unit,'source_database':'fixture-source',
                 'read_timestamp':Timestamp(clock,1),'collections':[{'name':collection,'count':rows,
@@ -114,3 +116,19 @@ class LegacyDataTests(unittest.TestCase):
         self.assertTrue(active(self.journal)['history_complete'])
         self.assertFalse(active(self.journal)['operational_baseline_ready'])
         with closing(self.journal._connect()) as db:self.assertIsNone(db.execute("SELECT value FROM metadata WHERE key='legacy_staging'").fetchone())
+
+
+    def test_reversal_history_is_read_only_and_embedded_cross_unit_data_is_rejected(self):
+        path=self.bundle('reversal.ganoh',rows=1,collection='prazo_payment_reversals',
+                         extra={'duplicate_payment':{'store':'runner','amount':10}})
+        import_bundle(self.journal,path,PHRASE)
+        row=records(self.journal,'prazo_payment_reversals')['items'][0]
+        self.assertEqual(row['duplicate_payment']['store'],'runner')
+        self.assertEqual(self.journal.status()['pending'],0)
+        from desktop.commerce import summary
+        self.assertEqual(summary(self.journal)['revenue_cents'],0)
+        bad=self.bundle('cross-unit-reversal.ganoh',clock=200,rows=1,
+                        collection='prazo_payment_reversals',
+                        extra={'duplicate_payment':{'store':'gym-londres','amount':10}})
+        with self.assertRaises(OfflineError):import_bundle(self.journal,bad,PHRASE)
+        self.assertEqual(records(self.journal,'prazo_payment_reversals')['items'][0]['duplicate_payment']['store'],'runner')

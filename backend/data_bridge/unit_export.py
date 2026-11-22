@@ -1,5 +1,6 @@
 """Derive a credential-free, strictly single-unit business bundle from a backup."""
 import hashlib
+from collections.abc import Mapping
 from bson.timestamp import Timestamp
 from desktop.offline_store import UNITS
 from backend.data_bridge.archive import Writer, Reader, ArchiveError, new_file, file_digest
@@ -8,12 +9,31 @@ UNIT_FORMAT = 'ganoh-unit-bootstrap-v1'
 UNIT_COLLECTIONS = frozenset({
     'stock','orders','order_history','cash_credit_topups','cash_drawer_config','cash_withdrawals',
     'daily_sales','monthly_sales','expenses','low_stock_list','pix_adjustments','prazo_customers',
-    'prazo_history','prazo_partial_payments','prazo_payments','stock_movements','whatsapp_inbound',
+    'prazo_history','prazo_partial_payments','prazo_payments','prazo_debts',
+    'prazo_payment_reversals','stock_movements','whatsapp_inbound',
 })
 SHARED_COLLECTIONS = frozenset({'menu','adicionais'})
 # These remain intact in the full backup, NEVER in an employee/device bundle.
-PRIVATE_COLLECTIONS = frozenset({'tenants','settings','deploy_markers','chart_cache'})
+PRIVATE_COLLECTIONS = frozenset({'tenants','settings','deploy_markers','chart_cache',
+    'repair_runs','recovery_runs','baileys_inbound','baileys_processed_messages'})
 BUSINESS_COLLECTIONS = UNIT_COLLECTIONS | SHARED_COLLECTIONS
+
+
+def _validate_nested_scope(value, unit, *, shared, depth=0):
+    # Reversal audit documents can embed complete before/after orders and payments.
+    # Top-level store alone is insufficient to prevent a cross-unit disclosure.
+    if depth > 100:
+        raise ArchiveError('Documento excessivamente aninhado exige revisão')
+    if isinstance(value, Mapping):
+        if 'store' in value:
+            store=value['store']
+            if store != unit and not (shared and store in (None,'all')):
+                raise ArchiveError('Documento contém unidade divergente no histórico aninhado')
+        for child in value.values():
+            _validate_nested_scope(child,unit,shared=shared,depth=depth+1)
+    elif isinstance(value,(list,tuple)):
+        for child in value:
+            _validate_nested_scope(child,unit,shared=shared,depth=depth+1)
 
 
 def belongs(name, document, unit):
@@ -21,10 +41,14 @@ def belongs(name, document, unit):
         raise ArchiveError('Coleção não autorizada no pacote da unidade')
     store = document.get('store')
     if name in SHARED_COLLECTIONS and store in (None, 'all'):
+        _validate_nested_scope(document,unit,shared=True)
         return True
     if store not in UNITS:
         raise ArchiveError('Registros sem unidade inequívoca exigem revisão: ' + name)
-    return store == unit
+    if store != unit:
+        return False
+    _validate_nested_scope(document,unit,shared=name in SHARED_COLLECTIONS)
+    return True
 
 
 def export_unit(backup, backup_phrase, destination, unit_phrase, unit, *, validated_backup=None, page_bytes=4*1024*1024):
