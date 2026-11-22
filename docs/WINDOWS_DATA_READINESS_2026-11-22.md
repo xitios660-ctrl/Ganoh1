@@ -33,8 +33,16 @@ vendas antigas e recentes, inclusive sábado 21/11, sem interromper o site.
 - Desktop: 63 testes, 61 aprovados e 2 exclusivos de Windows ignorados no Linux.
 - Fixtures incluem histórico de 2020, registros de sábado 21/11/2026, dinheiro
   Decimal128, duas unidades, interrupções e reabertura. Nenhuma fixture real.
-- Validação Windows e CI deste commit deve ser consultada no PR; resultado
-  anterior não deve ser apresentado como teste deste novo código.
+- CI do commit dfe570e aprovada: 63 desktop Windows, Linux 61+2 skips,
+  32 central, 13 data bridge, 13 React e 2 Node; builds desktop/gestor aprovados.
+  https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44982071812
+- Instalador deste commit aprovado: PyInstaller, restart e ensaio NSIS de
+  instalação/reinstalação/desinstalação preservando os dados.
+  https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44982071817
+  Isso não representa teste físico nas lojas nem importação do banco real.
+- Workflow Android TV disparado pelo PR (sem mudanças Android): a primeira
+  execução falhou ao baixar dependência Maven dos testes; repetição em andamento.
+  Não usar esse resultado como aprovação Android deste commit.
 
 ## Limitações que impedem entrega final
 

@@ -43,3 +43,10 @@ A tela operacional reutiliza tema/componentes, mas não é a reprodução integr
 O painel novo lê somente o livro da central isolada `ganoh_sync_test_*`. Não recebe dados de produção, e não conhece vendas ainda offline: pendências locais remotas são explicitamente desconhecidas. O acesso atual pelo celular permanece no site existente.
 
 Evidências e contagens atualizadas: [relatório técnico](CODEX_WINDOWS_PROGRESS_2026-11-18.md). Não declarar paridade completa ou homologação comercial com base apenas na CI.
+
+## Carga histórica — 22/11/2026
+
+Backup consistente e criptografado, ensaio de restauração e cache BSON SQLCipher
+retomável implementados com fixtures. Isso ainda não integra as telas originais
+nem constitui saldos operacionais aprovados. Consulta à origem real pendente;
+ver [prontidão dos dados](WINDOWS_DATA_READINESS_2026-11-22.md).

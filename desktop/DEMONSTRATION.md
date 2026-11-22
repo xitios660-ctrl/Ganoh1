@@ -18,7 +18,7 @@ A interface é operacional dedicada com tema/componentes existentes, sem paridad
 
 Electron isolado/sandbox/contextIsolation, sem Node no renderer, backend PyInstaller oculto em loopback com porta efêmera, token no processo principal e credencial por stdin. API valida bearer, origem/host e sessão de operador. Sessões HttpOnly SameSite strict expiram e são revogadas ao desativar/resetar conta. Auditoria local associa operador aos eventos. Nenhuma credencial Atlas é distribuída.
 
-SQLite usa SQLCipher inclusive WAL; chave e token do dispositivo usam DPAPI do usuário Windows. Não há fallback plaintext nem substituição de banco ao perder chave. Instalador não escreve no diretório dos dados. Schema 3 faz evolução aditiva e recusa versões futuras; restauração/rollback reais precisam de homologação.
+SQLite usa SQLCipher inclusive WAL; chave e token do dispositivo usam DPAPI do usuário Windows. Não há fallback plaintext nem substituição de banco ao perder chave. Instalador não escreve no diretório dos dados. Perfis comuns usam schema 3; iniciar a carga histórica evolui para schema 4 e bloqueia novas operações até conferir os saldos. Versões antigas recusam schema 4. Restauração/rollback reais precisam de homologação.
 
 Proprietário pode exportar backup cifrado consistente, protegido por frase de recuperação com pelo menos 16 caracteres. Guardar frase separadamente. A opção verificar restaura em diretório novo e revoga sessões copiadas, sem trocar o banco ativo. Não basta copiar o arquivo SQLite sem a chave. Recuperação ativa e backups automáticos ainda pendentes. CSV do livro é provisório, em centavos, com escape de fórmulas.
 
