@@ -40,16 +40,25 @@ vendas antigas e recentes, inclusive sábado 21/11, sem interromper o site.
   instalação/reinstalação/desinstalação preservando os dados.
   https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44982071817
   Isso não representa teste físico nas lojas nem importação do banco real.
-- Workflow Android TV disparado pelo PR (sem mudanças Android): a primeira
-  execução falhou ao baixar dependência Maven dos testes; repetição em andamento.
-  Não usar esse resultado como aprovação Android deste commit.
+- Workflow Android TV disparado pelo PR (sem mudanças Android): falha inicial
+  no download Maven; repetição aprovada, incluindo testes/emulador existentes.
+  https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44982075599
 
 ## Limitações que impedem entrega final
 
 O site informado `https://ganoh-minjuin.onrender.com/` respondeu HTTP 200. Não há
-origem Mongo confirmada nem backup dos dados reais neste incremento. O conector
-Render exige confirmar o workspace antes de consultar os serviços; está pendente
-confirmar “Min's workspace” na conexão Minjuin. Nenhuma configuração foi alterada.
+origem Mongo confirmada nem backup dos dados reais neste incremento. Após
+confirmação do proprietário, consulta somente leitura localizou ganoh-minjuin
+em “Min's workspace”, conexão Minjuin, serviço srv-dc057df40ujc73fe2fig.
+O serviço aponta para este repositório/main e está com auto-deploy desligado.
+Nenhuma configuração foi alterada.
+
+O conector Render não oferece leitura de variáveis de ambiente; não se usou
+update de variáveis como contorno. A tentativa de navegador falhou antes de
+abrir o painel. Consulta apenas dos nomes de bancos nos dois clusters da conexão
+Atlas Primary não encontrou ganoh_production; nenhum documento de outras
+aplicações foi consultado. É necessário identificar/conectar o projeto Atlas
+correto, sem publicar URI/senha nem presumir que outro banco seja a origem.
 
 O cache histórico não está ligado ao assistente de primeira execução nem às APIs
 originais. Faltam conciliação de caixa/prazo/estoque, compatibilidade integral com
