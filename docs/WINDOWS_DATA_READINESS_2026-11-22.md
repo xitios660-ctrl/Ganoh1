@@ -76,16 +76,27 @@ backup consistente. Para executar capture/validate_restore reais está preparado
 um acesso dedicado: usuário ganoh_backup_reader_20261122, somente role read em
 ganoh_production, limitado a Cluster0, senha gerada pelo servidor MCP e guardada
 fora do Git; liberação somente do IP de saída atual /32, sem trocar entradas
-existentes. Nenhum usuário/IP foi criado. A regra do proprietário exige aprovação
-antes de mudar configuração da produção. Revalidar IP antes de executar. A ferramenta
+existentes. Nenhum usuário/IP foi criado. O proprietário autorizou expressamente esse acesso
+na sessão; entretanto atlas_create_db_user recusou a execução com a mensagem
+“User did not confirm the execution”, informando que a operação não foi realizada.
+Não tentar outro mecanismo de escrita para contornar a confirmação do conector.
+É preciso concluir essa confirmação da ferramenta ou disponibilizar acesso
+somente leitura por canal seguro. Nenhuma senha deve ser enviada no chat.
+Revalidar IP antes de executar. A ferramenta
 de criação não oferece expiração/revogação; revogar usuário e IP pelo painel Atlas
 ao terminar a cópia, com confirmação do proprietário. Jamais incluir o acesso no
 Windows ou em artefatos. Até essa autorização, somente consultas via conector.
 
-Testes locais deste ajuste: 15 data_bridge aprovados; 63 desktop aprovados com
-2 skips Windows antes do último caso adicional; 7 testes focados de histórico
-aprovados após adicionar o caso de estorno local. A CI do novo commit deve validar
-64 testes desktop (incluindo os dois específicos de Windows na matriz Windows).
+Testes locais deste ajuste: 15 data_bridge aprovados; desktop 64 executados,
+62 aprovados e 2 skips exclusivos Windows. CI d9bfd75 aprovada com 64 testes
+Windows, Linux 62+2 skips, 32 central, 15 data_bridge, 13 React, 2 Node e builds.
+https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44985490393
+Instalador d9bfd75 aprovado, incluindo restart do backend empacotado, instalação,
+reinstalação e desinstalação preservando dados/chave.
+https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44985490420
+Android TV sem alterações: regressão/emulador aprovados nesta revisão.
+https://github.com/xitios660-ctrl/Ganoh1/actions/runs/44985494592
+Esses testes não constituem validação física nas lojas nem carga real de histórico.
 
 O cache histórico não está ligado ao assistente de primeira execução nem às APIs
 originais. Faltam conciliação de caixa/prazo/estoque, compatibilidade integral com
