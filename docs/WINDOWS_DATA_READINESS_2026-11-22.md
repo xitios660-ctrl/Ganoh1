@@ -115,3 +115,16 @@ e código na branch
 feature/windows-offline-ganoh-2026. Não distribuir cópia real do banco em GitHub.
 
 PR: https://github.com/xitios660-ctrl/Ganoh1/pull/6
+
+## Acesso disponibilizado pelo proprietário — 23/11
+
+Proprietário criou usuário e autorizou uso; credencial disponibilizada em imagem.
+Não copiar imagem, senha ou URI autenticada para Git/log/artefato. Nenhum segredo
+foi persistido no repositório. A conexão TCP ao cluster foi recusada antes do teste
+de autenticação. IP público identificado do ambiente não consta na lista Atlas.
+Tentativa autorizada de adicionar apenas esse IP foi recusada pelo conector com
+“User did not confirm the execution”; operação não realizada. Não modificar nem
+remover entradas que atendem às lojas. Necessária liberação manual do IP atual,
+seguida de novo teste de rede/autenticação — não assumir que isso resolve todos
+os bloqueios. Ainda nenhum backup real foi capturado. Senha mostrada em conversa
+deve ser rotacionada após o uso; nunca alterar usuário do site inadvertidamente.
