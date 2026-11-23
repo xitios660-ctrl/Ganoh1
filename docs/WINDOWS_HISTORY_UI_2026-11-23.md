@@ -65,3 +65,14 @@ Tentativa de preparar repositório privado para executor temporário de backup f
 recusada pelo GitHub: Resource not accessible by integration (createRepository).
 Nenhum repositório foi criado, nenhuma credencial ou dado foi enviado ao GitHub.
 Falta infraestrutura com acesso TCP e armazenamento privado para o backup real.
+
+## Alternativa privada preparada
+
+`ops/private-backup/backup.yml` é template inativo, fora de .github/workflows.
+Só roda por workflow_dispatch em repo privado, revalida visibilidade pela API,
+baixa código fixado por SHA, usa secrets, captura BSON e restaura em Mongo8 tmpfs
+local. Só publica artefato cifrado após conferir a restauração; retenção 3 dias.
+Nenhum deploy/site é afetado. README descreve custódia da chave, IP do runner,
+revogação e possível consumo de cota Actions. YAML e Python embutido validados
+sintaticamente; execução real ainda não realizada. Criação manual/acesso ao repo
+privado foi solicitada ao proprietário, pois criação automática foi negada.
