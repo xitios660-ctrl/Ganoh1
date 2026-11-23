@@ -76,3 +76,14 @@ Nenhum deploy/site é afetado. README descreve custódia da chave, IP do runner,
 revogação e possível consumo de cota Actions. YAML e Python embutido validados
 sintaticamente; execução real ainda não realizada. Criação manual/acesso ao repo
 privado foi solicitada ao proprietário, pois criação automática foi negada.
+
+## CI corrigida validada — d38f8d1
+
+- Regressão aprovada: https://github.com/xitios660-ctrl/Ganoh1/actions/runs/45091810090
+  67 Windows; Linux 65+2 skips; 32 central; 15 data_bridge; 15 React; 2 Node;
+  compilação desktop/gestor. O smoke de importação source Windows passou.
+- Instalador aprovado: https://github.com/xitios660-ctrl/Ganoh1/actions/runs/45091810164
+  PyInstaller/NSIS, importação via API empacotada, reinstalação/reabertura preservando
+  schema4, histórico e fila anterior, desinstalação preservando chave/dados.
+- Chromium real local aprovado com fixture. Não é teste físico Windows/TCL nem
+  integração de produção. Nenhuma demonstração nova foi entregue como app final.
