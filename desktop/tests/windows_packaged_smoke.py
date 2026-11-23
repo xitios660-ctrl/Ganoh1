@@ -9,6 +9,8 @@ import tempfile
 import time
 import uuid
 from pathlib import Path
+# The workflow runs this file directly, so explicitly include the project root.
+sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
 import httpx
 
 

@@ -47,3 +47,21 @@ Continuam pendentes: backup e conferência reais, conciliação operacional, par
 com as telas e regras originais, mudanças posteriores ao snapshot, central real
 idempotente/hospedagem e consumo desses dados pelo Android TV. O painel novo da TV
 continua apontando para homologação; não enviar demonstração como versão final.
+
+## Chromium e correção do smoke Windows
+
+`python -m desktop.tests.browser_history_smoke` aprovado com Chromium real: login
+local, importação pela tela, valor Decimal128 exato, frase limpa, reload preservando
+histórico, nenhuma nova operação na fila e nenhuma requisição externa. Tema continua
+podendo guardar sua preferência; credenciais/histórico não entram no localStorage.
+Screenshot de fixture inspecionada visualmente. Novo roteiro em browser_history_smoke.py.
+
+A primeira CI f2f9ab1 falhou no smoke Windows por import do módulo backend fora do
+sys.path ao executar o roteiro como arquivo. Corrigida inclusão explícita da raiz
+no roteiro; o resultado Windows desta correção precisa ser validado novamente.
+Regressões Linux/central/React do primeiro commit passaram. Não ocultar falha inicial.
+
+Tentativa de preparar repositório privado para executor temporário de backup foi
+recusada pelo GitHub: Resource not accessible by integration (createRepository).
+Nenhum repositório foi criado, nenhuma credencial ou dado foi enviado ao GitHub.
+Falta infraestrutura com acesso TCP e armazenamento privado para o backup real.
