@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: xitios660-ctrl/Ganoh1
-          ref: d38f8d131319faf0a525e7db55f33be5d6c81b66
+          ref: a50e04525721d230b8ae5b3d9814cd51fe9b1ff7
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -53,6 +53,7 @@ jobs:
           from pymongo.errors import PyMongoError
           from backend.data_bridge.mongo_backup import capture, validate_restore
           from backend.data_bridge.archive import ArchiveError
+          from backend.data_bridge.preflight import require_backup_reader
           required=('GANOH_SOURCE_USERNAME','GANOH_SOURCE_PASSWORD','GANOH_BACKUP_PHRASE')
           if any(not os.environ.get(k) for k in required):
               raise SystemExit('Required secrets missing; no source operation performed')
@@ -71,6 +72,7 @@ jobs:
                   except PyMongoError:
                       if attempt<29:time.sleep(5)
               if not connected:raise SystemExit('Source unreachable/authentication refused; no backup captured')
+              require_backup_reader(source,os.environ['GANOH_SOURCE_USERNAME'])
               root=Path('private-backup');root.mkdir(mode=0o700)
               path=root/'ganoh-mongo-snapshot.ganoh'
               capture(source['ganoh_production'],path,phrase)

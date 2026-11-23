@@ -13,13 +13,18 @@ Antes de execução real:
 1. Verificar isPrivate por API e visibilidade/revisores de acesso. O template recusa
    repo público tanto por condição quanto consulta autenticada. Nunca colocar
    dados, credenciais ou chave em arquivos Git; artefatos exigem repo privado.
-2. Revisar a revisão fixa d38f8d1 do código, workflow e prazo de retenção (3 dias).
+2. Revisar código/workflow fixado em `a50e04525721d230b8ae5b3d9814cd51fe9b1ff7`, incluindo preflight.py.
+   Não usar referência móvel. Revisar retenção (3 dias).
 3. Cadastrar secretos GANOH_SOURCE_USERNAME, GANOH_SOURCE_PASSWORD e uma frase de
    recuperação forte GANOH_BACKUP_PHRASE. Guardar a frase separadamente em custódia
    do proprietário; secrets do GitHub não permitem recuperar seu valor depois.
-4. Usar usuário read somente em ganoh_production/Cluster0. O usuário administrativo
-   autorizado pelo proprietário só deve ser usado para leitura; o script chama
-   exclusivamente ping e capture na origem. Não muda senha/configuração do site.
+4. Usar usuário dedicado com SOMENTE read em ganoh_production, restrito a Cluster0.
+   Conferir roles/scopes pelo inventário Atlas antes de executar. O preflight
+   connectionStatus verifica a identidade real e recusa funções adicionais, inclusive
+   administrador ou readWrite, antes da captura. Não altera usuário do site.
+   Confirmar previamente, por inspeção segura no Render, somente host e nome do
+   banco efetivamente usados, sem mostrar MONGO_URL autenticada. A evidência dos
+   logs e das consultas Atlas não substitui essa confirmação independente.
 5. Executar manualmente. Autorizar somente IP /32 mostrado pelo runner no Atlas,
    com expiração curta; ele pode mudar entre execuções. Tentativas têm prazo limitado.
 6. Não entregar arquivo se captura ou restauração falhar. Conferir recibo/hash,
