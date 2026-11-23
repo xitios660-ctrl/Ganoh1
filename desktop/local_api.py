@@ -198,6 +198,64 @@ def create_local_app(journal: OfflineJournal, session_token: str, transport=None
         return {'verified':True,'unit':restored.unit,'pending':restored.status()['pending'],
                 'sqlite_integrity':restored.status()['sqlite_integrity'],'active_database_changed':False}
 
+    @app.get('/api/local/history')
+    def history_status(request:Request):
+        owner(request)
+        from desktop.legacy_data import active, initialize
+        from backend.data_bridge.unit_export import BUSINESS_COLLECTIONS
+        initialize(journal)
+        with closing(journal._connect()) as db:
+            staging=db.execute("SELECT value FROM metadata WHERE key='legacy_staging'").fetchone()
+        return {'active':active(journal),'import_incomplete':bool(staging),
+                'collections':sorted(BUSINESS_COLLECTIONS),'unit':journal.unit}
+
+    @app.get('/api/local/history/{collection}')
+    def historical_records(collection:str,request:Request,after:str='',limit:int=50):
+        owner(request)
+        from desktop.legacy_data import records
+        try:return records(journal,collection,after=after,limit=limit)
+        except OfflineError as exc:raise HTTPException(409,str(exc))
+
+    history_import_lock=threading.Lock()
+
+    @app.post('/api/local/history/import')
+    async def historical_import(request:Request):
+        owner(request)
+        import base64,json,tempfile
+        from starlette.concurrency import run_in_threadpool
+        from desktop.legacy_data import import_bundle
+        # Accept only an encrypted single-unit package, never a filesystem path,
+        # Mongo URI or a complete server backup. Bound before JSON/base64 parsing.
+        maximum=40*1024*1024
+        parts=[];length=0
+        async for part in request.stream():
+            length+=len(part)
+            if length>56*1024*1024:raise HTTPException(413,'Pacote excede o limite de importação local')
+            parts.append(part)
+        try:
+            body=json.loads(b''.join(parts))
+            if not isinstance(body,dict) or set(body)!={'archive','passphrase'}:raise ValueError()
+            data=base64.b64decode(body['archive'],validate=True)
+            if not data or len(data)>maximum:raise ValueError()
+            phrase=body['passphrase']
+            if not isinstance(phrase,str) or not 16<=len(phrase)<=256:raise ValueError()
+        except (ValueError,KeyError,TypeError):raise HTTPException(422,'Pacote ou frase de recuperação inválidos')
+        def perform():
+            if not history_import_lock.acquire(blocking=False):
+                raise HTTPException(409,'Uma importação já está em andamento')
+            try:
+                # Only encrypted bytes touch disk. Interrupted imports resume from
+                # SQLite after resubmitting the SAME package, without new revenue.
+                with tempfile.TemporaryDirectory(prefix='.history-',dir=journal.path.parent) as directory:
+                    path=Path(directory)/'unit.ganoh'
+                    with path.open('xb') as output:output.write(data)
+                    path.chmod(0o600)
+                    return import_bundle(journal,path,phrase)
+            except OfflineError as exc:raise HTTPException(409,str(exc))
+            except Exception:raise HTTPException(409,'Importação interrompida; preserve o pacote para retomar') from None
+            finally:history_import_lock.release()
+        return await run_in_threadpool(perform)
+
     @app.get('/api/local/reports/ledger.csv')
     def report_ledger(request:Request):
         identity=getattr(request.state,'actor',None)

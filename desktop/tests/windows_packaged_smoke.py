@@ -108,8 +108,40 @@ def main():
             assert verified.status_code==200,verified.text
             assert verified.json()['verified'] and not verified.json()['active_database_changed']
             assert client.get('/api/local/status').json()['pending']==5
+            # Exercise the exact packaged history route and codec dependencies.
+            from bson import BSON, Decimal128
+            from bson.timestamp import Timestamp
+            from backend.data_bridge.archive import Writer,new_file
+            from backend.data_bridge.unit_export import UNIT_FORMAT
+            import hashlib
+            historical=Path(folder)/'fixture-history.ganoh'
+            raw=BSON.encode({'_id':'fixture-old-order','store':'runner','total':Decimal128('10.25'),
+                             'created_at':'2026-11-21T16:30:00Z'})
+            with new_file(historical) as output:
+                writer=Writer(output,recovery_phrase,kind=UNIT_FORMAT)
+                page=writer.page(raw)
+                writer.finish({'archive_id':writer.id,'unit':'runner','source_database':'fixture-source',
+                    'read_timestamp':Timestamp(100,1),'collections':[{'name':'orders','count':1,
+                    'sha256':hashlib.sha256(raw).hexdigest(),'pages':[page]}]})
+            historical_body={'archive':base64.b64encode(historical.read_bytes()).decode(),'passphrase':recovery_phrase}
+            imported=client.post('/api/local/history/import',json=historical_body)
+            assert imported.status_code==200,imported.text
+            assert imported.json()['documents']==1
+            assert client.get('/api/local/history/orders').json()['items'][0]['total']=={'$numberDecimal':'10.25'}
+            assert not client.get('/api/local/history').json()['active']['operational_baseline_ready']
+            assert client.get('/api/local/status').json()['pending']==5
         finally:
             stop(child, client)
+        if args.installer:
+            install()  # Upgrade preserves schema-4 imported history as well.
+        child,client=run()
+        try:
+            assert client.get('/api/local/history').json()['active']['history_complete']
+            assert client.get('/api/local/history/orders').json()['items'][0]['total']=={'$numberDecimal':'10.25'}
+            assert client.post('/api/local/history/import',json=historical_body).json()['already_imported']
+            assert client.get('/api/local/status').json()['pending']==5
+        finally:
+            stop(child,client)
         dbfile = Path(folder) / 'GANOH-Demo' / 'runner' / 'journal.sqlite3'
         assert not dbfile.read_bytes().startswith(b'SQLite format')
         if args.installer:

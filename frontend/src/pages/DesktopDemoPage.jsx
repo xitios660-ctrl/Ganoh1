@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {useDesktopActor} from '../components/DesktopAuthBoundary';
 import DesktopKitchenPanel from '../components/DesktopKitchenPanel';
 import DesktopSecurityPanel from '../components/DesktopSecurityPanel';
+import DesktopHistoryPanel from '../components/DesktopHistoryPanel';
 import DesktopOperationsPanel from '../components/DesktopOperationsPanel';
 import DesktopCommercePanel from '../components/DesktopCommercePanel';
 import { Button } from '../components/ui/button';
@@ -95,7 +96,7 @@ export default function DesktopDemoPage() {
       {!catalog.length && <p>O catálogo precisa ser carregado na primeira sincronização ou preparado pelo modo de demonstração.</p>}
     </CardContent></Card>
     <DesktopCommercePanel request={api} onChange={refresh} />
-    {actor?.role==='owner'&&<DesktopSecurityPanel onChange={refresh} />}
+    {actor?.role==='owner'&&<><DesktopHistoryPanel request={api} onChange={refresh} /><DesktopSecurityPanel onChange={refresh} /></>}
     <details><summary>Histórico de sincronização</summary>
       <ul>{history.slice(0, 10).map(e => <li key={e.sequence}>{e.created_at} • {e.connection} {e.message}</li>)}</ul>
     </details>
