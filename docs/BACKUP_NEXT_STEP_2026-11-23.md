@@ -112,3 +112,12 @@ nem apresentar valores de fixtures como reais na TV.
 Próxima ação concreta: obter acesso ao repo privado dedicado. Depois preparar
 somente o ensaio com fixtures, comprovar permissões/custos/custódia e executar o
 backup real quando todos os requisitos acima estiverem atendidos.
+
+## Regressão da preparação a4dca25
+
+https://github.com/xitios660-ctrl/Ganoh1/actions/runs/45099435939 — completed/success.
+67 testes desktop Windows; Linux 65+2 skips; 32 central; 18 data_bridge (incluindo
+os 3 novos testes de permissões); 15 React; 2 Node e builds desktop/gestor.
+Autenticação read contra o Atlas e ensaio do executor privado não estão incluídos.
+Não houve novo build NSIS necessário nesta alteração de preflight/template; a
+referência validada do instalador é d38f8d1, não uma homologação com dados reais.
