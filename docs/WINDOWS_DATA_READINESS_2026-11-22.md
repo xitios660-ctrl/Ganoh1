@@ -128,3 +128,16 @@ remover entradas que atendem às lojas. Necessária liberação manual do IP atu
 seguida de novo teste de rede/autenticação — não assumir que isso resolve todos
 os bloqueios. Ainda nenhum backup real foi capturado. Senha mostrada em conversa
 deve ser rotacionada após o uso; nunca alterar usuário do site inadvertidamente.
+
+## Liberação manual confirmada — 23/11
+
+Após confirmação do proprietário, inspect_access_list confirmou a inclusão do
+IP /32 solicitado, preservando entradas anteriores. Metadados atuais confirmam
+Cluster0 ativo e os mesmos hosts do replica set. Novos testes socket/TCP e
+PyMongo com TLS não alcançaram o replica set: conexão recusada/seleção expirada
+antes da autenticação. Portanto não há evidência de senha inválida; não solicitar
+reset do usuário do site ou abertura ampla de rede. environment_status reporta
+política unrestricted/enforced, mas isso não comprova conectividade Mongo.
+É necessário resolver o caminho TCP deste executor ou executar o procedimento
+em ambiente seguro que alcance o cluster. Não iniciar implantação nem considerar
+o backup feito. Credencial da imagem não foi usada em comandos, logs ou Git.
