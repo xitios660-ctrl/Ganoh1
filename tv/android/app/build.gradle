@@ -1,0 +1,29 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'com.ganoh.tv'
+    compileSdk 35
+    buildToolsVersion "35.0.0"
+    defaultConfig {
+        applicationId 'com.ganoh.tv.demo'
+        minSdk 24
+        targetSdk 35
+        versionCode 2
+        versionName '0.2.0-demo'
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_11; targetCompatibility JavaVersion.VERSION_11 }
+    testOptions {
+        unitTests.includeAndroidResources = true
+        unitTests.all {
+            systemProperty 'robolectric.dependency.repo.url', 'https://repo.maven.apache.org/maven2'
+            ['https.proxyHost', 'https.proxyPort', 'http.proxyHost', 'http.proxyPort', 'javax.net.ssl.trustStore'].each { key ->
+                if (System.getProperty(key) != null) systemProperty key, System.getProperty(key)
+            }
+        }
+    }
+    buildTypes { release { minifyEnabled false } }
+    lint { abortOnError true }
+}
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.robolectric:robolectric:4.14.1'
+}

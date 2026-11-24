@@ -1,0 +1,8 @@
+fastapi==0.110.1
+httpx==0.28.1
+uvicorn==0.25.0
+sqlcipher3-wheels==0.5.7
+cryptography==50.0.0
+
+# BSON codec for encrypted history only; Windows never creates a MongoClient.
+pymongo==4.5.0

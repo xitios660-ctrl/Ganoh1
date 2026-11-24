@@ -1,0 +1,5 @@
+fastapi==0.110.1
+httpx==0.28.1
+pymongo==4.5.0
+
+-r ../data_bridge/requirements.txt
