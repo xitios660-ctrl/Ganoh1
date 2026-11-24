@@ -12,7 +12,7 @@ precisa ser coordenada com Render para preservar o site ativo.
 Usuário read restrito já verificado no Atlas; proprietário cadastrou três Secrets.
 O workflow confirmou que GANOH_SOURCE_USERNAME, GANOH_SOURCE_PASSWORD e
 GANOH_BACKUP_PHRASE estão presentes e que a frase tem tamanho permitido. Não
-leu/exibiu valores, não confirmou senha correta nem autenticação real no banco.
+expôs valores, não confirmou senha correta nem autenticação real no banco.
 
 ## Workflow privado supervisionado
 
