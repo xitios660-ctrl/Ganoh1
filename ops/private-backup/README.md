@@ -39,3 +39,21 @@ TLS permanece ativo na conexão Atlas. Não imprime senha, URI autenticada ou re
 Ainda não foi executado contra dados reais nem validado nesse novo executor.
 Não é central de sincronização nem integra o Android TV automaticamente. Completar
 histórico não substitui conciliação de saldos/alterações posteriores ao snapshot.
+
+## Executor privado disponível — 24/11/2026
+
+O proprietário escolheu `xitios660-ctrl/Ganohgostozin`. Privacidade e acesso ADMIN
+confirmados pela API; dois workflows já existentes foram preservados. Foi adicionado
+`fixture-restore.yml` exclusivamente para ensaio sem Secrets ou conexão de produção.
+Cópia deste novo roteiro fica aqui como template inativo para revisão.
+
+Ensaio privado aprovado em https://github.com/xitios660-ctrl/Ganohgostozin/actions/runs/45300890486 :
+18 testes data_bridge em Mongo8 descartável e teste SCRAM local real aceitando read
+recusando readWrite. Não confundir com autenticação/restauração de produção.
+O Mongo descartável foi removido; nenhum artefato real foi publicado.
+
+A conta read restrita exigida foi identificada no Atlas por consulta de metadados.
+Os valores dos Secrets não foram lidos. A API de Secrets e sua chave pública retornam
+403 à integração, portanto o proprietário deve configurar os três nomes na interface
+privada. Não é possível afirmar se já foram cadastrados. Confirmação independente
+de host/DB efetivo do Render e custódia da chave ainda são condições de execução real.
