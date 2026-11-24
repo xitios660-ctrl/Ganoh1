@@ -57,3 +57,30 @@ Os valores dos Secrets não foram lidos. A API de Secrets e sua chave pública r
 403 à integração, portanto o proprietário deve configurar os três nomes na interface
 privada. Não é possível afirmar se já foram cadastrados. Confirmação independente
 de host/DB efetivo do Render e custódia da chave ainda são condições de execução real.
+
+## Supervisão e armazenamento — 24/11/2026
+
+O proprietário conferiu os campos no ambiente Render e confirmou o host esperado
+e ganoh_production. Não reproduzir a URI autenticada enviada na conversa. A senha
+do serviço exposta requer rotação coordenada com configuração Render, sem derrubar
+as lojas; não alterá-la isoladamente durante estes ensaios.
+
+Template e executor privado agora exigem source_confirmed=true além de
+VALIDAR_BACKUP. Verificam presença dos três Secrets antes de conectar, sem exibir
+valores; disponibilizam IP/run_id em artefato privado efêmero de 1 dia para permitir
+apenas o runner atual. Falha ao publicar esse metadado interrompe antes de Atlas.
+Isso evita capturar dados sem armazenamento disponível para a cópia validada.
+Autenticação inválida para imediatamente; indisponibilidade de rede tem prazo.
+
+Execução privada 45399508258, tentativas 1 e 2: confirmou os três Secrets presentes,
+mas falhou em upload de metadado por Artifact storage quota has been hit. Captura,
+restauração e upload de backup ficaram SKIPPED. Não há backup real neste resultado.
+
+Foram removidos somente sete artefatos antigos GANOH-Windows-DEMO-UNSIGNED,
+validados como desta branch e sem dados reais; cerca de 837,5 MiB. Preservados
+os dois mais recentes (14781264195 e 14739512840), código e logs. Não apagar dados
+ou artefatos de outros projetos para tentar liberar cota. GitHub informa recálculo
+em 6–12h; a segunda tentativa ainda falhou. Não repetir jobs continuamente nem
+considerar a cota liberada apenas pela exclusão. Novo teste deverá verificar
+armazenamento antes de qualquer conexão/captura real. IPs de runners encerrados
+não devem ser liberados como se pertencessem ao próximo job.

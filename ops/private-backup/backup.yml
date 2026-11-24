@@ -1,8 +1,18 @@
-# TEMPLATE ONLY. Install as .github/workflows/backup.yml in a PRIVATE repository.
-# Never enable this workflow in the public Ganoh1 repository.
+# PRIVATE GANOH BACKUP EXECUTOR. This workflow requires manual dispatch and repository privacy.
+# Never copy this workflow to the public Ganoh1 repository.
 name: Private GANOH backup validation
 on:
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Digite VALIDAR_BACKUP para autorizar um ensaio de backup privado com secrets configurados'
+        required: true
+        type: string
+      source_confirmed:
+        description: 'Origem conferida no Render: host esperado e ganoh_production'
+        required: true
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -10,7 +20,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   capture:
-    if: github.event.repository.private == true
+    if: github.event.repository.private == true && inputs.confirm == 'VALIDAR_BACKUP' && inputs.source_confirmed == true
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -29,10 +39,38 @@ jobs:
         with:
           python-version: '3.11'
       - run: python -m pip install -r backend/data_bridge/requirements.txt
-      - name: Report runner IP for restricted Atlas access
+      - name: Verify required secrets are present without revealing values
+        env:
+          GANOH_SOURCE_USERNAME: ${{ secrets.GANOH_SOURCE_USERNAME }}
+          GANOH_SOURCE_PASSWORD: ${{ secrets.GANOH_SOURCE_PASSWORD }}
+          GANOH_BACKUP_PHRASE: ${{ secrets.GANOH_BACKUP_PHRASE }}
         run: |
-          printf 'Authorize only this runner IP in Atlas, with a short expiration: '
-          curl --fail --silent --show-error --max-time 15 https://api.ipify.org
+          python - <<'PYCODE'
+          import os
+          required=('GANOH_SOURCE_USERNAME','GANOH_SOURCE_PASSWORD','GANOH_BACKUP_PHRASE')
+          missing=[k for k in required if not os.environ.get(k)]
+          if missing:raise SystemExit('Missing secret names: '+', '.join(missing))
+          if not 16<=len(os.environ['GANOH_BACKUP_PHRASE'])<=256:raise SystemExit('Recovery phrase length invalid')
+          print('Required secrets present; values not displayed')
+          PYCODE
+      - name: Report current runner IP for restricted Atlas access
+        run: |
+          python - <<'PYCODE'
+          import ipaddress,json,os,urllib.request
+          from pathlib import Path
+          ip=urllib.request.urlopen('https://api.ipify.org',timeout=15).read().decode().strip()
+          assert ipaddress.ip_address(ip).version==4
+          root=Path('runner-network');root.mkdir(mode=0o700)
+          (root/'network.json').write_text(json.dumps({'ipv4':ip,'run_id':os.environ['GITHUB_RUN_ID']}))
+          print('Current runner IPv4 /32: '+ip+'/32')
+          PYCODE
+      - name: Publish private network metadata for supervised access
+        uses: actions/upload-artifact@v4
+        with:
+          name: ganoh-runner-network
+          path: runner-network/network.json
+          retention-days: 1
+          if-no-files-found: error
       - name: Start isolated restore target
         run: |
           docker run -d --name ganoh-restore --tmpfs /data/db:rw,size=1g -p 127.0.0.1:27028:27017 mongo:8 --bind_ip_all --setParameter ttlMonitorEnabled=false
@@ -50,7 +88,7 @@ jobs:
           import json, os, time, uuid
           from pathlib import Path
           from pymongo import MongoClient
-          from pymongo.errors import PyMongoError
+          from pymongo.errors import PyMongoError, OperationFailure
           from backend.data_bridge.mongo_backup import capture, validate_restore
           from backend.data_bridge.archive import ArchiveError
           from backend.data_bridge.preflight import require_backup_reader
@@ -66,11 +104,14 @@ jobs:
           local=MongoClient('mongodb://127.0.0.1:27028/?directConnection=true',serverSelectionTimeoutMS=5000)
           try:
               connected=False
-              for attempt in range(30):
+              for attempt in range(60):
                   try:
                       source.admin.command('ping');connected=True;break
+                  except OperationFailure as exc:
+                      if exc.code==18:raise SystemExit('Backup reader authentication failed; no backup captured') from None
+                      raise
                   except PyMongoError:
-                      if attempt<29:time.sleep(5)
+                      if attempt<59:time.sleep(5)
               if not connected:raise SystemExit('Source unreachable/authentication refused; no backup captured')
               require_backup_reader(source,os.environ['GANOH_SOURCE_USERNAME'])
               root=Path('private-backup');root.mkdir(mode=0o700)
